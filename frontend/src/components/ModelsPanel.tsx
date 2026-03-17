@@ -559,6 +559,7 @@ export default function ModelsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
+  const [predFilter, setPredFilter] = useState("");
 
   // ── KM curve styling ────────────────────────────────────────────────────────
   const KM_PALETTE = ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4"];
@@ -700,14 +701,26 @@ export default function ModelsPanel() {
               )}
               {model === "cox" && (
                 <div>
-                  <label className="text-xs text-gray-400 block mb-1">Predictors</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-gray-400">Predictors</label>
+                    <button onClick={() => { setPredictors([]); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Filter variables…"
+                    value={predFilter}
+                    onChange={(e) => setPredFilter(e.target.value)}
+                    className="select w-full text-xs mb-1 py-1"
+                  />
                   <div className="max-h-40 overflow-y-auto space-y-1">
-                    {allCols.filter((c) => c !== durationCol && c !== eventCol).map((c) => (
-                      <label key={c} className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="checkbox" checked={predictors.includes(c)} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
-                        <span className="text-gray-700 truncate">{c}</span>
-                      </label>
-                    ))}
+                    {allCols
+                      .filter((c) => c !== durationCol && c !== eventCol && c.toLowerCase().includes(predFilter.toLowerCase()))
+                      .map((c) => (
+                        <label key={c} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input type="checkbox" checked={predictors.includes(c)} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
+                          <span className="text-gray-700 truncate">{c}</span>
+                        </label>
+                      ))}
                   </div>
                 </div>
               )}
@@ -736,9 +749,19 @@ export default function ModelsPanel() {
                 </div>
               )}
               <div>
-                <label className="text-xs text-gray-400 block mb-1">Predictors</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-gray-400">Predictors</label>
+                  <button onClick={() => { setPredictors([]); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Filter variables…"
+                  value={predFilter}
+                  onChange={(e) => setPredFilter(e.target.value)}
+                  className="select w-full text-xs mb-1 py-1"
+                />
                 <div className="max-h-48 overflow-y-auto space-y-1">
-                  {allCols.filter((c) => c !== outcome).map((c) => {
+                  {allCols.filter((c) => c !== outcome && c.toLowerCase().includes(predFilter.toLowerCase())).map((c) => {
                     const checked = predictors.includes(c);
                     const showScale = checked && (model === "logistic" || model === "ortable");
                     return (

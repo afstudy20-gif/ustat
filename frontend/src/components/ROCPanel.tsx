@@ -181,6 +181,8 @@ export default function ROCPanel() {
   const [combinedStyle,    setCombinedStyle]    = useState<CurveStyle>({ color: "#dc2626", width: 3, dash: "solid" });
   const [combinedLoading,  setCombinedLoading]  = useState(false);
   const [combinedError,    setCombinedError]    = useState<string | null>(null);
+  const [multiFilter,     setMultiFilter]     = useState("");
+  const [combinedFilter,  setCombinedFilter]  = useState("");
 
   const toggleCombinedCol = (col: string) =>
     setCombinedCols((prev) => prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]);
@@ -600,8 +602,15 @@ export default function ROCPanel() {
                   </button>
                 </div>
               </div>
+              <input
+                type="text"
+                placeholder="Filter variables…"
+                value={multiFilter}
+                onChange={(e) => setMultiFilter(e.target.value)}
+                className="select w-full text-xs py-1"
+              />
               <div className="max-h-48 overflow-y-auto space-y-0.5 border border-gray-200 rounded-lg p-1">
-                {numCols.map((col) => (
+                {numCols.filter((c) => c.toLowerCase().includes(multiFilter.toLowerCase())).map((col) => (
                   <label key={col} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
                     <input type="checkbox" className="accent-indigo-500"
                       checked={multiCols.includes(col)}
@@ -655,8 +664,15 @@ export default function ROCPanel() {
                           className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-50">None</button>
                       </div>
                     </div>
+                    <input
+                      type="text"
+                      placeholder="Filter variables…"
+                      value={combinedFilter}
+                      onChange={(e) => setCombinedFilter(e.target.value)}
+                      className="select w-full text-xs py-1 mb-1"
+                    />
                     <div className="max-h-36 overflow-y-auto space-y-0.5 border border-gray-200 rounded-lg p-1">
-                      {allCols.filter((c) => c !== outcomeCol).map((col) => (
+                      {allCols.filter((c) => c !== outcomeCol && c.toLowerCase().includes(combinedFilter.toLowerCase())).map((col) => (
                         <label key={col} className="flex items-center gap-2 px-2 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
                           <input type="checkbox" className="accent-red-500"
                             checked={combinedCols.includes(col)}
