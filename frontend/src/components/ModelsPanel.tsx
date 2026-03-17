@@ -3,7 +3,7 @@ import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runLinear, runLogistic, runKM, runCox, runLogisticTable } from "../api";
 
-const PLOT_LAYOUT: Record<string, unknown> = {
+const PLOT_LAYOUT = {
   paper_bgcolor: "transparent",
   plot_bgcolor: "#ffffff",
   font: { color: "#374151", size: 12 },
@@ -1065,8 +1065,8 @@ export default function ModelsPanel() {
                   {/* ── Plot ── */}
                   <div style={{ height: plotH }}>
                     <Plot
-                      onInitialized={(_, gd) => { kmPlotRef.current = gd; }}
-                      onUpdate={(_, gd)      => { kmPlotRef.current = gd; }}
+                      onInitialized={(_: object, gd: HTMLElement) => { kmPlotRef.current = gd; }}
+                      onUpdate={(_: object, gd: HTMLElement)      => { kmPlotRef.current = gd; }}
                       data={traces}
                       layout={{
                         ...PLOT_LAYOUT,

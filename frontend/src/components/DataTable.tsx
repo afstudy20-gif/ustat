@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store";
 import type { ColMeta } from "../store";
 import api from "../api";
@@ -61,8 +61,9 @@ export default function DataTable() {
   if (!session) return null;
   const { preview, columns } = session;
 
+  type IndexedRow = Record<string, unknown> & { _idx: number };
   const indexedRows = useMemo(
-    () => preview.map((row, idx) => ({ ...row, _idx: idx })),
+    () => preview.map((row, idx): IndexedRow => ({ ...row, _idx: idx })),
     [preview]
   );
 

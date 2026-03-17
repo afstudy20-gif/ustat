@@ -674,7 +674,7 @@ export default function ROCPanel() {
                 )}
                 {[...multiResults]
                   .sort((a, b) => b.auc - a.auc)
-                  .map((r, i) => {
+                  .map((r) => {
                     const origIdx = multiResults.findIndex((x) => x.col === r.col);
                     const st = multiStyles[origIdx] ?? defaultStyle(origIdx);
                     return (
@@ -820,8 +820,8 @@ export default function ROCPanel() {
                   xanchor: "right" as const, yanchor: "bottom" as const,
                 }],
               }}
-              onInitialized={(_, gd) => { rocPlotRef.current = gd; }}
-              onUpdate={(_, gd)      => { rocPlotRef.current = gd; }}
+              onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; }}
+              onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; }}
               style={{ width: "100%", height: "100%" }}
               useResizeHandler
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
@@ -843,8 +843,8 @@ export default function ROCPanel() {
                   x: 0.5, y: 0.05, xanchor: "left" as const, yanchor: "bottom" as const,
                 },
               }}
-              onInitialized={(_, gd) => { rocPlotRef.current = gd; }}
-              onUpdate={(_, gd)      => { rocPlotRef.current = gd; }}
+              onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; }}
+              onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; }}
               style={{ width: "100%", height: "100%" }}
               useResizeHandler
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}

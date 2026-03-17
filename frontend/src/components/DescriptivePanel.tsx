@@ -12,39 +12,6 @@ const BASE_LAYOUT = {
   yaxis: { gridcolor: "#e5e7eb", zerolinecolor: "#d1d5db" },
 };
 
-// ── Tiny sparkline rendered as SVG ──────────────────────────────────────────
-
-function Sparkline({ col }: { col: any }) {
-  if (col.kind === "categorical") {
-    const cats = col.top2 ?? [];
-    const total = cats.reduce((a: number, c: any) => a + c.count, 0) || 1;
-    const colors = ["#7c3aed", "#f59e0b", "#10b981", "#ef4444"];
-    let x = 0;
-    return (
-      <svg width={100} height={14}>
-        {cats.map((c: any, i: number) => {
-          const w = (c.count / total) * 100;
-          const rect = <rect key={i} x={x} y={2} width={w} height={10} fill={colors[i % colors.length]} rx={1} />;
-          x += w;
-          return rect;
-        })}
-      </svg>
-    );
-  }
-  const bins = col.hist ?? [];
-  if (!bins.length) return null;
-  const maxC = Math.max(...bins.map((b: any) => b.count), 1);
-  const W = 100, H = 18, bw = W / bins.length;
-  return (
-    <svg width={W} height={H}>
-      {bins.map((b: any, i: number) => {
-        const h = (b.count / maxC) * (H - 2);
-        return <rect key={i} x={i * bw} y={H - h} width={bw - 0.5} height={h} fill="#6366f1" />;
-      })}
-    </svg>
-  );
-}
-
 // ── Main chart for numeric columns ──────────────────────────────────────────
 
 const CHART_TABS = [
