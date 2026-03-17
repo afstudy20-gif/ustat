@@ -40,6 +40,17 @@ export const runLogisticTable = (data: object) => api.post("/api/models/logistic
 export const runKM = (data: object) => api.post("/api/models/survival/km", data);
 export const runCox = (data: object) => api.post("/api/models/survival/cox", data);
 
+export const getMissing = (sessionId: string, columns: string[]) =>
+  api.get(`/api/stats/${sessionId}/missing`, { params: { columns: columns.join(",") } });
+
+// ── Compute / Create New Variable ──────────────────────────────────────────
+export const computeFormula    = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/formula`, data);
+export const computeTransform  = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/transform`, data);
+export const computeRecode     = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/recode`, data);
+export const computeClinical   = (sessionId: string, calc: string, data: object) => api.post(`/api/compute/${sessionId}/clinical/${calc}`, data);
+export const deleteColumn      = (sessionId: string, col: string) => api.delete(`/api/compute/${sessionId}/column/${encodeURIComponent(col)}`);
+export const getUniqueValues   = (sessionId: string, col: string) => api.get(`/api/compute/${sessionId}/unique/${encodeURIComponent(col)}`);
+
 export const runCorrelationPair = (data: object) => api.post("/api/stats/correlation_pair", data);
 export const runCorrelationMatrix = (data: object) => api.post("/api/stats/correlation_matrix", data);
 export const runICC = (data: object) => api.post("/api/stats/icc", data);

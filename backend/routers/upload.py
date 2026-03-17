@@ -71,7 +71,7 @@ async def upload_file(file: UploadFile = File(...)):
 
     # Use pandas to_json → loads to guarantee NaN/Inf become null
     import numpy as np, json as _json
-    preview_df = df.head(100).replace([np.inf, -np.inf], np.nan)
+    preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
     preview = _json.loads(preview_df.to_json(orient="records", default_handler=str))
 
     return {

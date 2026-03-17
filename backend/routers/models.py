@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from services import store
+from services.impute import apply_imputation
 
 router = APIRouter()
 
@@ -26,11 +27,15 @@ class LinearRequest(BaseModel):
     session_id: str
     outcome: str
     predictors: List[str]
+    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
 
 
 @router.post("/linear")
 def linear_regression(req: LinearRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.outcome] + req.predictors)
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
     y = df[req.outcome].astype(float)
@@ -52,6 +57,8 @@ def linear_regression(req: LinearRequest):
         "model": "Linear Regression (OLS)",
         "outcome": req.outcome,
         "n": int(model.nobs),
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
         "r_squared": float(model.rsquared),
         "adj_r_squared": float(model.rsquared_adj),
         "f_stat": float(model.fvalue),
@@ -70,6 +77,7 @@ class LogisticRequest(BaseModel):
     predictors: List[str]
     scale_factors: Optional[dict] = None   # {column: divisor}  e.g. {"Platelet": 10000}
     selection: Optional[str] = "all"       # "all" | "p05" | "p10" | "forward" | "backward"
+    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
 
 
 def _apply_scaling(df: pd.DataFrame, predictors: List[str], scale_factors: Optional[dict]):
@@ -167,7 +175,10 @@ def _stepwise_backward(y, df: pd.DataFrame, pred_list: list, p_remove: float = 0
 
 @router.post("/logistic")
 def logistic_regression(req: LogisticRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.outcome] + req.predictors)
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    n_excluded = n_total - len(df)
     df, pred_list = _apply_scaling(df, req.predictors, req.scale_factors)
     X = pd.get_dummies(df[pred_list], drop_first=True).astype(float)
     X_const = sm.add_constant(X)
@@ -198,6 +209,8 @@ def logistic_regression(req: LogisticRequest):
         "model": "Logistic Regression",
         "outcome": req.outcome,
         "n": int(model.nobs),
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
         "pseudo_r2": float(model.prsquared),
         "log_likelihood": float(model.llf),
         "aic": float(model.aic),
@@ -210,7 +223,10 @@ def logistic_regression(req: LogisticRequest):
 
 @router.post("/logistic_table")
 def logistic_or_table(req: LogisticRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.outcome] + req.predictors)
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    n_excluded = n_total - len(df)
 
     # Apply unit scaling (renames columns & divides values)
     df, pred_list = _apply_scaling(df, req.predictors, req.scale_factors)
@@ -307,6 +323,8 @@ def logistic_or_table(req: LogisticRequest):
         "model": "Logistic OR Table",
         "outcome": req.outcome,
         "n": len(df),
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
         "selection_method": selection_label,
         "n_multi": len(multi_pred_list),
         "n_total": len(pred_list),
@@ -321,6 +339,7 @@ class KMRequest(BaseModel):
     duration_col: str
     event_col: str
     group_col: Optional[str] = None
+    imputation: Optional[str] = "listwise"
 
 
 def _safe_float(v):
@@ -336,13 +355,17 @@ def _safe_float(v):
 
 @router.post("/survival/km")
 def kaplan_meier(req: KMRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.duration_col, req.event_col])
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
 
-    # Coerce duration to numeric, drop non-numeric rows
-    df = df.copy()
-    df[req.duration_col] = pd.to_numeric(df[req.duration_col], errors="coerce")
-    df[req.event_col]    = pd.to_numeric(df[req.event_col],    errors="coerce")
-    df = df.dropna(subset=[req.duration_col, req.event_col])
+    # Coerce to numeric first so imputation sees real NaN
+    df_full = df_full.copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col]    = pd.to_numeric(df_full[req.event_col],    errors="coerce")
+
+    km_cols = [req.duration_col, req.event_col]
+    df = apply_imputation(df_full, km_cols, req.imputation)
+    n_excluded = n_total - len(df)
 
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric. Check that both columns contain numbers.")
@@ -397,7 +420,14 @@ def kaplan_meier(req: KMRequest):
         except Exception:
             pass
 
-    return {"model": "Kaplan-Meier", "groups": results, "logrank": logrank}
+    return {
+        "model": "Kaplan-Meier",
+        "groups": results,
+        "logrank": logrank,
+        "n_total": n_total,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation,
+    }
 
 
 # ── Cox Proportional Hazards ──────────────────────────────────────────────────
@@ -407,15 +437,21 @@ class CoxRequest(BaseModel):
     duration_col: str
     event_col: str
     predictors: List[str]
+    imputation: Optional[str] = "listwise"
 
 
 @router.post("/survival/cox")
 def cox_regression(req: CoxRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.duration_col, req.event_col] + req.predictors)
-    df = df.copy()
-    df[req.duration_col] = pd.to_numeric(df[req.duration_col], errors="coerce")
-    df[req.event_col]    = pd.to_numeric(df[req.event_col],    errors="coerce")
-    df = df.dropna(subset=[req.duration_col, req.event_col])
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+
+    df_full = df_full.copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col]    = pd.to_numeric(df_full[req.event_col],    errors="coerce")
+
+    cox_cols = [req.duration_col, req.event_col] + req.predictors
+    df = apply_imputation(df_full, cox_cols, req.imputation)
+    n_excluded = n_total - len(df)
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric.")
 
@@ -443,6 +479,9 @@ def cox_regression(req: CoxRequest):
     return {
         "model": "Cox Proportional Hazards",
         "n": int(cph.event_observed.sum()),
+        "n_total": n_total,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation,
         "log_likelihood": _safe_float(cph.log_likelihood_),
         "concordance": _safe_float(cph.concordance_index_),
         "coefficients": coefs,

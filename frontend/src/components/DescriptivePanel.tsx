@@ -461,8 +461,23 @@ function StatBadge({ label, value }: { label: string; value: string | number }) 
 
 // ── Main panel ───────────────────────────────────────────────────────────────
 
+const KIND_CYCLE: Record<string, "numeric" | "categorical" | "boolean" | "text"> = {
+  numeric: "categorical",
+  categorical: "boolean",
+  boolean: "text",
+  text: "numeric",
+};
+
+const KIND_STYLE: Record<string, { label: string; cls: string }> = {
+  numeric:     { label: "N", cls: "bg-blue-100 text-blue-700" },
+  categorical: { label: "C", cls: "bg-purple-100 text-purple-700" },
+  boolean:     { label: "B", cls: "bg-green-100 text-green-700" },
+  text:        { label: "T", cls: "bg-gray-100 text-gray-500" },
+};
+
 export default function DescriptivePanel() {
   const session = useStore((s) => s.session);
+  const updateColumnKind = useStore((s) => s.updateColumnKind);
   const [colMeta, setColMeta] = useState<any[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [summary, setSummary] = useState<any | null>(null);
@@ -485,9 +500,9 @@ export default function DescriptivePanel() {
     });
   }, [session?.session_id]);
 
-  const loadSummary = useCallback((colName: string) => {
+  const loadSummary = useCallback((colName: string, kindOverride?: string) => {
     if (!session) return;
-    const kind = session.columns.find((c) => c.name === colName)?.kind ?? undefined;
+    const kind = kindOverride ?? session.columns.find((c) => c.name === colName)?.kind ?? undefined;
     setSelected(colName);
     setSummary(null);
     setSummaryLoading(true);
@@ -542,9 +557,17 @@ export default function DescriptivePanel() {
                   ${isActive ? "bg-indigo-50 border-l-2 border-l-indigo-500" : "hover:bg-gray-50"}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <span className={`text-[9px] font-bold px-1 rounded flex-shrink-0
-                    ${c.kind === "numeric" ? "bg-blue-100 text-blue-700" : "bg-purple-100 text-purple-700"}`}>
-                    {c.kind === "numeric" ? "N" : "C"}
+                  <span
+                    title={`Type: ${c.kind} — click to change`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const next = KIND_CYCLE[c.kind] ?? "numeric";
+                      updateColumnKind(c.name, next);
+                      if (selected === c.name) loadSummary(c.name, next);
+                    }}
+                    className={`text-[9px] font-bold px-1 rounded flex-shrink-0 cursor-pointer hover:opacity-70
+                      ${KIND_STYLE[c.kind]?.cls ?? "bg-gray-100 text-gray-500"}`}>
+                    {KIND_STYLE[c.kind]?.label ?? "?"}
                   </span>
                   <span className="text-xs text-gray-700 truncate">{c.name}</span>
                 </div>

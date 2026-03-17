@@ -2,10 +2,11 @@ import numpy as np
 import pandas as pd
 import json as _json
 from scipy import stats as scipy_stats
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Query
 from pydantic import BaseModel
 from typing import Optional, List
 from services import store
+from services.impute import apply_imputation, missing_info
 
 
 def _safe_json(obj) -> Response:
@@ -33,6 +34,21 @@ def _get_df(session_id: str) -> pd.DataFrame:
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return df
+
+
+# ── Missing Data Summary ─────────────────────────────────────────────────────
+
+@router.get("/{session_id}/missing")
+def get_missing(session_id: str, columns: str = Query("")):
+    """
+    Return per-column missing counts and total rows affected for the given
+    comma-separated list of column names.
+    """
+    df = _get_df(session_id)
+    cols = [c.strip() for c in columns.split(",") if c.strip() and c.strip() in df.columns]
+    if not cols:
+        cols = df.columns.tolist()
+    return missing_info(df, cols)
 
 
 # ── Descriptive Statistics ──────────────────────────────────────────────────
@@ -290,6 +306,7 @@ class ROCRequest(BaseModel):
     score_column: str
     outcome_column: str
     manual_cutoff: Optional[float] = None
+    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
 
 
 def _roc_metrics_at_cutoff(scores: np.ndarray, y: np.ndarray, threshold: float) -> dict:
@@ -369,12 +386,13 @@ def _delong_compare(y: np.ndarray, s1: np.ndarray, s2: np.ndarray) -> dict:
     }
 
 
-def _validate_roc_inputs(df: pd.DataFrame, score_col: str, outcome_col: str):
-    """Validate + return (scores_arr, y_arr). Raises HTTPException on error."""
+def _validate_roc_inputs(df: pd.DataFrame, score_col: str, outcome_col: str,
+                         imputation: str = "listwise"):
+    """Validate + return (scores_arr, y_arr, clean_df). Raises HTTPException on error."""
     for col in [score_col, outcome_col]:
         if col not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{col}' not found")
-    df = df.dropna(subset=[score_col, outcome_col])
+    df = apply_imputation(df, [score_col, outcome_col], imputation)
     if len(df) < 10:
         raise HTTPException(status_code=400, detail="Not enough data (need ≥ 10 rows after removing missing)")
     try:
@@ -400,7 +418,10 @@ def roc_analysis(req: ROCRequest):
     from sklearn.metrics import roc_curve, roc_auc_score
 
     df_full = _get_df(req.session_id)
-    scores_arr, y_arr, df = _validate_roc_inputs(df_full, req.score_column, req.outcome_column)
+    scores_arr, y_arr, df = _validate_roc_inputs(
+        df_full, req.score_column, req.outcome_column,
+        imputation=req.imputation or "listwise"
+    )
 
     try:
         fpr, tpr, thresholds = roc_curve(y_arr, scores_arr)
@@ -966,14 +987,18 @@ class CorrelationPairRequest(BaseModel):
     var1: str
     var2: str
     method: Optional[str] = "auto"   # "auto" | "pearson" | "spearman"
+    imputation: Optional[str] = "listwise"
 
 
 @router.post("/correlation_pair")
 def correlation_pair(req: CorrelationPairRequest):
-    df = _get_df(req.session_id).dropna(subset=[req.var1, req.var2])
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.var1, req.var2], req.imputation or "listwise")
     x = df[req.var1].astype(float).values
     y = df[req.var2].astype(float).values
     n = len(x)
+    n_excluded = n_total - n
     if n < 3:
         raise HTTPException(status_code=400, detail="Need at least 3 observations")
 
@@ -1029,6 +1054,8 @@ def correlation_pair(req: CorrelationPairRequest):
         "method": method_used,
         "label": label,
         "n": n,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
         "r": float(r),
         "p": float(p),
         "ci_low": ci_low,
@@ -1058,11 +1085,13 @@ class CorrelationMatrixRequest(BaseModel):
     session_id: str
     variables: List[str]
     method: Optional[str] = "pearson"
+    imputation: Optional[str] = "listwise"
 
 
 @router.post("/correlation_matrix")
 def correlation_matrix_post(req: CorrelationMatrixRequest):
-    df = _get_df(req.session_id)[req.variables].apply(pd.to_numeric, errors="coerce").dropna()
+    raw = _get_df(req.session_id)[req.variables].apply(pd.to_numeric, errors="coerce")
+    df = apply_imputation(raw, req.variables, req.imputation or "listwise")
     if len(req.variables) < 2:
         raise HTTPException(status_code=400, detail="Need at least 2 variables")
 

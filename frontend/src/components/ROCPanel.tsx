@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runROC, runROCCompare, runROCCombined } from "../api";
+import { Tip, LabelTip, InfoBanner } from "./Tip";
+import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -55,6 +57,21 @@ const defaultStyle = (i: number): CurveStyle => ({
 
 // ── Metrics block (single mode) ───────────────────────────────────────────────
 
+const METRIC_TIPS: Record<string, string> = {
+  "Cutoff":      "The threshold score above which a patient is classified as positive. Everything ≥ cutoff → predicted positive.",
+  "Sensitivity": "True Positive Rate — of all patients who actually have the condition, what % were correctly identified. High sensitivity minimises missed cases.",
+  "Specificity": "True Negative Rate — of all patients who do NOT have the condition, what % were correctly ruled out. High specificity minimises false alarms.",
+  "PPV":         "Positive Predictive Value — of all patients the test called positive, what % truly have the condition. Depends heavily on disease prevalence.",
+  "NPV":         "Negative Predictive Value — of all patients the test called negative, what % are truly disease-free.",
+  "Accuracy":    "Overall percentage of correct classifications (TP + TN) / total. Can be misleading with imbalanced classes.",
+  "LR+":         "Likelihood Ratio Positive — how much more likely a positive test result is in a diseased vs. healthy person. LR+ > 10 is strong evidence.",
+  "LR−":         "Likelihood Ratio Negative — how much more likely a negative test result is in a diseased person. LR− < 0.1 is strong evidence against disease.",
+  "Youden J":    "J = Sensitivity + Specificity − 1. Ranges 0–1; the optimal cutoff maximises J, giving the best overall balance between sensitivity and specificity.",
+  "TP": "True Positives — correctly identified disease cases.", "TN": "True Negatives — correctly identified healthy cases.",
+  "FP": "False Positives — healthy cases wrongly flagged as disease (Type I error).",
+  "FN": "False Negatives — disease cases missed by the test (Type II error).",
+};
+
 function MetricsBlock({ m, label }: { m: any; label: string }) {
   return (
     <div className="space-y-0.5">
@@ -72,7 +89,10 @@ function MetricsBlock({ m, label }: { m: any; label: string }) {
         ["TP", m.tp], ["TN", m.tn], ["FP", m.fp], ["FN", m.fn],
       ].map(([k, v]: any) => (
         <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
-          <span className="text-gray-400">{k}</span>
+          <span className="text-gray-400 flex items-center">
+            {k}
+            {METRIC_TIPS[k] && <Tip text={METRIC_TIPS[k]} wide />}
+          </span>
           <span className="text-gray-700 font-mono">{v}</span>
         </div>
       ))}
@@ -130,6 +150,7 @@ export default function ROCPanel() {
   const [result,       setResult]       = useState<any>(null);
   const [error,        setError]        = useState<string | null>(null);
   const [loading,      setLoading]      = useState(false);
+  const [imputation,   setImputation]   = useState<ImputationStrategy>("listwise");
 
   const [showCompare, setShowCompare] = useState(false);
   const [scoreCol2,   setScoreCol2]   = useState(numCols[1] ?? numCols[0] ?? "");
@@ -232,6 +253,7 @@ export default function ROCPanel() {
         session_id: session.session_id,
         score_column: scoreCol,
         outcome_column: outcomeCol,
+        imputation,
         ...(mc != null && !isNaN(mc) ? { manual_cutoff: mc } : {}),
       });
       setResult(res.data);
@@ -420,10 +442,17 @@ export default function ROCPanel() {
                 )}
               </div>
 
-              <button className="btn-primary w-full" onClick={run}
-                disabled={loading || !scoreCol || !outcomeCol}>
-                {loading ? "Computing…" : "Run ROC"}
-              </button>
+              <MissingGuard
+                sessionId={session.session_id}
+                columns={[scoreCol, outcomeCol].filter(Boolean)}
+                imputation={imputation}
+                onImputation={setImputation}
+              >
+                <button className="btn-primary w-full" onClick={run}
+                  disabled={loading || !scoreCol || !outcomeCol}>
+                  {loading ? "Computing…" : "Run ROC"}
+                </button>
+              </MissingGuard>
 
               {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-2">
@@ -450,7 +479,10 @@ export default function ROCPanel() {
                 </div>
 
                 <div className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg py-3">
-                  <span className="text-xs text-gray-400 mb-0.5">AUC</span>
+                  <span className="text-xs text-gray-400 mb-0.5 flex items-center">
+                    AUC
+                    <Tip text="Area Under the ROC Curve — probability that the model ranks a randomly chosen positive case higher than a randomly chosen negative. 0.5 = no better than chance; 1.0 = perfect. ≥0.9 Excellent · ≥0.8 Good · ≥0.7 Fair · <0.7 Poor." wide />
+                  </span>
                   <span className={`text-2xl font-bold font-mono ${aucColor(result.auc)}`}>{result.auc}</span>
                   <span className={`text-xs mt-0.5 ${aucColor(result.auc)}`}>{aucLabel(result.auc)}</span>
                   {result.ci_lower != null && (
@@ -459,7 +491,17 @@ export default function ROCPanel() {
                     </span>
                   )}
                 </div>
+                <InfoBanner>
+                  AUC = {result.auc} — {aucLabel(result.auc)} discrimination.{" "}
+                  {result.auc >= 0.9 ? "This predictor is excellent at separating positives from negatives." : result.auc >= 0.8 ? "Good discriminative ability — suitable for clinical use with appropriate cutoff." : result.auc >= 0.7 ? "Fair discrimination — useful as a screening tool but not definitive alone." : "Poor discrimination — the predictor barely outperforms random chance."}
+                </InfoBanner>
 
+                {result.n_excluded != null && result.n_excluded > 0 && (
+                  <InfoBanner>
+                    {result.n_excluded} row{result.n_excluded !== 1 ? "s" : ""} excluded due to missing values
+                    {result.imputation && result.imputation !== "listwise" ? ` (${result.imputation} imputation applied)` : " (listwise deletion)"}.
+                  </InfoBanner>
+                )}
                 {[["n", result.n], ["Positives", result.n_positive], ["Negatives", result.n_negative]].map(([k, v]: any) => (
                   <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
                     <span className="text-gray-400">{k}</span>
@@ -471,7 +513,10 @@ export default function ROCPanel() {
                   <div className="flex rounded overflow-hidden border border-gray-300 mt-2">
                     <button
                       className={`flex-1 text-xs py-1 transition-colors ${!useManual ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-100"}`}
-                      onClick={() => setUseManual(false)}>Youden J</button>
+                      onClick={() => setUseManual(false)}>
+                      Youden J
+                      {!useManual && <Tip text="Optimal cutoff that maximises Sensitivity + Specificity − 1 (Youden's J index). Gives the best overall balance between catching true positives and avoiding false positives." wide />}
+                    </button>
                     <button
                       className={`flex-1 text-xs py-1 transition-colors ${useManual ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-100"}`}
                       onClick={() => setUseManual(true)}>Manual</button>

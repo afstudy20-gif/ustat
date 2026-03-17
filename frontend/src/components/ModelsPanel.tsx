@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runLinear, runLogistic, runKM, runCox, runLogisticTable } from "../api";
+import { Tip, InfoBanner } from "./Tip";
+import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 
 const PLOT_LAYOUT = {
   paper_bgcolor: "transparent",
@@ -556,6 +558,7 @@ export default function ModelsPanel() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
 
   // ── KM curve styling ────────────────────────────────────────────────────────
   const KM_PALETTE = ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6","#06b6d4"];
@@ -609,11 +612,11 @@ export default function ModelsPanel() {
     try {
       let res: any;
       const sf = buildScaleFactors();
-      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors });
-      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf });
-      else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection });
-      else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined });
-      else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors });
+      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation });
+      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation });
+      else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
+      else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, imputation });
+      else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation });
       setResult(res.data);
     } catch (e: any) {
       const detail = e.response?.data?.detail;
@@ -654,10 +657,19 @@ export default function ModelsPanel() {
       <div className="w-64 flex-shrink-0 space-y-4">
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Model</h3>
-          {[["linear", "Linear Regression"], ["logistic", "Logistic Regression"], ["ortable", "OR Table (Uni + Multi)"], ["km", "Kaplan-Meier"], ["cox", "Cox PH"]].map(([v, l]) => (
-            <label key={v} className="flex items-center gap-2 cursor-pointer">
-              <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); }} className="accent-indigo-500" />
-              <span className="text-sm text-gray-700">{l}</span>
+          {([
+            ["linear",   "Linear Regression",       "Predict a continuous outcome (e.g. blood pressure) from one or more predictors. Output: β coefficients, R², p-values."],
+            ["logistic", "Logistic Regression",      "Predict a binary outcome (0/1, yes/no) — outputs Odds Ratios showing how each predictor changes the odds of the event."],
+            ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
+            ["km",       "Kaplan-Meier",             "Plot survival over time, comparing curves between groups (e.g. treatment vs. control). Tests group differences with the log-rank test."],
+            ["cox",      "Cox PH",                   "Regression for time-to-event data. Outputs Hazard Ratios (HR) — how much each predictor changes the rate of the event occurring over time."],
+          ] as const).map(([v, l, desc]) => (
+            <label key={v} className="flex items-start gap-2 cursor-pointer group">
+              <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); }} className="accent-indigo-500 mt-0.5" />
+              <span className="text-sm text-gray-700 leading-tight">
+                {l}
+                <Tip text={desc} wide />
+              </span>
             </label>
           ))}
         </div>
@@ -756,9 +768,16 @@ export default function ModelsPanel() {
               </div>
             </>
           )}
-          <button className="btn-primary w-full" onClick={run} disabled={loading || (!isSurvival && predictors.length === 0) || (isORTable && predictors.length < 1)}>
-            {loading ? "Fitting…" : "Fit Model"}
-          </button>
+          <MissingGuard
+            sessionId={sid}
+            columns={isSurvival ? [durationCol, eventCol, ...(model === "cox" ? predictors : [])] : [...predictors, outcome]}
+            imputation={imputation}
+            onImputation={setImputation}
+          >
+            <button className="btn-primary w-full" onClick={run} disabled={loading || (!isSurvival && predictors.length === 0) || (isORTable && predictors.length < 1)}>
+              {loading ? "Fitting…" : "Fit Model"}
+            </button>
+          </MissingGuard>
           {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
       </div>
@@ -771,27 +790,63 @@ export default function ModelsPanel() {
               <h4 className="font-semibold text-gray-900 mb-3">{result.model}</h4>
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  ["N", result.n],
-                  result.r_squared != null && ["R²", result.r_squared?.toFixed(4)],
-                  result.adj_r_squared != null && ["Adj R²", result.adj_r_squared?.toFixed(4)],
-                  result.pseudo_r2 != null && ["Pseudo R²", result.pseudo_r2?.toFixed(4)],
-                  result.f_stat != null && ["F-stat", result.f_stat?.toFixed(3)],
-                  result.aic != null && ["AIC", result.aic?.toFixed(2)],
-                  result.bic != null && ["BIC", result.bic?.toFixed(2)],
-                  result.concordance != null && ["C-index", result.concordance?.toFixed(4)],
-                ].filter(Boolean).map(([k, v]: any) => (
+                  ["N",          result.n,                       "Total number of observations used to fit the model."],
+                  result.r_squared != null      && ["R²",        result.r_squared?.toFixed(4),      "Proportion of variance in the outcome explained by the model (0–1). Higher is better, but add predictors only if they genuinely help."],
+                  result.adj_r_squared != null  && ["Adj R²",    result.adj_r_squared?.toFixed(4),  "R² adjusted for the number of predictors — penalises adding unhelpful variables. Prefer this over R² when comparing models."],
+                  result.pseudo_r2 != null      && ["Pseudo R²", result.pseudo_r2?.toFixed(4),      "McFadden's Pseudo R² for logistic regression. Analogous to R² but not directly comparable. Values 0.2–0.4 indicate good fit."],
+                  result.f_stat != null         && ["F-stat",    result.f_stat?.toFixed(3),         "F-test: tests whether the model as a whole explains significantly more variance than no predictors. Large F with small p = model is useful."],
+                  result.aic != null            && ["AIC",       result.aic?.toFixed(2),            "Akaike Information Criterion — lower is better. Used to compare models: the model with the lowest AIC balances fit and complexity best."],
+                  result.bic != null            && ["BIC",       result.bic?.toFixed(2),            "Bayesian Information Criterion — similar to AIC but applies a larger penalty for extra parameters. Prefer the model with the lower BIC."],
+                  result.concordance != null    && ["C-index",   result.concordance?.toFixed(4),    "Concordance index for Cox models — equivalent to AUC. Probability that the model ranks a higher-risk patient above a lower-risk patient."],
+                ].filter(Boolean).map(([k, v, tip]: any) => (
                   <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                    <p className="text-xs text-gray-400">{k}</p>
+                    <p className="text-xs text-gray-400 flex items-center">
+                      {k}
+                      {tip && <Tip text={tip} wide />}
+                    </p>
                     <p className="text-gray-900 font-semibold">{v}</p>
                   </div>
                 ))}
               </div>
+              {/* Missing-data exclusion notice */}
+              {result.n_excluded != null && result.n_excluded > 0 && (
+                <div className="mt-3">
+                  <InfoBanner>
+                    {result.n_excluded} row{result.n_excluded !== 1 ? "s" : ""} were excluded due to missing values
+                    {result.imputation && result.imputation !== "listwise" ? ` (${result.imputation} imputation applied to numeric columns)` : " (listwise deletion)"}.
+                    Model was fitted on <strong>{result.n}</strong> of <strong>{result.n_total ?? (result.n + result.n_excluded)}</strong> rows.
+                  </InfoBanner>
+                </div>
+              )}
+              {/* Plain-English model fit interpretation */}
+              {result.r_squared != null && (
+                <div className="mt-3">
+                  <InfoBanner>
+                    The model explains <strong>{(result.r_squared * 100).toFixed(1)}%</strong> of the variance in <em>{result.outcome ?? "the outcome"}</em>.{" "}
+                    {result.r_squared >= 0.7 ? "This is a strong fit." : result.r_squared >= 0.4 ? "This is a moderate fit — other factors likely also play a role." : "This is a weak fit — important predictors may be missing."}
+                    {result.adj_r_squared != null && result.adj_r_squared < result.r_squared - 0.05 && " Note: Adjusted R² is notably lower than R², suggesting some predictors may not be contributing meaningfully."}
+                  </InfoBanner>
+                </div>
+              )}
+              {result.pseudo_r2 != null && (
+                <div className="mt-3">
+                  <InfoBanner>
+                    Pseudo R² = {result.pseudo_r2?.toFixed(3)}.{" "}
+                    {result.pseudo_r2 >= 0.4 ? "Excellent model fit." : result.pseudo_r2 >= 0.2 ? "Good model fit." : result.pseudo_r2 >= 0.1 ? "Moderate model fit." : "Weak model fit — consider adding more informative predictors."}
+                  </InfoBanner>
+                </div>
+              )}
             </div>
 
             {/* Coefficients table */}
             {result.coefficients && (
               <div className="panel">
-                <h4 className="font-semibold text-gray-900 mb-1">Coefficients</h4>
+                <h4 className="font-semibold text-gray-900 mb-1">
+                  {model === "cox" ? "Coefficients (Hazard Ratios)" : model === "logistic" ? "Coefficients (Odds Ratios)" : "Coefficients"}
+                  {model === "linear" && <Tip text="Each β coefficient shows how much the outcome changes for a 1-unit increase in that predictor, holding all others constant. Significant predictors (p < 0.05) are highlighted." wide />}
+                  {model === "logistic" && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
+                  {model === "cox" && <Tip text="Hazard Ratio (HR) > 1 means a higher rate of the event over time; HR < 1 means a protective effect. E.g. HR = 1.5 means 50% higher event rate per unit increase." wide />}
+                </h4>
                 <CoefTable coefs={result.coefficients} hrMode={model === "cox"} />
               </div>
             )}
@@ -802,6 +857,7 @@ export default function ModelsPanel() {
               <div className="panel">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot
+                  <Tip text="Each row shows one predictor. The square is the point estimate (OR or HR); the horizontal line is the 95% Confidence Interval. If the CI crosses 1 (the vertical dashed line), the effect is not statistically significant. Larger squares = more precise estimate." wide />
                   <span className="ml-2 text-xs font-normal text-gray-400">
                     {model === "cox" ? "HR" : "OR"} with 95% CI — colored = p&lt;0.05, square size = precision
                   </span>
@@ -813,7 +869,10 @@ export default function ModelsPanel() {
             {/* OR Table (Uni + Multi) */}
             {result.table && (
               <div className="panel">
-                <h4 className="font-semibold text-gray-900 mb-2">Univariate &amp; Multivariate OR Table</h4>
+                <h4 className="font-semibold text-gray-900 mb-2">
+                  Univariate &amp; Multivariate OR Table
+                  <Tip text="Univariate: each predictor tested alone against the outcome. Multivariate: all selected predictors tested together, adjusting for each other. Compare both columns — a variable that is significant univariately but not multivariately may be confounded by another predictor." wide />
+                </h4>
                 <ORTable
                   rows={result.table}
                   outcome={result.outcome}
@@ -989,13 +1048,20 @@ export default function ModelsPanel() {
                         );
                       })}
                       {result.logrank && (
-                        <span className="font-medium">
-                          Log-rank p{" "}
+                        <span className="font-medium flex items-center gap-1">
+                          Log-rank p
+                          <Tip text="The log-rank test compares survival curves between groups. p < 0.05 means survival differs significantly between groups. It is most reliable when survival curves do not cross." wide />
+                          {" "}
                           <span className={result.logrank.p < 0.05 ? "text-indigo-600" : ""}>
                             {result.logrank.p != null
                               ? (result.logrank.p < 0.001 ? "< 0.001" : `= ${result.logrank.p.toFixed(3)}`)
                               : "N/A"}
                           </span>
+                          {result.logrank.p != null && (
+                            <span className="text-xs font-normal text-gray-400">
+                              {result.logrank.p < 0.001 ? "— highly significant" : result.logrank.p < 0.05 ? "— significant" : "— not significant"}
+                            </span>
+                          )}
                         </span>
                       )}
                     </div>

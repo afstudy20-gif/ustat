@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, type ReactNode } from "react";
-import { FileSpreadsheet, BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap } from "lucide-react";
+import { FileSpreadsheet, BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator } from "lucide-react";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
@@ -25,6 +25,7 @@ import ModelsPanel from "./components/ModelsPanel";
 import ROCPanel from "./components/ROCPanel";
 import Table1Panel from "./components/Table1Panel";
 import PowerPanel from "./components/PowerPanel";
+import ComputePanel from "./components/ComputePanel";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -35,6 +36,7 @@ const TABS = [
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
   { id: "power",       label: "Power",       icon: Zap },
+  { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "charts",      label: "Charts",      icon: BarChart2 },
 ];
 
@@ -97,6 +99,7 @@ export default function App() {
           {activeTab === "roc"         && <ROCPanel />}
           {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
+          {activeTab === "compute"     && <div className="flex-1 p-4 overflow-y-auto"><ComputePanel /></div>}
           {activeTab === "charts"      && <div className="flex-1 p-4 overflow-y-auto"><ChartsPanel /></div>}
         </ErrorBoundary>
       </main>

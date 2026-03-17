@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from routers import upload, stats, charts, models, session
+from routers import upload, stats, charts, models, session, compute
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
 
@@ -19,6 +19,7 @@ app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(charts.router, prefix="/api/charts", tags=["charts"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
 app.include_router(session.router, prefix="/api/sessions", tags=["sessions"])
+app.include_router(compute.router, prefix="/api/compute", tags=["compute"])
 
 
 @app.get("/api/health")

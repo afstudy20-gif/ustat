@@ -24,6 +24,9 @@ interface AppState {
   updateColumnKind: (name: string, kind: ColMeta["kind"]) => void;
   // Inline cell editing
   updatePreviewCell: (rowIdx: number, col: string, value: unknown) => void;
+  // Computed columns (Compute tab)
+  addSessionColumn: (col: ColMeta, previewValues: (number | string | null)[]) => void;
+  removeSessionColumn: (name: string) => void;
   // Table 1 persistence across tab switches
   table1Result: any;
   setTable1Result: (r: any) => void;
@@ -55,6 +58,31 @@ export const useStore = create<AppState>((set) => ({
       const preview = [...state.session.preview];
       preview[rowIdx] = { ...preview[rowIdx], [col]: value };
       return { session: { ...state.session, preview } };
+    }),
+  addSessionColumn: (col, previewValues) =>
+    set((state) => {
+      if (!state.session) return state;
+      // Replace existing column with same name, or append
+      const columns = [
+        ...state.session.columns.filter((c) => c.name !== col.name),
+        col,
+      ];
+      const preview = state.session.preview.map((row, i) => ({
+        ...row,
+        [col.name]: previewValues[i] ?? null,
+      }));
+      return { session: { ...state.session, columns, preview } };
+    }),
+  removeSessionColumn: (name) =>
+    set((state) => {
+      if (!state.session) return state;
+      const columns = state.session.columns.filter((c) => c.name !== name);
+      const preview = state.session.preview.map((row) => {
+        const r = { ...row };
+        delete r[name];
+        return r;
+      });
+      return { session: { ...state.session, columns, preview } };
     }),
   setTable1Result: (r) => set({ table1Result: r }),
   clearTable1: () => set({ table1Result: null }),
