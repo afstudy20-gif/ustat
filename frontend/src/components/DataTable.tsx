@@ -143,17 +143,18 @@ export default function DataTable() {
     }
   };
 
-  const downloadAs = useCallback((fmt: "csv" | "tsv" | "xlsx") => {
-    const base = (session.filename ?? "data").replace(/\.[^.]+$/, "");
-    const url  = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}`;
-    const a    = document.createElement("a");
-    a.href     = url;
-    a.download = `${base}.${fmt}`;
+  const downloadAs = useCallback((fmt: "csv" | "tsv" | "xlsx" | "sav") => {
+    const base     = (session.filename ?? "data").replace(/\.[^.]+$/, "");
+    const colKinds = encodeURIComponent(JSON.stringify(Object.fromEntries(columns.map((c) => [c.name, c.kind]))));
+    const url      = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}&col_kinds=${colKinds}`;
+    const a        = document.createElement("a");
+    a.href         = url;
+    a.download     = `${base}.${fmt}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setShowSaveMenu(false);
-  }, [session.session_id, session.filename]);
+  }, [session.session_id, session.filename, columns]);
 
   const activeFilters = Object.values(filters).filter(Boolean).length;
 
@@ -226,11 +227,12 @@ export default function DataTable() {
                 {[
                   { fmt: "csv",  label: "CSV",          desc: "Comma-separated",  icon: "📄" },
                   { fmt: "xlsx", label: "Excel (.xlsx)", desc: "Microsoft Excel",  icon: "📊" },
+                  { fmt: "sav",  label: "SPSS (.sav)",   desc: "Keeps col types",  icon: "🔬" },
                   { fmt: "tsv",  label: "TSV",           desc: "Tab-separated",    icon: "📋" },
                 ].map(({ fmt, label, desc, icon }) => (
                   <button
                     key={fmt}
-                    onClick={() => downloadAs(fmt as "csv" | "tsv" | "xlsx")}
+                    onClick={() => downloadAs(fmt as "csv" | "tsv" | "xlsx" | "sav")}
                     className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
                   >
                     <span className="text-base">{icon}</span>

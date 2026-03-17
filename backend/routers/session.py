@@ -1,5 +1,8 @@
 """Session management: cell editing and dataset export."""
 import io
+import json
+import os
+import tempfile
 import numpy as np
 import pandas as pd
 from typing import Any, Optional
@@ -63,8 +66,9 @@ async def update_cell(session_id: str, body: CellUpdate):
 @router.get("/{session_id}/export")
 async def export_dataset(
     session_id: str,
-    fmt: str = Query("csv", regex="^(csv|tsv|xlsx)$"),
+    fmt: str = Query("csv", regex="^(csv|tsv|xlsx|sav)$"),
     filename: str = Query("data"),
+    col_kinds: str = Query("{}"),   # JSON: {"colName": "numeric"|"categorical"|"boolean"|"text"}
 ):
     df = store.get(session_id)
     if df is None:
@@ -102,4 +106,54 @@ async def export_dataset(
             content=buf.read(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f'attachment; filename="{base}.xlsx"'},
+        )
+
+    if fmt == "sav":
+        import pyreadstat
+
+        try:
+            kinds: dict = json.loads(col_kinds)
+        except Exception:
+            kinds = {}
+
+        # Build a clean copy of the dataframe suitable for pyreadstat
+        df_sav = df.copy()
+
+        variable_measure: dict = {}
+        variable_value_labels: dict = {}
+
+        for col in df_sav.columns:
+            kind = kinds.get(col, "numeric")
+
+            if kind in ("categorical", "boolean", "text"):
+                variable_measure[col] = "nominal"
+                # Numeric columns marked as categorical → add value labels so
+                # SPSS knows the numbers map to categories
+                if pd.api.types.is_numeric_dtype(df_sav[col]):
+                    unique_vals = sorted(df_sav[col].dropna().unique())
+                    variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
+            else:
+                variable_measure[col] = "scale"
+                # Ensure object columns declared numeric are cast to float
+                if df_sav[col].dtype == object:
+                    df_sav[col] = pd.to_numeric(df_sav[col], errors="coerce")
+
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".sav")
+        os.close(tmp_fd)
+        try:
+            pyreadstat.write_sav(
+                df_sav,
+                tmp_path,
+                variable_measure=variable_measure,
+                variable_value_labels=variable_value_labels if variable_value_labels else None,
+            )
+            with open(tmp_path, "rb") as f:
+                content = f.read()
+        finally:
+            os.unlink(tmp_path)
+
+        return Response(
+            content=content,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{base}.sav"'},
         )
