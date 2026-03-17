@@ -1260,3 +1260,188 @@ def cohens_kappa(req: KappaRequest):
         "labels": labels,
         "confusion_matrix": cm.tolist(),
     }
+
+
+# ── Power Analysis ─────────────────────────────────────────────────────────────
+
+class PowerRequest(BaseModel):
+    test: str          # t_two | t_one | anova | correlation | proportion | chi2
+    solve_for: str     # n | power | effect_size
+    alpha: float = 0.05
+    power: Optional[float] = None
+    effect_size: Optional[float] = None
+    n: Optional[int] = None
+    tails: int = 2
+    k_groups: int = 3   # ANOVA: number of groups; chi2: number of bins (df+1)
+    ratio: float = 1.0  # n2/n1 for two-sample tests
+    p1: Optional[float] = None
+    p2: Optional[float] = None
+
+
+@router.post("/power")
+def run_power(req: PowerRequest):
+    import numpy as np
+    from scipy.stats import norm
+    from statsmodels.stats.power import (
+        TTestIndPower, TTestOneSamplePower,
+        FTestAnovaPower, NormalIndPower, GofChisquarePower,
+    )
+
+    alt = "two-sided" if req.tails == 2 else "larger"
+    a   = req.alpha
+
+    def _ceil(x): return int(np.ceil(float(x)))
+
+    def _curve(pw_fn, n_end, n_start=4, steps=80):
+        pts, step = [], max(1, (n_end - n_start) // steps)
+        for n in range(n_start, n_end + 1, step):
+            try:
+                pwr = float(pw_fn(n))
+                if 0 <= pwr <= 1:
+                    pts.append({"n": n, "power": round(pwr, 4)})
+            except Exception:
+                pass
+        return pts
+
+    result, label, curve = None, "", []
+
+    # ── Two-sample t-test ──────────────────────────────────────────────────────
+    if req.test == "t_two":
+        ana = TTestIndPower()
+        ratio = req.ratio or 1.0
+        def pw(n): return ana.solve_power(effect_size=req.effect_size, nobs1=n, alpha=a, power=None, ratio=ratio, alternative=alt)
+
+        if req.solve_for == "n":
+            n1 = _ceil(ana.solve_power(effect_size=req.effect_size, nobs1=None, alpha=a, power=req.power, ratio=ratio, alternative=alt))
+            result = n1
+            label  = f"n₁ = {n1},  n₂ = {_ceil(n1*ratio)},  total N = {n1 + _ceil(n1*ratio)}"
+            curve  = _curve(pw, max(n1 * 4, 100))
+        elif req.solve_for == "power":
+            result = float(ana.solve_power(effect_size=req.effect_size, nobs1=req.n, alpha=a, power=None, ratio=ratio, alternative=alt))
+            label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+            curve  = _curve(pw, max(int(req.n) * 4, 100))
+        else:
+            result = float(ana.solve_power(effect_size=None, nobs1=req.n, alpha=a, power=req.power, ratio=ratio, alternative=alt))
+            label  = f"Minimum detectable Cohen's d = {result:.4f}"
+            d = result
+            curve  = _curve(lambda n: ana.solve_power(effect_size=d, nobs1=n, alpha=a, power=None, ratio=ratio, alternative=alt), max(int(req.n)*4, 100))
+
+    # ── One-sample / paired t-test ─────────────────────────────────────────────
+    elif req.test == "t_one":
+        ana = TTestOneSamplePower()
+        def pw(n): return ana.solve_power(effect_size=req.effect_size, nobs=n, alpha=a, power=None, alternative=alt)
+
+        if req.solve_for == "n":
+            n = _ceil(ana.solve_power(effect_size=req.effect_size, nobs=None, alpha=a, power=req.power, alternative=alt))
+            result, label, curve = n, f"n = {n}", _curve(pw, max(n*4, 100))
+        elif req.solve_for == "power":
+            result = float(ana.solve_power(effect_size=req.effect_size, nobs=req.n, alpha=a, power=None, alternative=alt))
+            label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+            curve  = _curve(pw, max(int(req.n)*4, 100))
+        else:
+            result = float(ana.solve_power(effect_size=None, nobs=req.n, alpha=a, power=req.power, alternative=alt))
+            label  = f"Minimum detectable Cohen's d = {result:.4f}"
+            d = result
+            curve  = _curve(lambda n: ana.solve_power(effect_size=d, nobs=n, alpha=a, power=None, alternative=alt), max(int(req.n)*4, 100))
+
+    # ── One-way ANOVA ──────────────────────────────────────────────────────────
+    elif req.test == "anova":
+        ana, k = FTestAnovaPower(), req.k_groups
+        def pw(n): return ana.solve_power(effect_size=req.effect_size, nobs=n, alpha=a, power=None, k_groups=k)
+
+        if req.solve_for == "n":
+            n = _ceil(ana.solve_power(effect_size=req.effect_size, nobs=None, alpha=a, power=req.power, k_groups=k))
+            result, label, curve = n, f"n/group = {n},  total N = {n*k}", _curve(pw, max(n*4, 100))
+        elif req.solve_for == "power":
+            result = float(ana.solve_power(effect_size=req.effect_size, nobs=req.n, alpha=a, power=None, k_groups=k))
+            label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+            curve  = _curve(pw, max(int(req.n)*4, 100))
+        else:
+            result = float(ana.solve_power(effect_size=None, nobs=req.n, alpha=a, power=req.power, k_groups=k))
+            label  = f"Minimum detectable Cohen's f = {result:.4f}"
+            f_es = result
+            curve  = _curve(lambda n: ana.solve_power(effect_size=f_es, nobs=n, alpha=a, power=None, k_groups=k), max(int(req.n)*4, 100))
+
+    # ── Pearson correlation (Fisher-z) ─────────────────────────────────────────
+    elif req.test == "correlation":
+        tails = req.tails
+
+        def corr_power(r, n):
+            if abs(r) >= 1 or n <= 3: return float("nan")
+            ncp = np.arctanh(abs(r)) * np.sqrt(n - 3)
+            z_c = norm.ppf(1 - a / (1 if tails == 1 else 2))
+            return float(norm.sf(z_c - ncp) + (norm.cdf(-z_c - ncp) if tails == 2 else 0))
+
+        def corr_solve_n(r, pwr):
+            for n in range(4, 100001):
+                if corr_power(r, n) >= pwr: return n
+            return 100001
+
+        def corr_solve_r(n, pwr):
+            from scipy.optimize import brentq
+            try:   return float(brentq(lambda r: corr_power(r, n) - pwr, 1e-6, 1 - 1e-6))
+            except Exception: return None
+
+        r_es = req.effect_size
+        if req.solve_for == "n":
+            n = corr_solve_n(r_es, req.power)
+            result, label = n, f"n = {n}"
+            curve = _curve(lambda n: corr_power(r_es, n), max(n*4, 100))
+        elif req.solve_for == "power":
+            result = corr_power(r_es, req.n)
+            label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+            curve  = _curve(lambda n: corr_power(r_es, n), max(int(req.n)*4, 100))
+        else:
+            r_sol = corr_solve_r(req.n, req.power)
+            result = r_sol
+            label  = f"Minimum detectable r = {r_sol:.4f}" if r_sol else "Could not converge"
+            if r_sol:
+                curve = _curve(lambda n: corr_power(r_sol, n), max(int(req.n)*4, 100))
+
+    # ── Two proportions (Cohen's h) ────────────────────────────────────────────
+    elif req.test == "proportion":
+        ana   = NormalIndPower()
+        ratio = req.ratio or 1.0
+        p1    = req.p1 if req.p1 is not None else 0.5
+        p2    = req.p2 if req.p2 is not None else 0.3
+        h_from_p = abs(float(2*np.arcsin(np.sqrt(p1)) - 2*np.arcsin(np.sqrt(p2))))
+
+        if req.solve_for == "effect_size":
+            eff = float(ana.solve_power(effect_size=None, nobs1=req.n, alpha=a, power=req.power, ratio=ratio, alternative=alt))
+            result = abs(eff)
+            label  = f"Minimum detectable Cohen's h = {result:.4f}"
+            h_sol = result
+            curve  = _curve(lambda n: ana.solve_power(effect_size=h_sol, nobs1=n, alpha=a, power=None, ratio=ratio, alternative=alt), max(int(req.n)*4, 100))
+        else:
+            eff = req.effect_size if req.effect_size is not None else h_from_p
+            def pw(n): return ana.solve_power(effect_size=eff, nobs1=n, alpha=a, power=None, ratio=ratio, alternative=alt)
+            if req.solve_for == "n":
+                n1 = _ceil(ana.solve_power(effect_size=eff, nobs1=None, alpha=a, power=req.power, ratio=ratio, alternative=alt))
+                result, label, curve = n1, f"n₁ = {n1},  n₂ = {_ceil(n1*ratio)},  total N = {n1+_ceil(n1*ratio)}", _curve(pw, max(n1*4, 100))
+            else:
+                result = float(ana.solve_power(effect_size=eff, nobs1=req.n, alpha=a, power=None, ratio=ratio, alternative=alt))
+                label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+                curve  = _curve(pw, max(int(req.n)*4, 100))
+
+    # ── Chi-square ─────────────────────────────────────────────────────────────
+    elif req.test == "chi2":
+        ana    = GofChisquarePower()
+        n_bins = req.k_groups   # df = k_groups - 1
+        def pw(n): return ana.solve_power(effect_size=req.effect_size, nobs=n, alpha=a, power=None, n_bins=n_bins)
+
+        if req.solve_for == "n":
+            n = _ceil(ana.solve_power(effect_size=req.effect_size, nobs=None, alpha=a, power=req.power, n_bins=n_bins))
+            result, label, curve = n, f"n = {n}", _curve(pw, max(n*4, 100))
+        elif req.solve_for == "power":
+            result = float(ana.solve_power(effect_size=req.effect_size, nobs=req.n, alpha=a, power=None, n_bins=n_bins))
+            label  = f"Power (1-β) = {result:.4f}  ({result*100:.1f}%)"
+            curve  = _curve(pw, max(int(req.n)*4, 100))
+        else:
+            result = float(ana.solve_power(effect_size=None, nobs=req.n, alpha=a, power=req.power, n_bins=n_bins))
+            label  = f"Minimum detectable Cohen's w = {result:.4f}"
+            w_es = result
+            curve  = _curve(lambda n: ana.solve_power(effect_size=w_es, nobs=n, alpha=a, power=None, n_bins=n_bins), max(int(req.n)*4, 100))
+    else:
+        raise HTTPException(400, f"Unknown test: {req.test}")
+
+    return {"result": float(result) if result is not None else None, "label": label, "curve": curve}

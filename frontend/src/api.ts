@@ -44,3 +44,4 @@ export const runCorrelationPair = (data: object) => api.post("/api/stats/correla
 export const runCorrelationMatrix = (data: object) => api.post("/api/stats/correlation_matrix", data);
 export const runICC = (data: object) => api.post("/api/stats/icc", data);
 export const runCohensKappa = (data: object) => api.post("/api/stats/cohens_kappa", data);
+export const runPower       = (data: object) => api.post("/api/stats/power", data);
