@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runLinear, runLogistic, runKM, runCox, runLogisticTable } from "../api";
+import { runLinear, runLogistic, runKM, runCox, runLogisticTable, runRCS } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 
@@ -554,6 +554,13 @@ export default function ModelsPanel() {
   const [model, setModel] = useState("linear");
   const [outcome, setOutcome] = useState(numCols[0] ?? "");
   const [predictors, setPredictors] = useState<string[]>([]);
+
+  // ── RCS-specific state ───────────────────────────────────────────────────
+  const [rcsPredictor, setRcsPredictor] = useState(numCols[0] ?? "");
+  const [rcsOutcome,   setRcsOutcome]   = useState(numCols[1] ?? numCols[0] ?? "");
+  const [rcsNKnots,    setRcsNKnots]    = useState(4);
+  const [rcsRefValue,  setRcsRefValue]  = useState("");
+  const [rcsCovariates, setRcsCovariates] = useState<string[]>([]);
   const [scaleFactors, setScaleFactors] = useState<Record<string, string>>({}); // col → divisor string
   const [selection, setSelection] = useState("p10"); // multivariate variable selection strategy
   const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
@@ -621,6 +628,15 @@ export default function ModelsPanel() {
       else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, imputation });
+      else if (model === "rcs") res = await runRCS({
+        session_id: sid,
+        predictor:  rcsPredictor,
+        outcome:    rcsOutcome,
+        covariates: rcsCovariates,
+        n_knots:    rcsNKnots,
+        ref_value:  rcsRefValue !== "" ? parseFloat(rcsRefValue) : undefined,
+        model_type: "logistic",
+      });
       else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation });
       setResult(res.data);
     } catch (e: any) {
@@ -656,6 +672,7 @@ export default function ModelsPanel() {
 
   const isSurvival = model === "km" || model === "cox";
   const isORTable  = model === "ortable";
+  const isRCS      = model === "rcs";
 
   return (
     <div className="flex gap-4">
@@ -668,6 +685,7 @@ export default function ModelsPanel() {
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
             ["km",       "Kaplan-Meier",             "Plot survival over time, comparing curves between groups (e.g. treatment vs. control). Tests group differences with the log-rank test."],
             ["cox",      "Cox PH",                   "Regression for time-to-event data. Outputs Hazard Ratios (HR) — how much each predictor changes the rate of the event occurring over time."],
+            ["rcs",      "RCS Dose-Response",        "Restricted Cubic Splines — models non-linear (U/J-shaped) relationships between a continuous predictor and a binary outcome. Outputs a publication-ready dose-response curve with 95% CI."],
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
               <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); }} className="accent-indigo-500 mt-0.5" />
@@ -680,7 +698,60 @@ export default function ModelsPanel() {
         </div>
 
         <div className="panel space-y-3">
-          {isSurvival ? (
+          {isRCS ? (
+            <>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Predictor (continuous)</label>
+                <select className="select w-full" value={rcsPredictor} onChange={(e) => setRcsPredictor(e.target.value)}>
+                  {numCols.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Outcome (binary 0/1)</label>
+                <select className="select w-full" value={rcsOutcome} onChange={(e) => setRcsOutcome(e.target.value)}>
+                  {allCols.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Knots <Tip text="3 knots → [10th, 50th, 90th] percentiles. 4 knots (clinical standard) → [5th, 35th, 65th, 95th]. 5 knots → [5th, 27.5th, 50th, 72.5th, 95th]." wide />
+                </label>
+                <div className="flex gap-2">
+                  {[3, 4, 5].map((k) => (
+                    <button key={k} onClick={() => setRcsNKnots(k)}
+                      className={`flex-1 py-1 text-xs rounded border transition-colors ${rcsNKnots === k ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-600 hover:bg-gray-50"}`}>
+                      {k}{k === 4 ? " ★" : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Reference value <Tip text="The OR = 1.0 reference point on the X-axis. Leave blank to use the median." />
+                </label>
+                <input type="number" placeholder="(median)" value={rcsRefValue}
+                  onChange={(e) => setRcsRefValue(e.target.value)}
+                  className="select w-full text-xs py-1" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Covariates (optional)</label>
+                <div className="max-h-32 overflow-y-auto space-y-1">
+                  {numCols.filter((c) => c !== rcsPredictor && c !== rcsOutcome).map((c) => (
+                    <label key={c} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input type="checkbox" checked={rcsCovariates.includes(c)}
+                        onChange={() => setRcsCovariates((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])}
+                        className="accent-indigo-500" />
+                      <span className="text-gray-700 truncate">{c}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <button className="btn-primary w-full" onClick={run} disabled={loading}>
+                {loading ? "Fitting…" : "Fit RCS Model"}
+              </button>
+              {error && <p className="text-red-400 text-xs">{error}</p>}
+            </>
+          ) : isSurvival ? (
             <>
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Duration column</label>
@@ -810,7 +881,108 @@ export default function ModelsPanel() {
       </div>
 
       <div className="flex-1 space-y-4">
-        {result ? (
+        {result && isRCS ? (
+          /* ── RCS dose-response result ─────────────────────────────────────── */
+          <div className="panel space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold text-gray-900">
+                Dose-Response: {result.predictor} → {result.outcome}
+              </h4>
+              <div className="flex items-center gap-3 text-xs text-gray-500">
+                <span>n = {result.n}{result.n_events != null ? `, events = ${result.n_events}` : ""}</span>
+                {result.aic != null && <span>AIC = {result.aic?.toFixed(1)}</span>}
+              </div>
+            </div>
+
+            {/* Knot positions */}
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+              <span className="text-gray-400">{result.n_knots} knots at:</span>
+              {(result.knots as number[]).map((k: number, i: number) => (
+                <span key={i} className="bg-indigo-50 border border-indigo-100 text-indigo-600 rounded px-1.5 py-0.5">{k}</span>
+              ))}
+              <span className="text-gray-400 ml-2">reference = <strong>{result.ref_value}</strong> (OR = 1.0)</span>
+            </div>
+
+            {/* Dose-response plot */}
+            <Plot
+              data={[
+                /* CI band */
+                {
+                  type: "scatter" as const,
+                  x: [...(result.x_values as number[]), ...(result.x_values as number[]).slice().reverse()],
+                  y: [...(result.ci_high as number[]), ...(result.ci_low as number[]).slice().reverse()],
+                  fill: "toself",
+                  fillcolor: "rgba(99,102,241,0.12)",
+                  line: { color: "transparent" },
+                  hoverinfo: "skip",
+                  showlegend: false,
+                  name: "95% CI",
+                },
+                /* OR curve */
+                {
+                  type: "scatter" as const,
+                  mode: "lines" as const,
+                  x: result.x_values as number[],
+                  y: result.or_values as number[],
+                  line: { color: "#6366f1", width: 2.5 },
+                  name: "Odds Ratio",
+                  hovertemplate: `${result.predictor}: %{x:.2f}<br>OR: %{y:.3f}<extra></extra>`,
+                },
+                /* raw data rug */
+                {
+                  type: "scatter" as const,
+                  mode: "markers" as const,
+                  x: result.x_data as number[],
+                  y: Array((result.x_data as number[]).length).fill(1),
+                  marker: { color: "#6366f1", size: 3, opacity: 0.25, symbol: "line-ns-open" },
+                  yaxis: "y2",
+                  showlegend: false,
+                  hoverinfo: "skip",
+                },
+              ]}
+              layout={{
+                ...PLOT_LAYOUT,
+                autosize: true,
+                height: 420,
+                xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor } },
+                yaxis: { ...PLOT_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Odds Ratio (95% CI)" }, zeroline: false },
+                yaxis2: { overlaying: "y" as const, range: [0.5, 1.5], fixedrange: true, showgrid: false, showticklabels: false, zeroline: false },
+                shapes: [
+                  /* OR = 1 reference line */
+                  { type: "line" as const, xref: "paper" as const, yref: "y" as const,
+                    x0: 0, x1: 1, y0: 1, y1: 1,
+                    line: { color: "#9ca3af", width: 1.5, dash: "dash" as const } },
+                  /* knot tick marks */
+                  ...(result.knots as number[]).map((k: number) => ({
+                    type: "line" as const, xref: "x" as const, yref: "paper" as const,
+                    x0: k, x1: k, y0: 0, y1: 0.04,
+                    line: { color: "#6366f1", width: 1, dash: "dot" as const },
+                  })),
+                ],
+                annotations: [
+                  { x: result.ref_value, y: 1, xref: "x" as const, yref: "y" as const,
+                    text: `ref=${result.ref_value}`, showarrow: true, arrowhead: 2,
+                    arrowcolor: "#9ca3af", font: { size: 10, color: "#6b7280" },
+                    ax: 0, ay: -30 },
+                ],
+                legend: { font: { size: 11, color: "#374151" }, x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const },
+                margin: { t: 20, r: 20, b: 50, l: 65 },
+              }}
+              style={{ width: "100%", height: 420 }}
+              useResizeHandler
+              config={{ responsive: true, displaylogo: false,
+                toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${result.outcome}`, width: 900, height: 500 },
+                modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
+            />
+
+            <InfoBanner>
+              The curve shows the <strong>non-linear dose-response</strong> relationship between <em>{result.predictor}</em> and the odds of <em>{result.outcome}</em>.
+              The shaded band is the 95% CI — it widens at the extremes where data is sparse.
+              Dashed vertical lines mark knot positions ({result.n_knots} knots at {result.n_knots === 3 ? "10th/50th/90th" : result.n_knots === 4 ? "5th/35th/65th/95th" : "5th/27.5th/50th/72.5th/95th"} percentiles).
+              The horizontal dashed line at OR = 1.0 is the null reference.
+            </InfoBanner>
+          </div>
+        ) : result ? (
           <>
             {/* Summary cards */}
             <div className="panel">

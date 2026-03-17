@@ -486,3 +486,144 @@ def cox_regression(req: CoxRequest):
         "concordance": _safe_float(cph.concordance_index_),
         "coefficients": coefs,
     }
+
+
+# ── Restricted Cubic Splines ─────────────────────────────────────────────────
+
+class RCSRequest(BaseModel):
+    session_id: str
+    predictor: str
+    outcome: str
+    covariates: List[str] = []
+    n_knots: int = 4          # 3, 4, or 5
+    ref_value: Optional[float] = None   # OR reference (median if None)
+    model_type: str = "logistic"        # "logistic" | "linear"
+    imputation: str = "listwise"
+
+_KNOT_PERCENTILES = {
+    3: [10, 50, 90],
+    4: [5, 35, 65, 95],
+    5: [5, 27.5, 50, 72.5, 95],
+}
+
+def _rcs_basis(x: np.ndarray, knots: np.ndarray) -> np.ndarray:
+    """Harrell restricted cubic spline basis (returns n_knots-2 spline columns)."""
+    k = len(knots)
+    cols = []
+    kk = knots[-1]   # last knot
+    k1 = knots[-2]   # second-to-last knot
+    denom = (kk - knots[0]) ** 2
+    for j in range(k - 2):
+        t1 = np.maximum(x - knots[j], 0) ** 3
+        t2 = np.maximum(x - k1, 0) ** 3
+        t3 = np.maximum(x - kk, 0) ** 3
+        col = t1 - ((kk - knots[j]) / (kk - k1)) * t2 + ((k1 - knots[j]) / (kk - k1)) * t3
+        cols.append(col / denom)
+    return np.column_stack(cols)
+
+@router.post("/rcs")
+def rcs_regression(req: RCSRequest):
+    from services.impute import apply_imputation as _imp
+
+    df_full = _get_df(req.session_id)
+    cols_needed = [req.predictor, req.outcome] + req.covariates
+    df = df_full[cols_needed].copy()
+    for c in cols_needed:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna()
+    n = len(df)
+    if n < 10:
+        raise HTTPException(status_code=400, detail="Not enough complete rows (need ≥ 10).")
+
+    x_raw = df[req.predictor].values.astype(float)
+    y     = df[req.outcome].values.astype(float)
+
+    # Knot positions
+    pcts = _KNOT_PERCENTILES.get(req.n_knots, _KNOT_PERCENTILES[4])
+    knots = np.percentile(x_raw, pcts)
+
+    # Build design matrix: intercept + x + spline cols + covariates
+    spline_cols = _rcs_basis(x_raw, knots)
+    X_parts = [np.ones(n), x_raw, spline_cols]
+    if req.covariates:
+        cov_mat = df[req.covariates].values.astype(float)
+        X_parts.append(cov_mat)
+    X = np.column_stack(X_parts)
+
+    # Fit model
+    try:
+        if req.model_type == "logistic":
+            result = sm.Logit(y, X).fit(disp=0, maxiter=200)
+        else:
+            result = sm.OLS(y, X).fit()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Model fitting error: {exc}")
+
+    # Synthetic X range for dose-response curve (1st–99th percentile of predictor)
+    x_lo, x_hi = float(np.percentile(x_raw, 1)), float(np.percentile(x_raw, 99))
+    x_syn = np.linspace(x_lo, x_hi, 200)
+    sp_syn = _rcs_basis(x_syn, knots)
+
+    # Build covariate means for synthetic rows
+    n_cov = len(req.covariates)
+    if n_cov:
+        cov_means = df[req.covariates].mean().values.astype(float)
+        X_syn = np.column_stack([np.ones(200), x_syn, sp_syn, np.tile(cov_means, (200, 1))])
+    else:
+        X_syn = np.column_stack([np.ones(200), x_syn, sp_syn])
+
+    # Predict log-odds (or fitted values)
+    lp_syn = X_syn @ result.params
+
+    # Reference value
+    ref_val = req.ref_value if req.ref_value is not None else float(np.median(x_raw))
+    ref_val = float(np.clip(ref_val, x_lo, x_hi))
+    # Find closest index in synthetic range
+    ref_idx = int(np.argmin(np.abs(x_syn - ref_val)))
+    lp_ref  = lp_syn[ref_idx]
+
+    # Relative log-odds → OR
+    rel_lp = lp_syn - lp_ref
+
+    # 95% CI via delta method on the linear predictor difference
+    # Var(lp(x) - lp(ref)) = (X_syn[i] - X_syn[ref]) @ cov @ (X_syn[i] - X_syn[ref])'
+    cov_mat_param = result.cov_params()
+    diffs = X_syn - X_syn[ref_idx]
+    var_lp = np.einsum("ij,jk,ik->i", diffs, cov_mat_param, diffs)
+    se_lp  = np.sqrt(np.maximum(var_lp, 0))
+    z95    = 1.96
+
+    if req.model_type == "logistic":
+        or_vals  = np.exp(rel_lp)
+        ci_low   = np.exp(rel_lp - z95 * se_lp)
+        ci_high  = np.exp(rel_lp + z95 * se_lp)
+    else:
+        or_vals = rel_lp          # for linear: difference in means
+        ci_low  = rel_lp - z95 * se_lp
+        ci_high = rel_lp + z95 * se_lp
+
+    # Summarise: n, events, AIC, knot positions
+    events = int(y.sum()) if req.model_type == "logistic" else None
+
+    def _ns(v):
+        return None if (v is None or np.isnan(v) or np.isinf(v)) else round(float(v), 4)
+
+    def _clean(arr):
+        return [_ns(v) for v in arr]
+
+    return {
+        "predictor":   req.predictor,
+        "outcome":     req.outcome,
+        "model_type":  req.model_type,
+        "n":           n,
+        "n_events":    events,
+        "n_knots":     req.n_knots,
+        "knots":       [round(float(k), 2) for k in knots],
+        "ref_value":   round(ref_val, 2),
+        "aic":         _ns(result.aic),
+        "x_values":    _clean(x_syn),
+        "or_values":   _clean(or_vals),
+        "ci_low":      _clean(ci_low),
+        "ci_high":     _clean(ci_high),
+        "x_data":      _clean(x_raw[:500]),  # raw data rug (first 500 points)
+    }

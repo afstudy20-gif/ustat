@@ -34,7 +34,8 @@ export const getScatter = (data: object) => api.post("/api/charts/scatter", data
 export const getBoxplot = (data: object) => api.post("/api/charts/boxplot", data);
 export const getBar = (data: object) => api.post("/api/charts/bar", data);
 
-export const runLinear = (data: object) => api.post("/api/models/linear", data);
+export const runLinear   = (data: object) => api.post("/api/models/linear", data);
+export const runRCS      = (data: object) => api.post("/api/models/rcs", data);
 export const runLogistic = (data: object) => api.post("/api/models/logistic", data);
 export const runLogisticTable = (data: object) => api.post("/api/models/logistic_table", data);
 export const runKM = (data: object) => api.post("/api/models/survival/km", data);
