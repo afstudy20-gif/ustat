@@ -85,18 +85,16 @@ export default function App() {
       </header>
 
       {/* Content */}
-      <main className={`flex-1 overflow-hidden flex flex-col ${
-        ["summary","table1","roc","data"].includes(activeTab) ? "" : "p-4 overflow-auto"
-      }`} style={["summary","table1","roc","data"].includes(activeTab) ? {} : undefined}>
+      <main className="flex-1 overflow-hidden flex flex-col">
         <ErrorBoundary key={activeTab}>
           {activeTab === "data"        && <div className="flex-1 p-4 overflow-hidden flex flex-col" style={{minHeight:0}}><DataTable /></div>}
           {activeTab === "summary"     && <DescriptivePanel />}
           {activeTab === "table1"      && <Table1Panel />}
-          {activeTab === "hypothesis"  && <HypothesisPanel />}
-          {activeTab === "correlation" && <CorrelationPanel />}
+          {activeTab === "hypothesis"  && <div className="flex-1 p-4 overflow-y-auto"><HypothesisPanel /></div>}
+          {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
-          {activeTab === "models"      && <ModelsPanel />}
-          {activeTab === "charts"      && <ChartsPanel />}
+          {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
+          {activeTab === "charts"      && <div className="flex-1 p-4 overflow-y-auto"><ChartsPanel /></div>}
         </ErrorBoundary>
       </main>
     </div>

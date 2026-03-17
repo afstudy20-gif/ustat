@@ -700,7 +700,7 @@ export default function ROCPanel() {
       </div>
 
       {/* ── Plot area ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col gap-3 min-h-0">
+      <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto">
 
         {/* Style controls bar */}
         {mode === "single" && result && (
