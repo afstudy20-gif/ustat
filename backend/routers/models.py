@@ -27,7 +27,8 @@ class LinearRequest(BaseModel):
     session_id: str
     outcome: str
     predictors: List[str]
-    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
+    imputation: Optional[str] = "listwise"
+    robust_se: Optional[bool] = False
 
 
 @router.post("/linear")
@@ -39,7 +40,8 @@ def linear_regression(req: LinearRequest):
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
     y = df[req.outcome].astype(float)
-    model = sm.OLS(y, X).fit()
+    base = sm.OLS(y, X)
+    model = base.fit(cov_type="HC3", use_t=True) if req.robust_se else base.fit()
 
     coefs = []
     for var in model.params.index:
@@ -54,7 +56,7 @@ def linear_regression(req: LinearRequest):
         })
 
     return {
-        "model": "Linear Regression (OLS)",
+        "model": f"Linear Regression (OLS){' [Robust SE]' if req.robust_se else ''}",
         "outcome": req.outcome,
         "n": int(model.nobs),
         "n_excluded": n_excluded,
@@ -75,9 +77,10 @@ class LogisticRequest(BaseModel):
     session_id: str
     outcome: str
     predictors: List[str]
-    scale_factors: Optional[dict] = None   # {column: divisor}  e.g. {"Platelet": 10000}
-    selection: Optional[str] = "all"       # "all" | "p05" | "p10" | "forward" | "backward"
-    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
+    scale_factors: Optional[dict] = None
+    selection: Optional[str] = "all"
+    imputation: Optional[str] = "listwise"
+    robust_se: Optional[bool] = False
 
 
 def _apply_scaling(df: pd.DataFrame, predictors: List[str], scale_factors: Optional[dict]):
@@ -189,7 +192,8 @@ def logistic_regression(req: LogisticRequest):
     else:
         y = y.astype(int)
 
-    model = sm.Logit(y, X_const).fit(disp=False)
+    cov_type = "HC3" if req.robust_se else "nonrobust"
+    model = sm.Logit(y, X_const).fit(disp=False, cov_type=cov_type)
     coefs = []
     for var in model.params.index:
         est = float(model.params[var])
@@ -206,13 +210,62 @@ def logistic_regression(req: LogisticRequest):
         })
 
     return {
-        "model": "Logistic Regression",
+        "model": f"Logistic Regression{' [Robust SE]' if req.robust_se else ''}",
         "outcome": req.outcome,
         "n": int(model.nobs),
         "n_excluded": n_excluded,
         "imputation": req.imputation or "listwise",
         "pseudo_r2": float(model.prsquared),
         "log_likelihood": float(model.llf),
+        "aic": float(model.aic),
+        "bic": float(model.bic),
+        "coefficients": coefs,
+    }
+
+
+# ── Poisson Regression ───────────────────────────────────────────────────────
+
+class PoissonRequest(BaseModel):
+    session_id: str
+    outcome: str
+    predictors: List[str]
+    imputation: Optional[str] = "listwise"
+    robust_se: Optional[bool] = False
+
+
+@router.post("/poisson")
+def poisson_regression(req: PoissonRequest):
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    n_excluded = n_total - len(df)
+    X = pd.get_dummies(df[req.predictors], drop_first=True)
+    X = sm.add_constant(X.astype(float))
+    y = df[req.outcome].astype(float)
+    cov_type = "HC3" if req.robust_se else "nonrobust"
+    model = sm.GLM(y, X, family=sm.families.Poisson()).fit(cov_type=cov_type)
+    ci = model.conf_int()
+    coefs = []
+    for var in model.params.index:
+        est = float(model.params[var])
+        coefs.append({
+            "variable": str(var),
+            "log_irr": est,
+            "irr": float(np.exp(est)),
+            "se": float(model.bse[var]),
+            "z": float(model.tvalues[var]),
+            "p": float(model.pvalues[var]),
+            "ci_low": float(ci.loc[var, 0]),
+            "ci_high": float(ci.loc[var, 1]),
+            "irr_ci_low":  float(np.exp(ci.loc[var, 0])),
+            "irr_ci_high": float(np.exp(ci.loc[var, 1])),
+        })
+    return {
+        "model": f"Poisson Regression{' [Robust SE]' if req.robust_se else ''}",
+        "outcome": req.outcome,
+        "n": int(model.nobs),
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
         "aic": float(model.aic),
         "bic": float(model.bic),
         "coefficients": coefs,

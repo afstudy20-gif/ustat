@@ -621,6 +621,32 @@ def roc_combined(req: ROCCombinedRequest):
     })
 
 
+# ── Sparklines (mini per-column distribution data for variable lists) ─────────
+
+@router.get("/{session_id}/sparklines")
+def get_sparklines(session_id: str):
+    df = _get_df(session_id)
+    result = {}
+    for col in df.columns:
+        s = df[col].dropna()
+        if len(s) == 0:
+            result[col] = {"type": "empty", "data": []}
+            continue
+        if pd.api.types.is_numeric_dtype(s):
+            n_bins = min(14, max(4, int(len(s) ** 0.38)))
+            counts, _ = np.histogram(s, bins=n_bins)
+            result[col] = {"type": "numeric", "data": counts.tolist()}
+        else:
+            vc = s.value_counts(normalize=True)
+            n_cats = min(6, len(vc))
+            result[col] = {
+                "type": "categorical",
+                "data": [float(v) for v in vc.head(n_cats).values],
+                "labels": vc.head(n_cats).index.astype(str).tolist(),
+            }
+    return result
+
+
 # ── Column Summary (Wizard-style: histogram+QQ or donut+bar) ─────────────────
 
 @router.get("/{session_id}/column_summary")

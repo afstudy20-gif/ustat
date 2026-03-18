@@ -38,8 +38,12 @@ export const runLinear   = (data: object) => api.post("/api/models/linear", data
 export const runRCS      = (data: object) => api.post("/api/models/rcs", data);
 export const runLogistic = (data: object) => api.post("/api/models/logistic", data);
 export const runLogisticTable = (data: object) => api.post("/api/models/logistic_table", data);
+export const runPoisson  = (data: object) => api.post("/api/models/poisson", data);
 export const runKM = (data: object) => api.post("/api/models/survival/km", data);
 export const runCox = (data: object) => api.post("/api/models/survival/cox", data);
+
+export const getSparklines = (sessionId: string) =>
+  api.get(`/api/stats/${sessionId}/sparklines`);
 
 export const getMissing = (sessionId: string, columns: string[]) =>
   api.get(`/api/stats/${sessionId}/missing`, { params: { columns: columns.join(",") } });

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runLinear, runLogistic, runKM, runCox, runLogisticTable, runRCS } from "../api";
+import { runLinear, runLogistic, runKM, runCox, runLogisticTable, runRCS, runPoisson, getSparklines } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 
@@ -14,12 +14,165 @@ const PLOT_LAYOUT = {
   yaxis: { gridcolor: "#e5e7eb" },
 };
 
-function CoefTable({ coefs, hrMode = false }: { coefs: any[]; hrMode?: boolean }) {
+// ── p-value adjustment for one/two-tailed hypothesis ─────────────────────────
+function adjustP(p: number, beta: number, nullHyp: string): number {
+  if (nullHyp === "leq") return beta > 0 ? Math.min(p / 2, 1) : Math.min(1 - p / 2, 1);
+  if (nullHyp === "geq") return beta < 0 ? Math.min(p / 2, 1) : Math.min(1 - p / 2, 1);
+  return p; // "eq" = two-tailed default
+}
+
+// ── Mini bell-curve (sampling distribution of the estimator) ─────────────────
+function MiniNormalSVG({ beta, se, p }: { beta: number; se: number; p: number }) {
+  if (!isFinite(beta) || !isFinite(se) || se <= 0)
+    return <span className="text-amber-400 text-[11px]">⚠</span>;
+  const W = 64, H = 24, span = 3.8 * se;
+  const lo = beta - span, hi = beta + span;
+  const N  = 60;
+  const toSX = (x: number) => ((x - lo) / (hi - lo)) * W;
+  const toSY = (y: number) => H - 2 - y * (H - 4);
+  const pts = Array.from({ length: N + 1 }, (_, i) => {
+    const x = lo + (hi - lo) * i / N;
+    return [x, Math.exp(-0.5 * ((x - beta) / se) ** 2)] as [number, number];
+  });
+  const curve = pts.map(([x, y]) => `${toSX(x).toFixed(1)},${toSY(y).toFixed(1)}`).join(" ");
+  const fill  = [`0,${H}`, ...pts.map(([x, y]) => `${toSX(x).toFixed(1)},${toSY(y).toFixed(1)}`), `${W},${H}`].join(" ");
+  const zx    = toSX(0);
+  const color = p < 0.001 ? "#3730a3" : p < 0.01 ? "#4338ca" : p < 0.05 ? "#6366f1" : "#9ca3af";
+  return (
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      <polygon points={fill}  fill={`${color}${p < 0.05 ? "22" : "0e"}`} />
+      <polyline points={curve} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+      {zx >= 0 && zx <= W && (
+        <line x1={zx.toFixed(1)} y1="1" x2={zx.toFixed(1)} y2={H}
+          stroke="#9ca3af" strokeWidth="0.8" strokeDasharray="2,2" />
+      )}
+    </svg>
+  );
+}
+
+// ── Significance bar ──────────────────────────────────────────────────────────
+function SigBar({ p }: { p: number }) {
+  const pct   = p < 0.001 ? 100 : p < 0.01 ? 80 : p < 0.05 ? 55 : p < 0.1 ? 22 : 7;
+  const color = p < 0.001 ? "#3730a3" : p < 0.01 ? "#4338ca" : p < 0.05 ? "#6366f1" : "#d1d5db";
+  return (
+    <div style={{ width: 56, height: 10, backgroundColor: "#f3f4f6", borderRadius: 3, overflow: "hidden" }}>
+      <div style={{ width: `${pct}%`, height: "100%", backgroundColor: color }} />
+    </div>
+  );
+}
+
+// ── Sparkline mini distribution bar ──────────────────────────────────────────
+function SparklineMini({ data, type }: { data: number[]; type: string }) {
+  const W = 44, H = 14;
+  if (!data || data.length === 0) return null;
+  const max = Math.max(...data);
+  if (max === 0) return null;
+  if (type === "numeric") {
+    const bw = W / data.length;
+    return (
+      <svg width={W} height={H} style={{ display: "block", flexShrink: 0 }}>
+        {data.map((v, i) => {
+          const bh = Math.max(1, (v / max) * H);
+          return <rect key={i} x={i * bw} y={H - bh} width={Math.max(bw - 0.5, 0.5)} height={bh} fill="#ef4444" opacity={0.65} />;
+        })}
+      </svg>
+    );
+  }
+  // categorical → stacked horizontal proportion bars
+  const total = data.reduce((a, b) => a + b, 0);
+  const CATS  = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"];
+  let cx = 0;
+  return (
+    <svg width={W} height={H} style={{ display: "block", flexShrink: 0 }}>
+      {data.map((v, i) => {
+        const w = (v / total) * W;
+        const rect = <rect key={i} x={cx} y={0} width={Math.max(w, 0.5)} height={H} fill={CATS[i % CATS.length]} />;
+        cx += w;
+        return rect;
+      })}
+    </svg>
+  );
+}
+
+function CoefTable({
+  coefs, hrMode = false, allColumns = [], selectedIdx = null, onSelect, nullHyp = "eq",
+}: {
+  coefs: any[]; hrMode?: boolean; allColumns?: string[];
+  selectedIdx?: number | null; onSelect?: (i: number) => void; nullHyp?: string;
+}) {
   const fmtP = (p: number) => (p < 0.001 ? "<0.001" : p.toFixed(4));
   const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
 
+  const isConst   = (n: string) => n === "const" || n === "Intercept";
+  const isDummy   = (n: string) => !isConst(n) && allColumns.length > 0 && !allColumns.includes(n);
+  const getBeta   = (c: any) => hrMode ? (c.log_hr ?? c.estimate) : (c.log_odds ?? c.estimate);
+
+  const renderViz = (c: any) => {
+    if (isConst(c.variable)) return <span className="text-gray-300 text-xs">—</span>;
+    if (isDummy(c.variable)) return <span className="text-amber-400 text-xs" title="Categorical indicator variable">⚠</span>;
+    const beta = getBeta(c);
+    if (beta == null || c.se == null) return null;
+    return <MiniNormalSVG beta={beta} se={c.se} p={adjustP(c.p, beta, nullHyp)} />;
+  };
+  const renderSig = (c: any) => {
+    if (isConst(c.variable)) return null;
+    const beta = getBeta(c) ?? 0;
+    return <SigBar p={adjustP(c.p, beta, nullHyp)} />;
+  };
+  const rowCls = (i: number, adjP: number) =>
+    `cursor-pointer border-b border-gray-100 transition-colors ${
+      i === selectedIdx ? "bg-indigo-50" : adjP < 0.05 ? "hover:bg-indigo-50/40" : "hover:bg-gray-50"
+    }`;
+  const hd = "pb-1.5 pr-2 font-medium";
+
   // Detect logistic mode: coefficients have odds_ratio + or_ci_low fields
   const isLogistic = !hrMode && coefs.length > 0 && coefs[0].odds_ratio != null;
+  // Detect Poisson mode
+  const isPoisson  = !hrMode && !isLogistic && coefs.length > 0 && coefs[0].irr != null;
+
+  // ── Poisson table ────────────────────────────────────────────────────────
+  if (isPoisson) {
+    return (
+      <div className="overflow-auto rounded border border-gray-200 mt-3">
+        <table>
+          <thead>
+            <tr>
+              <th className={hd}>Variable</th>
+              <th className={hd} title="Log Incidence Rate Ratio">Log-IRR</th>
+              <th className={hd}>SE</th><th className={hd}>z</th>
+              <th className={hd}>p-value</th>
+              <th className={hd} title="Incidence Rate Ratio = e^β">IRR</th>
+              <th className={hd}>CI 95% (IRR)</th>
+              <th className={hd}>Visualization</th>
+              <th className={hd}>Significance</th>
+              <th className={hd}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {coefs.map((c: any, i: number) => {
+              const adjP = adjustP(c.p, c.log_irr ?? 0, nullHyp);
+              return (
+                <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
+                  <td className="font-mono text-xs text-gray-900 pr-2">{c.variable}</td>
+                  <td className="font-mono pr-2">{c.log_irr?.toFixed(4)}</td>
+                  <td className="pr-2">{c.se?.toFixed(4)}</td>
+                  <td className="pr-2">{c.z?.toFixed(3)}</td>
+                  <td className="pr-2"><span className={adjP < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(adjP)}</span></td>
+                  <td className={`font-mono font-semibold pr-2 ${adjP < 0.05 ? "text-indigo-600" : ""}`}>{c.irr?.toFixed(3)}</td>
+                  <td className="font-mono text-xs text-gray-400 pr-2">
+                    {c.irr_ci_low != null ? `${c.irr_ci_low.toFixed(3)}–${c.irr_ci_high.toFixed(3)}` : "–"}
+                  </td>
+                  <td className="pr-2">{renderViz(c)}</td>
+                  <td className="pr-2">{renderSig(c)}</td>
+                  <td className="text-yellow-400 font-bold">{sig(adjP)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 
   // ── Logistic regression table ────────────────────────────────────────────
   if (isLogistic) {
@@ -28,35 +181,37 @@ function CoefTable({ coefs, hrMode = false }: { coefs: any[]; hrMode?: boolean }
         <table>
           <thead>
             <tr>
-              <th>Variable</th>
-              <th title="Log-Odds (β)">Estimate (Log-Odds)</th>
-              <th>SE</th>
-              <th>z</th>
-              <th>p-value</th>
-              <th title="Odds Ratio = e^β">Odds Ratio</th>
-              <th title="95% CI for Odds Ratio">CI 95% (OR)</th>
-              <th></th>
+              <th className={hd}>Variable</th>
+              <th className={hd} title="Log-Odds (β)">Log-Odds</th>
+              <th className={hd}>SE</th><th className={hd}>z</th>
+              <th className={hd}>p-value</th>
+              <th className={hd} title="Odds Ratio = e^β">OR</th>
+              <th className={hd}>CI 95% (OR)</th>
+              <th className={hd}>Visualization</th>
+              <th className={hd}>Significance</th>
+              <th className={hd}></th>
             </tr>
           </thead>
           <tbody>
-            {coefs.map((c: any) => (
-              <tr key={c.variable}>
-                <td className="font-mono text-xs text-gray-900">{c.variable}</td>
-                <td className="font-mono">{c.log_odds?.toFixed(4)}</td>
-                <td>{c.se?.toFixed(4)}</td>
-                <td>{c.z?.toFixed(3)}</td>
-                <td>
-                  <span className={c.p < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(c.p)}</span>
-                </td>
-                <td className={`font-mono font-semibold ${c.p < 0.05 ? "text-indigo-600" : ""}`}>
-                  {c.odds_ratio?.toFixed(3)}
-                </td>
-                <td className="font-mono text-xs text-gray-400">
-                  {c.or_ci_low != null ? `${c.or_ci_low.toFixed(3)} – ${c.or_ci_high.toFixed(3)}` : "–"}
-                </td>
-                <td className="text-yellow-400 font-bold">{sig(c.p)}</td>
-              </tr>
-            ))}
+            {coefs.map((c: any, i: number) => {
+              const adjP = adjustP(c.p, c.log_odds ?? 0, nullHyp);
+              return (
+                <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
+                  <td className="font-mono text-xs text-gray-900 pr-2">{c.variable}</td>
+                  <td className="font-mono pr-2">{c.log_odds?.toFixed(4)}</td>
+                  <td className="pr-2">{c.se?.toFixed(4)}</td>
+                  <td className="pr-2">{c.z?.toFixed(3)}</td>
+                  <td className="pr-2"><span className={adjP < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(adjP)}</span></td>
+                  <td className={`font-mono font-semibold pr-2 ${adjP < 0.05 ? "text-indigo-600" : ""}`}>{c.odds_ratio?.toFixed(3)}</td>
+                  <td className="font-mono text-xs text-gray-400 pr-2">
+                    {c.or_ci_low != null ? `${c.or_ci_low.toFixed(3)}–${c.or_ci_high.toFixed(3)}` : "–"}
+                  </td>
+                  <td className="pr-2">{renderViz(c)}</td>
+                  <td className="pr-2">{renderSig(c)}</td>
+                  <td className="text-yellow-400 font-bold">{sig(adjP)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -69,34 +224,36 @@ function CoefTable({ coefs, hrMode = false }: { coefs: any[]; hrMode?: boolean }
       <table>
         <thead>
           <tr>
-            <th>Variable</th>
-            {hrMode ? <th>HR</th> : <th>Estimate</th>}
-            <th>SE</th>
-            {hrMode ? <th>Z</th> : <th>t / z</th>}
-            <th>p-value</th>
-            <th>CI (95%)</th>
-            <th></th>
+            <th className={hd}>Variable</th>
+            {hrMode ? <th className={hd}>HR</th> : <th className={hd}>Estimate</th>}
+            <th className={hd}>SE</th>
+            {hrMode ? <th className={hd}>Z</th> : <th className={hd}>t / z</th>}
+            <th className={hd}>p-value</th>
+            <th className={hd}>CI (95%)</th>
+            <th className={hd}>Visualization</th>
+            <th className={hd}>Significance</th>
+            <th className={hd}></th>
           </tr>
         </thead>
         <tbody>
-          {coefs.map((c: any) => {
-            const est = hrMode ? c.hr : c.estimate ?? c.log_hr;
-            const ci = hrMode
-              ? `${c.hr_ci_low?.toFixed(3)} – ${c.hr_ci_high?.toFixed(3)}`
-              : c.ci_low != null
-              ? `${c.ci_low.toFixed(3)} – ${c.ci_high.toFixed(3)}`
-              : "–";
+          {coefs.map((c: any, i: number) => {
+            const est  = hrMode ? c.hr : (c.estimate ?? c.log_hr);
+            const beta = getBeta(c) ?? 0;
+            const adjP = adjustP(c.p, beta, nullHyp);
+            const ci   = hrMode
+              ? (c.hr_ci_low != null ? `${c.hr_ci_low.toFixed(3)}–${c.hr_ci_high.toFixed(3)}` : "–")
+              : (c.ci_low != null    ? `${c.ci_low.toFixed(3)}–${c.ci_high.toFixed(3)}`        : "–");
             return (
-              <tr key={c.variable}>
-                <td className="font-mono text-xs text-gray-900">{c.variable}</td>
-                <td>{typeof est === "number" ? est.toFixed(4) : est}</td>
-                <td>{c.se?.toFixed(4)}</td>
-                <td>{(c.t ?? c.z)?.toFixed(3)}</td>
-                <td>
-                  <span className={c.p < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(c.p)}</span>
-                </td>
-                <td className="font-mono text-xs">{ci}</td>
-                <td className="text-yellow-400 font-bold">{sig(c.p)}</td>
+              <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
+                <td className="font-mono text-xs text-gray-900 pr-2">{c.variable}</td>
+                <td className="pr-2">{typeof est === "number" ? est.toFixed(4) : est}</td>
+                <td className="pr-2">{c.se?.toFixed(4)}</td>
+                <td className="pr-2">{(c.t ?? c.z)?.toFixed(3)}</td>
+                <td className="pr-2"><span className={adjP < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(adjP)}</span></td>
+                <td className="font-mono text-xs pr-2">{ci}</td>
+                <td className="pr-2">{renderViz(c)}</td>
+                <td className="pr-2">{renderSig(c)}</td>
+                <td className="text-yellow-400 font-bold">{sig(adjP)}</td>
               </tr>
             );
           })}
@@ -543,6 +700,88 @@ function ForestPlot({ result, modelType, outcome }: {
   );
 }
 
+// ── Coefficient Detail Panel (Plotly normal distribution on click) ────────────
+function CoefDetailPanel({
+  coef, nullHyp, onClose,
+}: {
+  coef: any; nullHyp: string; onClose: () => void;
+}) {
+  const beta = coef.log_odds ?? coef.log_irr ?? coef.log_hr ?? coef.estimate ?? 0;
+  const se   = coef.se ?? 1;
+  const adjP = adjustP(coef.p, beta, nullHyp);
+
+  if (!isFinite(beta) || !isFinite(se) || se <= 0) return null;
+
+  const span = 4 * se;
+  const lo   = beta - span, hi = beta + span;
+  const N    = 200;
+  const xs   = Array.from({ length: N + 1 }, (_, i) => lo + (hi - lo) * i / N);
+  const ys   = xs.map((x) => Math.exp(-0.5 * ((x - beta) / se) ** 2) / (se * Math.sqrt(2 * Math.PI)));
+
+  const fillX = [...xs, ...xs.slice().reverse()];
+  const fillY = [...ys, ...xs.map(() => 0)];
+
+  const col = adjP < 0.001 ? "#3730a3" : adjP < 0.01 ? "#4338ca" : adjP < 0.05 ? "#6366f1" : "#9ca3af";
+
+  return (
+    <div className="panel border border-indigo-100 bg-indigo-50/30 relative">
+      <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-gray-700 text-xs">✕ close</button>
+      <h5 className="text-xs font-semibold text-gray-600 mb-2">
+        Coefficient Detail — <span className="font-mono text-indigo-700">{coef.variable}</span>
+      </h5>
+      <div className="flex gap-4 items-start">
+        <Plot
+          data={[
+            { type: "scatter" as const, x: fillX, y: fillY, fill: "toself",
+              fillcolor: `${col}22`, line: { color: "transparent" }, hoverinfo: "skip", showlegend: false },
+            { type: "scatter" as const, x: xs, y: ys, mode: "lines" as const,
+              line: { color: col, width: 2 }, name: "N(β, SE)", hovertemplate: "x: %{x:.4f}<br>density: %{y:.4f}<extra></extra>" },
+            { type: "scatter" as const, x: [0, 0], y: [0, Math.max(...ys) * 1.05],
+              mode: "lines" as const, line: { color: "#9ca3af", dash: "dot" as const, width: 1.5 },
+              name: "H₀ = 0", hoverinfo: "skip" as const },
+            { type: "scatter" as const, x: [beta, beta], y: [0, Math.max(...ys) * 1.05],
+              mode: "lines" as const, line: { color: col, dash: "dash" as const, width: 1.5 },
+              name: `β = ${beta.toFixed(4)}`, hoverinfo: "skip" as const },
+          ]}
+          layout={{
+            paper_bgcolor: "transparent", plot_bgcolor: "#ffffff",
+            font: { color: "#374151", size: 11 },
+            height: 200,
+            margin: { t: 10, r: 20, b: 40, l: 50 },
+            xaxis: { title: { text: "β (coefficient)", font: { size: 10 } }, gridcolor: "#e5e7eb", zeroline: false },
+            yaxis: { title: { text: "density", font: { size: 10 } }, gridcolor: "#e5e7eb", zeroline: false },
+            legend: { font: { size: 10 }, x: 0.65, y: 0.95, xanchor: "left" as const, yanchor: "top" as const },
+            showlegend: true,
+          }}
+          style={{ width: "100%", height: 200 }}
+          useResizeHandler
+          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        />
+        <div className="flex-shrink-0 space-y-2 min-w-[130px] pt-2">
+          {[
+            ["β", beta.toFixed(5)],
+            ["SE", se.toFixed(5)],
+            ["z / t", (coef.z ?? coef.t)?.toFixed(4) ?? "–"],
+            ["p (adj)", adjP < 0.001 ? "<0.001" : adjP.toFixed(4)],
+            ...(coef.ci_low != null ? [["95% CI", `${coef.ci_low.toFixed(3)} – ${coef.ci_high.toFixed(3)}`]] : []),
+            ...(coef.or_ci_low != null ? [["OR CI", `${coef.or_ci_low.toFixed(3)} – ${coef.or_ci_high.toFixed(3)}`]] : []),
+            ...(coef.hr_ci_low  != null ? [["HR CI", `${coef.hr_ci_low.toFixed(3)} – ${coef.hr_ci_high.toFixed(3)}`]] : []),
+            ...(coef.irr_ci_low != null ? [["IRR CI", `${coef.irr_ci_low.toFixed(3)} – ${coef.irr_ci_high.toFixed(3)}`]] : []),
+            ...(coef.odds_ratio != null ? [["OR", coef.odds_ratio.toFixed(4)]] : []),
+            ...(coef.hr != null         ? [["HR", coef.hr.toFixed(4)]] : []),
+            ...(coef.irr != null        ? [["IRR", coef.irr.toFixed(4)]] : []),
+          ].map(([k, v]) => (
+            <div key={k}>
+              <p className="text-[10px] text-gray-400">{k}</p>
+              <p className={`text-xs font-mono font-semibold ${adjP < 0.05 ? "text-indigo-700" : "text-gray-700"}`}>{v}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ModelsPanel() {
   const session  = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
@@ -554,6 +793,18 @@ export default function ModelsPanel() {
   const [model, setModel] = useState("linear");
   const [outcome, setOutcome] = useState(numCols[0] ?? "");
   const [predictors, setPredictors] = useState<string[]>([]);
+
+  // ── New feature state ─────────────────────────────────────────────────────
+  const [selectedCoefIdx, setSelectedCoefIdx] = useState<number | null>(null);
+  const [nullHyp,   setNullHyp]   = useState("eq");    // eq | leq | geq
+  const [robustSE,  setRobustSE]  = useState(false);
+  const [sparklines, setSparklines] = useState<Record<string, { type: string; data: number[] }>>({});
+
+  useEffect(() => {
+    getSparklines(session.session_id)
+      .then((r) => setSparklines(r.data))
+      .catch(() => {});
+  }, [session.session_id]);
 
   // ── RCS-specific state ───────────────────────────────────────────────────
   const [rcsPredictor, setRcsPredictor] = useState(numCols[0] ?? "");
@@ -620,13 +871,14 @@ export default function ModelsPanel() {
   const sid = session.session_id;
 
   const run = async () => {
-    setLoading(true); setError(null); setResult(null);
+    setLoading(true); setError(null); setResult(null); setSelectedCoefIdx(null);
     try {
       let res: any;
       const sf = buildScaleFactors();
-      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation });
-      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation });
+      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
+      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
+      else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, imputation });
       else if (model === "rcs") res = await runRCS({
         session_id: sid,
@@ -670,9 +922,11 @@ export default function ModelsPanel() {
     return Object.keys(out).length > 0 ? out : undefined;
   };
 
-  const isSurvival = model === "km" || model === "cox";
-  const isORTable  = model === "ortable";
-  const isRCS      = model === "rcs";
+  const isSurvival  = model === "km" || model === "cox";
+  const isORTable   = model === "ortable";
+  const isRCS       = model === "rcs";
+  const isPoisson   = model === "poisson";
+  const hasRobustSE = model === "linear" || model === "logistic" || model === "poisson";
 
   return (
     <div className="flex gap-4">
@@ -683,18 +937,28 @@ export default function ModelsPanel() {
             ["linear",   "Linear Regression",       "Predict a continuous outcome (e.g. blood pressure) from one or more predictors. Output: β coefficients, R², p-values."],
             ["logistic", "Logistic Regression",      "Predict a binary outcome (0/1, yes/no) — outputs Odds Ratios showing how each predictor changes the odds of the event."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
+            ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
             ["km",       "Kaplan-Meier",             "Plot survival over time, comparing curves between groups (e.g. treatment vs. control). Tests group differences with the log-rank test."],
             ["cox",      "Cox PH",                   "Regression for time-to-event data. Outputs Hazard Ratios (HR) — how much each predictor changes the rate of the event occurring over time."],
             ["rcs",      "RCS Dose-Response",        "Restricted Cubic Splines — models non-linear (U/J-shaped) relationships between a continuous predictor and a binary outcome. Outputs a publication-ready dose-response curve with 95% CI."],
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
-              <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); }} className="accent-indigo-500 mt-0.5" />
+              <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); setSelectedCoefIdx(null); }} className="accent-indigo-500 mt-0.5" />
               <span className="text-sm text-gray-700 leading-tight">
                 {l}
                 <Tip text={desc} wide />
               </span>
             </label>
           ))}
+          {hasRobustSE && (
+            <label className="flex items-center gap-2 cursor-pointer mt-1 pt-2 border-t border-gray-100">
+              <input type="checkbox" checked={robustSE} onChange={(e) => setRobustSE(e.target.checked)} className="accent-indigo-500" />
+              <span className="text-xs text-gray-600">
+                Robust SE (HC3)
+                <Tip text="Heteroscedasticity-consistent standard errors (HC3). Use when residuals may have unequal variance — common in clinical data. Does not change point estimates, only SEs and p-values." wide />
+              </span>
+            </label>
+          )}
         </div>
 
         <div className="panel space-y-3">
@@ -790,12 +1054,16 @@ export default function ModelsPanel() {
                   <div className="max-h-40 overflow-y-auto space-y-1">
                     {allCols
                       .filter((c) => c !== durationCol && c !== eventCol && c.toLowerCase().includes(predFilter.toLowerCase()))
-                      .map((c) => (
-                        <label key={c} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input type="checkbox" checked={predictors.includes(c)} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
-                          <span className="text-gray-700 truncate">{c}</span>
-                        </label>
-                      ))}
+                      .map((c) => {
+                        const spk = sparklines[c];
+                        return (
+                          <label key={c} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input type="checkbox" checked={predictors.includes(c)} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
+                            <span className="text-gray-700 truncate flex-1">{c}</span>
+                            {spk && <SparklineMini data={spk.data} type={spk.type} />}
+                          </label>
+                        );
+                      })}
                   </div>
                 </div>
               )}
@@ -839,11 +1107,13 @@ export default function ModelsPanel() {
                   {allCols.filter((c) => c !== outcome && c.toLowerCase().includes(predFilter.toLowerCase())).map((c) => {
                     const checked = predictors.includes(c);
                     const showScale = checked && (model === "logistic" || model === "ortable");
+                    const spk = sparklines[c];
                     return (
                       <div key={c} className="space-y-0.5">
                         <label className="flex items-center gap-2 text-sm cursor-pointer">
                           <input type="checkbox" checked={checked} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
-                          <span className="text-gray-700 truncate">{c}</span>
+                          <span className="text-gray-700 truncate flex-1">{c}</span>
+                          {spk && <SparklineMini data={spk.data} type={spk.type} />}
                         </label>
                         {showScale && (
                           <div className="flex items-center gap-1 ml-5 mb-0.5">
@@ -1037,16 +1307,48 @@ export default function ModelsPanel() {
               )}
             </div>
 
-            {/* Coefficients table */}
+            {/* Coefficients table + detail panel */}
             {result.coefficients && (
               <div className="panel">
-                <h4 className="font-semibold text-gray-900 mb-1">
-                  {model === "cox" ? "Coefficients (Hazard Ratios)" : model === "logistic" ? "Coefficients (Odds Ratios)" : "Coefficients"}
-                  {model === "linear" && <Tip text="Each β coefficient shows how much the outcome changes for a 1-unit increase in that predictor, holding all others constant. Significant predictors (p < 0.05) are highlighted." wide />}
-                  {model === "logistic" && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
-                  {model === "cox" && <Tip text="Hazard Ratio (HR) > 1 means a higher rate of the event over time; HR < 1 means a protective effect. E.g. HR = 1.5 means 50% higher event rate per unit increase." wide />}
-                </h4>
-                <CoefTable coefs={result.coefficients} hrMode={model === "cox"} />
+                <div className="flex items-center justify-between mb-1">
+                  <h4 className="font-semibold text-gray-900">
+                    {model === "cox" ? "Coefficients (Hazard Ratios)" : model === "logistic" ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
+                    {model === "linear" && <Tip text="Each β coefficient shows how much the outcome changes for a 1-unit increase in that predictor, holding all others constant. Significant predictors (p < 0.05) are highlighted." wide />}
+                    {model === "logistic" && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
+                    {model === "cox" && <Tip text="Hazard Ratio (HR) > 1 means a higher rate of the event over time; HR < 1 means a protective effect. E.g. HR = 1.5 means 50% higher event rate per unit increase." wide />}
+                    {model === "poisson" && <Tip text="Incidence Rate Ratio (IRR) = eβ. IRR > 1 means higher event rate; IRR < 1 means lower rate. Use for count outcomes (hospital admissions, episodes, etc.)." wide />}
+                  </h4>
+                  {/* Null hypothesis radio */}
+                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                    <span className="text-gray-400">H₀:</span>
+                    {([["eq", "β = 0"], ["leq", "β ≤ 0"], ["geq", "β ≥ 0"]] as const).map(([v, lbl]) => (
+                      <label key={v} className="flex items-center gap-1 cursor-pointer">
+                        <input type="radio" name="nullhyp" value={v} checked={nullHyp === v}
+                          onChange={() => { setNullHyp(v); setSelectedCoefIdx(null); }}
+                          className="accent-indigo-500" />
+                        <span>{lbl}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <CoefTable
+                  coefs={result.coefficients}
+                  hrMode={model === "cox"}
+                  allColumns={allCols}
+                  selectedIdx={selectedCoefIdx}
+                  onSelect={(i) => setSelectedCoefIdx((prev) => prev === i ? null : i)}
+                  nullHyp={nullHyp}
+                />
+                {selectedCoefIdx != null && result.coefficients[selectedCoefIdx] && (
+                  <div className="mt-3">
+                    <CoefDetailPanel
+                      coef={result.coefficients[selectedCoefIdx]}
+                      nullHyp={nullHyp}
+                      onClose={() => setSelectedCoefIdx(null)}
+                    />
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-400 mt-2">Click a row to see the coefficient's sampling distribution.</p>
               </div>
             )}
 
