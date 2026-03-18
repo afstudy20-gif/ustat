@@ -1069,6 +1069,8 @@ export default function ModelsPanel() {
   const [rcsNKnots,    setRcsNKnots]    = useState(4);
   const [rcsRefValue,  setRcsRefValue]  = useState("");
   const [rcsCovariates, setRcsCovariates] = useState<string[]>([]);
+  const [rcsLogScale,   setRcsLogScale]   = useState(true);
+  const [rcsShowData,   setRcsShowData]   = useState(true);
   const [scaleFactors, setScaleFactors] = useState<Record<string, string>>({}); // col → divisor string
   const [selection, setSelection] = useState("p10"); // multivariate variable selection strategy
   const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
@@ -1410,9 +1412,10 @@ export default function ModelsPanel() {
         {result && isRCS ? (
           /* ── RCS dose-response result ─────────────────────────────────────── */
           <div className="panel space-y-3">
-            <div className="flex items-center justify-between">
+            {/* Header row */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <h4 className="font-semibold text-gray-900">
-                Dose-Response: {result.predictor} → {result.outcome}
+                {result.predictor} &amp; {result.outcome}: Restricted Cubic Spline
               </h4>
               <div className="flex items-center gap-3 text-xs text-gray-500">
                 <span>n = {result.n}{result.n_events != null ? `, events = ${result.n_events}` : ""}</span>
@@ -1420,7 +1423,7 @@ export default function ModelsPanel() {
               </div>
             </div>
 
-            {/* Knot positions */}
+            {/* Knot position badges */}
             <div className="flex flex-wrap gap-1.5 text-[11px]">
               <span className="text-gray-400">{result.n_knots} knots at:</span>
               {(result.knots as number[]).map((k: number, i: number) => (
@@ -1454,58 +1457,102 @@ export default function ModelsPanel() {
                   name: "Odds Ratio",
                   hovertemplate: `${result.predictor}: %{x:.2f}<br>OR: %{y:.3f}<extra></extra>`,
                 },
-                /* raw data rug */
+                /* Knot markers on the curve */
                 {
                   type: "scatter" as const,
                   mode: "markers" as const,
-                  x: result.x_data as number[],
-                  y: Array((result.x_data as number[]).length).fill(1),
-                  marker: { color: "#6366f1", size: 3, opacity: 0.25, symbol: "line-ns-open" },
-                  yaxis: "y2",
-                  showlegend: false,
-                  hoverinfo: "skip",
+                  x: result.knots as number[],
+                  y: (result.knots as number[]).map((k: number) => {
+                    const xs = result.x_values as number[];
+                    const ys = result.or_values as number[];
+                    const idx = xs.reduce((best: number, x: number, i: number) =>
+                      Math.abs(x - k) < Math.abs(xs[best] - k) ? i : best, 0);
+                    return ys[idx];
+                  }),
+                  marker: { color: "#6366f1", size: 8, line: { color: "#fff", width: 2 } },
+                  name: "Knots",
+                  hovertemplate: `Knot: %{x:.2f}<br>OR: %{y:.3f}<extra></extra>`,
                 },
+                /* Raw data rug (toggleable) */
+                ...(rcsShowData ? [{
+                  type: "scatter" as const,
+                  mode: "markers" as const,
+                  x: result.x_data as number[],
+                  y: Array((result.x_data as number[]).length).fill(rcsLogScale ? Math.exp(-0.35) : 0.7),
+                  marker: { color: "#6366f1", size: 3, opacity: 0.2, symbol: "line-ns-open" as const },
+                  yaxis: "y" as const,
+                  showlegend: false,
+                  hoverinfo: "skip" as const,
+                  name: "Data",
+                }] : []),
               ]}
               layout={{
                 ...PLOT_LAYOUT,
                 autosize: true,
-                height: 420,
-                xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor } },
-                yaxis: { ...PLOT_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Odds Ratio (95% CI)" }, zeroline: false },
-                yaxis2: { overlaying: "y" as const, range: [0.5, 1.5], fixedrange: true, showgrid: false, showticklabels: false, zeroline: false },
+                height: 440,
+                xaxis: {
+                  ...PLOT_LAYOUT.xaxis,
+                  showgrid: showGrid,
+                  title: { text: result.predictor },
+                  zeroline: false,
+                },
+                yaxis: {
+                  ...PLOT_LAYOUT.yaxis,
+                  showgrid: showGrid,
+                  title: { text: "Odds Ratio (95% CI)" },
+                  zeroline: false,
+                  ...(rcsLogScale ? { type: "log" as const, dtick: 1 } : {}),
+                },
                 shapes: [
                   /* OR = 1 reference line */
                   { type: "line" as const, xref: "paper" as const, yref: "y" as const,
                     x0: 0, x1: 1, y0: 1, y1: 1,
                     line: { color: "#9ca3af", width: 1.5, dash: "dash" as const } },
-                  /* knot tick marks */
-                  ...(result.knots as number[]).map((k: number) => ({
-                    type: "line" as const, xref: "x" as const, yref: "paper" as const,
-                    x0: k, x1: k, y0: 0, y1: 0.04,
-                    line: { color: "#6366f1", width: 1, dash: "dot" as const },
-                  })),
                 ],
                 annotations: [
-                  { x: result.ref_value, y: 1, xref: "x" as const, yref: "y" as const,
-                    text: `ref=${result.ref_value}`, showarrow: true, arrowhead: 2,
-                    arrowcolor: "#9ca3af", font: { size: 10, color: "#6b7280" },
-                    ax: 0, ay: -30 },
+                  { xref: "paper" as const, yref: "y" as const,
+                    x: 0.01, y: 1,
+                    text: "Reference Risk (OR = 1.0)",
+                    showarrow: false,
+                    font: { size: 10, color: "#9ca3af" },
+                    xanchor: "left" as const, yanchor: "bottom" as const },
                 ],
                 legend: { font: { size: 11, color: "#374151" }, x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const },
                 margin: { t: 20, r: 20, b: 50, l: 65 },
               }}
-              style={{ width: "100%", height: 420 }}
+              style={{ width: "100%", height: 440 }}
               useResizeHandler
               config={{ responsive: true, displaylogo: false,
-                toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${result.outcome}`, width: 900, height: 500 },
+                toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${result.outcome}`, width: 1200, height: 600 },
                 modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
             />
 
+            {/* Plot controls */}
+            <div className="flex items-center gap-6 pt-1 border-t border-gray-100">
+              <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                <span>Log Scale (Y)</span>
+                <button
+                  onClick={() => setRcsLogScale(v => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${rcsLogScale ? "bg-indigo-600" : "bg-gray-300"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${rcsLogScale ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                </button>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                <span>Show Data Points</span>
+                <button
+                  onClick={() => setRcsShowData(v => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${rcsShowData ? "bg-indigo-600" : "bg-gray-300"}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${rcsShowData ? "translate-x-4.5" : "translate-x-0.5"}`} />
+                </button>
+              </label>
+            </div>
+
             <InfoBanner>
               The curve shows the <strong>non-linear dose-response</strong> relationship between <em>{result.predictor}</em> and the odds of <em>{result.outcome}</em>.
-              The shaded band is the 95% CI — it widens at the extremes where data is sparse.
-              Dashed vertical lines mark knot positions ({result.n_knots} knots at {result.n_knots === 3 ? "10th/50th/90th" : result.n_knots === 4 ? "5th/35th/65th/95th" : "5th/27.5th/50th/72.5th/95th"} percentiles).
-              The horizontal dashed line at OR = 1.0 is the null reference.
+              Filled circles mark the {result.n_knots} knot positions. The shaded band is the 95% CI.
+              <strong>Log scale</strong> is recommended for ORs — it symmetrises the curve and reveals J/U shapes that appear compressed on a linear axis.
             </InfoBanner>
           </div>
         ) : result ? (
