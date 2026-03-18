@@ -641,7 +641,7 @@ export default function VisualModelPanel() {
       </div>
 
       {/* Active section */}
-      {active === "polynomial" && <PolynomialSection sessionId={sid} allCols={allCols} numCols={numCols} />}
+      {active === "polynomial" && <PolynomialSection sessionId={sid} numCols={numCols} />}
       {active === "lmm"        && <LMMSection        sessionId={sid} allCols={allCols} numCols={numCols} />}
       {active === "glm"        && <GLMSection        sessionId={sid} allCols={allCols} numCols={numCols} />}
       {active === "diag"       && <DiagnosticsSection sessionId={sid} allCols={allCols} numCols={numCols} />}
