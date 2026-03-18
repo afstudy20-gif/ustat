@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import {
@@ -6,6 +6,7 @@ import {
   runCorrelationMatrix,
   runICC,
   runCohensKappa,
+  getRawColumns,
 } from "../api";
 import { Tip, LabelTip, InfoBanner } from "./Tip";
 
@@ -425,6 +426,10 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [displayMode, setDisplayMode] = useState<"heatmap" | "splom">("heatmap");
+  const [rawData, setRawData] = useState<Record<string, (number | null)[]> | null>(null);
+  const [rawLoading, setRawLoading] = useState(false);
+  const [selectedVar, setSelectedVar] = useState<string | null>(null);
 
   const toggle = (c: string) =>
     setSelected((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
@@ -443,6 +448,16 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
     }
   };
 
+  // Fetch raw data when SPLOM mode is active
+  useEffect(() => {
+    if (displayMode !== "splom" || selected.length < 2) return;
+    setRawLoading(true);
+    getRawColumns(sessionId, selected)
+      .then((r) => setRawData(r.data))
+      .catch(() => {})
+      .finally(() => setRawLoading(false));
+  }, [displayMode, selected.join(","), sessionId]);
+
   const exportMatrix = () => {
     if (!data) return;
     const vars: string[] = data.variables;
@@ -456,6 +471,61 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
       }),
     ]);
     downloadCSV("correlation_matrix.csv", [header, ...rows]);
+  };
+
+  // Build SPLOM distribution panel for a selected variable
+  const renderVarDetail = (v: string) => {
+    if (!rawData || !rawData[v]) return null;
+    const vals = rawData[v].filter((x): x is number => x != null);
+    if (vals.length === 0) return null;
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    const nBins = Math.min(20, Math.max(6, Math.round(vals.length ** 0.38)));
+    const binW = (maxV - minV) / nBins;
+    const counts = Array(nBins).fill(0);
+    vals.forEach((x) => { const b = Math.min(Math.floor((x - minV) / binW), nBins - 1); counts[b]++; });
+    const xs = counts.map((_, i) => +(minV + (i + 0.5) * binW).toFixed(4));
+    return (
+      <div className="panel flex-shrink-0 w-48 flex flex-col gap-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold text-gray-700 truncate">{v}</p>
+          <button onClick={() => setSelectedVar(null)} className="text-gray-300 hover:text-gray-600 text-xs">✕</button>
+        </div>
+        <p className="text-[10px] text-gray-400">n = {vals.length}</p>
+        <Plot
+          data={[{ type: "bar" as const, x: xs, y: counts,
+            marker: { color: "#6366f1", opacity: 0.8 },
+            hovertemplate: "%{x:.2f}: %{y}<extra></extra>" }]}
+          layout={{
+            paper_bgcolor: "transparent", plot_bgcolor: "#f9fafb",
+            font: { color: "#374151", size: 9 },
+            height: 130, margin: { t: 8, r: 4, b: 28, l: 28 },
+            xaxis: { gridcolor: "#f3f4f6", zeroline: false, title: { text: v, font: { size: 8 } } },
+            yaxis: { gridcolor: "#f3f4f6", zeroline: false },
+            showlegend: false,
+          }}
+          style={{ width: "100%", height: 130 }}
+          useResizeHandler
+          config={{ displayModeBar: false, responsive: true }}
+        />
+        {data?.matrix?.[v] && (
+          <div className="space-y-0.5">
+            <p className="text-[10px] text-gray-400 font-semibold">Correlations</p>
+            {Object.entries(data.matrix[v] as Record<string, number>)
+              .filter(([k]) => k !== v)
+              .sort(([, a], [, b]) => Math.abs(b) - Math.abs(a))
+              .slice(0, 6)
+              .map(([k, r]) => (
+                <div key={k} className="flex items-center justify-between gap-1">
+                  <span className="text-[9px] text-gray-500 truncate flex-1">{k}</span>
+                  <span className={`text-[9px] font-mono font-semibold ${Math.abs(r) >= 0.5 ? "text-indigo-600" : "text-gray-500"}`}>
+                    {r.toFixed(3)}
+                  </span>
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -474,6 +544,19 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
               <span className="text-sm text-gray-700 capitalize">{m}</span>
             </label>
           ))}
+
+          {/* Display mode toggle */}
+          <div className="pt-1 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-700 mb-2">Display</p>
+            <div className="flex rounded overflow-hidden border border-gray-200">
+              {(["heatmap", "splom"] as const).map((mode) => (
+                <button key={mode} onClick={() => setDisplayMode(mode)}
+                  className={`flex-1 text-xs py-1 transition-colors ${displayMode === mode ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                  {mode === "heatmap" ? "Heatmap" : "Scatter"}
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="flex items-center justify-between pt-1">
             <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
@@ -503,7 +586,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
           <p className="text-[10px] text-gray-400">{selected.length} selected</p>
 
           <button className="btn-primary w-full" onClick={run} disabled={loading}>
-            {loading ? "Computing…" : "Compute"}
+            {loading ? "Computing…" : "Compute Matrix"}
           </button>
           {error && <p className="text-xs text-red-500">{error}</p>}
 
@@ -513,97 +596,161 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
         </div>
       </div>
 
-      {/* Heatmap + warnings */}
-      <div className="flex-1 flex flex-col gap-3 min-h-0">
-        {data ? (
-          <>
-            {/* Multicollinearity warnings */}
-            {data.multicollinearity_warnings.length > 0 && (
-              <div className="panel flex-shrink-0 space-y-1 border-amber-200 bg-amber-50">
-                <p className="text-xs font-semibold text-amber-700 flex items-center">
-                  ⚠ High Collinearity Detected (|r| ≥ 0.70)
-                  <Tip text="Two predictors are so strongly correlated they carry redundant information. In regression, this inflates standard errors and makes coefficients unreliable. Do not include both in the same model — remove the one that is less clinically meaningful." wide />
-                </p>
-                {data.multicollinearity_warnings.map((w: any, i: number) => (
-                  <p key={i} className="text-xs text-gray-700">
-                    <span className={w.severity === "high" ? "text-red-600 font-semibold" : "text-amber-600 font-medium"}>
-                      {w.var1} ↔ {w.var2}
-                    </span>
-                    <span className="text-gray-400 ml-2">r = {w.r.toFixed(3)}</span>
-                    {w.severity === "high"
-                      ? <span className="text-red-500 ml-2">⚠ Very high (&gt; 0.90) — strong redundancy</span>
-                      : <span className="text-amber-500 ml-2">— Do not use both in the same regression</span>}
+      {/* Main content */}
+      <div className="flex-1 flex gap-3 min-h-0">
+        <div className="flex-1 flex flex-col gap-3 min-h-0">
+          {data ? (
+            <>
+              {/* Multicollinearity warnings */}
+              {data.multicollinearity_warnings.length > 0 && (
+                <div className="panel flex-shrink-0 space-y-1 border-amber-200 bg-amber-50">
+                  <p className="text-xs font-semibold text-amber-700 flex items-center">
+                    ⚠ High Collinearity Detected (|r| ≥ 0.70)
+                    <Tip text="Two predictors are so strongly correlated they carry redundant information. In regression, this inflates standard errors and makes coefficients unreliable. Do not include both in the same model — remove the one that is less clinically meaningful." wide />
                   </p>
-                ))}
-              </div>
-            )}
+                  {data.multicollinearity_warnings.map((w: any, i: number) => (
+                    <p key={i} className="text-xs text-gray-700">
+                      <span className={w.severity === "high" ? "text-red-600 font-semibold" : "text-amber-600 font-medium"}>
+                        {w.var1} ↔ {w.var2}
+                      </span>
+                      <span className="text-gray-400 ml-2">r = {w.r.toFixed(3)}</span>
+                      {w.severity === "high"
+                        ? <span className="text-red-500 ml-2">⚠ Very high (&gt; 0.90) — strong redundancy</span>
+                        : <span className="text-amber-500 ml-2">— Do not use both in the same regression</span>}
+                    </p>
+                  ))}
+                </div>
+              )}
 
-            {/* Heatmap */}
-            <div className="panel flex-1 min-h-0 flex flex-col gap-2">
-              <div className="flex items-center justify-between flex-shrink-0">
-                <span className="text-xs font-semibold text-gray-500">Correlation Matrix</span>
-                <button
-                  onClick={exportMatrix}
-                  className="flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
-                >
-                  ↓ Export CSV
-                </button>
-              </div>
-              <Plot
-                data={[{
-                  type: "heatmap",
-                  z: data.variables.map((c1: string) =>
-                    data.variables.map((c2: string) => data.matrix[c1][c2])
-                  ),
-                  x: data.variables,
-                  y: data.variables,
-                  colorscale: [
-                    [0,   "#2563eb"],
-                    [0.25,"#93c5fd"],
-                    [0.5, "#f9fafb"],
-                    [0.75,"#fca5a5"],
-                    [1,   "#dc2626"],
-                  ],
-                  zmid: 0, zmin: -1, zmax: 1,
-                  text: data.variables.map((c1: string) =>
-                    data.variables.map((c2: string) => {
-                      if (c1 === c2) return "1";
-                      const v = data.matrix[c1][c2];
-                      const p = data.p_matrix?.[c1]?.[c2];
-                      if (v == null) return "";
-                      return `${v.toFixed(2)}${starsFor(p)}`;
-                    })
-                  ),
-                  texttemplate: "%{text}",
-                  textfont: { size: 11, color: "#111827" },
-                  hovertemplate: "%{x} vs %{y}: %{z:.4f}<extra></extra>",
-                }]}
-                layout={{
-                  ...PLOT_BG,
-                  autosize: true,
-                  xaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
-                  yaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
-                  margin: { t: 20, r: 20, b: 100, l: 100 },
-                }}
-                style={{ width: "100%", height: "100%", flex: 1 }}
-                useResizeHandler
-                config={{ responsive: true, displayModeBar: false }}
-              />
-              {/* Significance legend */}
-              <div className="flex gap-4 text-[10px] text-gray-400 flex-shrink-0">
-                <span>* p &lt; 0.05</span>
-                <span>** p &lt; 0.01</span>
-                <span>*** p &lt; 0.001</span>
-                <span className="ml-2 text-blue-500">■ Negative correlation</span>
-                <span className="text-red-500">■ Positive correlation</span>
-              </div>
+              {displayMode === "heatmap" ? (
+                /* Heatmap */
+                <div className="panel flex-1 min-h-0 flex flex-col gap-2">
+                  <div className="flex items-center justify-between flex-shrink-0">
+                    <span className="text-xs font-semibold text-gray-500">Correlation Matrix</span>
+                    <button
+                      onClick={exportMatrix}
+                      className="flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+                    >
+                      ↓ Export CSV
+                    </button>
+                  </div>
+                  <Plot
+                    data={[{
+                      type: "heatmap",
+                      z: data.variables.map((c1: string) =>
+                        data.variables.map((c2: string) => data.matrix[c1][c2])
+                      ),
+                      x: data.variables,
+                      y: data.variables,
+                      colorscale: [
+                        [0,   "#2563eb"],
+                        [0.25,"#93c5fd"],
+                        [0.5, "#f9fafb"],
+                        [0.75,"#fca5a5"],
+                        [1,   "#dc2626"],
+                      ],
+                      zmid: 0, zmin: -1, zmax: 1,
+                      text: data.variables.map((c1: string) =>
+                        data.variables.map((c2: string) => {
+                          if (c1 === c2) return "1";
+                          const v = data.matrix[c1][c2];
+                          const p = data.p_matrix?.[c1]?.[c2];
+                          if (v == null) return "";
+                          return `${v.toFixed(2)}${starsFor(p)}`;
+                        })
+                      ),
+                      texttemplate: "%{text}",
+                      textfont: { size: 11, color: "#111827" },
+                      hovertemplate: "%{x} vs %{y}: %{z:.4f}<extra></extra>",
+                    }]}
+                    layout={{
+                      ...PLOT_BG,
+                      autosize: true,
+                      xaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
+                      yaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
+                      margin: { t: 20, r: 20, b: 100, l: 100 },
+                    }}
+                    style={{ width: "100%", height: "100%", flex: 1 }}
+                    useResizeHandler
+                    config={{ responsive: true, displayModeBar: false }}
+                  />
+                  {/* Significance legend */}
+                  <div className="flex gap-4 text-[10px] text-gray-400 flex-shrink-0">
+                    <span>* p &lt; 0.05</span>
+                    <span>** p &lt; 0.01</span>
+                    <span>*** p &lt; 0.001</span>
+                    <span className="ml-2 text-blue-500">■ Negative correlation</span>
+                    <span className="text-red-500">■ Positive correlation</span>
+                  </div>
+                </div>
+              ) : (
+                /* Scatter Matrix (SPLOM) */
+                <div className="panel flex-1 min-h-0 flex flex-col gap-2">
+                  <div className="flex items-center justify-between flex-shrink-0">
+                    <span className="text-xs font-semibold text-gray-500">
+                      Scatter Matrix
+                      <Tip text="Each cell shows the scatterplot between two variables. Diagonal shows histogram of each variable. Click a variable label to see its distribution detail on the right. Only numeric columns are included." wide />
+                    </span>
+                    <div className="flex items-center gap-2">
+                      {rawLoading && <span className="text-[10px] text-gray-400 animate-pulse">Loading data…</span>}
+                      <button onClick={exportMatrix}
+                        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 hover:text-indigo-600 hover:border-indigo-300 transition-colors">
+                        ↓ Export CSV
+                      </button>
+                    </div>
+                  </div>
+                  {rawData && Object.keys(rawData).length >= 2 ? (
+                    <Plot
+                      data={[{
+                        type: "splom" as const,
+                        dimensions: Object.keys(rawData).map((col) => ({
+                          label: col,
+                          values: rawData[col],
+                        })),
+                        marker: {
+                          color: "#6366f1",
+                          size: 3,
+                          opacity: 0.45,
+                          line: { color: "#a5b4fc", width: 0.5 },
+                        },
+                        diagonal: { visible: true },
+                        showupperhalf: false,
+                        text: Object.keys(rawData).join(", "),
+                        hovertemplate: "%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<extra></extra>",
+                      } as any]}
+                      layout={{
+                        paper_bgcolor: "transparent",
+                        plot_bgcolor: "#f9fafb",
+                        font: { color: "#374151", size: 10 },
+                        autosize: true,
+                        margin: { t: 20, r: 20, b: 20, l: 20 },
+                        dragmode: "select" as const,
+                      }}
+                      style={{ width: "100%", flex: 1 }}
+                      useResizeHandler
+                      config={{ responsive: true, displayModeBar: false }}
+                      onClickAnnotation={(e: any) => setSelectedVar(e?.annotation?.text ?? null)}
+                    />
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+                      {rawLoading ? "Loading scatter data…" : "Click Compute Matrix first, then switch to Scatter view"}
+                    </div>
+                  )}
+                  <p className="text-[10px] text-gray-400 flex-shrink-0">
+                    Showing {Object.keys(rawData ?? {}).length} numeric variables · up to 3 000 rows · click variable name on plot to see detail
+                  </p>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="panel flex-1 flex items-center justify-center text-gray-400">
+              Select variables and click Compute Matrix
             </div>
-          </>
-        ) : (
-          <div className="panel flex-1 flex items-center justify-center text-gray-400">
-            Select variables and click Compute
-          </div>
-        )}
+          )}
+        </div>
+
+        {/* Variable detail side panel (SPLOM mode) */}
+        {displayMode === "splom" && selectedVar && renderVarDetail(selectedVar)}
       </div>
     </div>
   );

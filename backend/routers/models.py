@@ -44,6 +44,7 @@ def linear_regression(req: LinearRequest):
     model = base.fit(cov_type="HC3", use_t=True) if req.robust_se else base.fit()
 
     coefs = []
+    ci = model.conf_int()
     for var in model.params.index:
         coefs.append({
             "variable": str(var),
@@ -51,9 +52,33 @@ def linear_regression(req: LinearRequest):
             "se": float(model.bse[var]),
             "t": float(model.tvalues[var]),
             "p": float(model.pvalues[var]),
-            "ci_low": float(model.conf_int().loc[var, 0]),
-            "ci_high": float(model.conf_int().loc[var, 1]),
+            "ci_low": float(ci.loc[var, 0]),
+            "ci_high": float(ci.loc[var, 1]),
         })
+
+    # ── Predictor metadata for the interactive prediction panel ──────────────
+    predictor_info: dict = {}
+    for col in req.predictors:
+        if col not in df_full.columns:
+            continue
+        s = df_full[col].dropna()
+        if len(s) == 0:
+            continue
+        if pd.api.types.is_numeric_dtype(s):
+            predictor_info[col] = {
+                "type": "numeric",
+                "min": float(s.min()),
+                "max": float(s.max()),
+                "mean": float(s.mean()),
+                "median": float(s.median()),
+            }
+        else:
+            vc = s.value_counts()
+            predictor_info[col] = {
+                "type": "categorical",
+                "categories": vc.index.astype(str).tolist(),
+                "counts": [int(v) for v in vc.values],
+            }
 
     return {
         "model": f"Linear Regression (OLS){' [Robust SE]' if req.robust_se else ''}",
@@ -68,6 +93,10 @@ def linear_regression(req: LinearRequest):
         "aic": float(model.aic),
         "bic": float(model.bic),
         "coefficients": coefs,
+        "residual_se": float(np.sqrt(model.mse_resid)),
+        "df_resid": int(model.df_resid),
+        "predictors": req.predictors,
+        "predictor_info": predictor_info,
     }
 
 

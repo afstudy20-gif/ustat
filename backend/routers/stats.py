@@ -647,6 +647,20 @@ def get_sparklines(session_id: str):
     return result
 
 
+# ── Raw column values (for SPLOM scatterplot matrix) ─────────────────────────
+
+@router.get("/{session_id}/raw")
+def get_raw_columns(session_id: str, columns: str = ""):
+    df = _get_df(session_id)
+    cols = [c.strip() for c in columns.split(",") if c.strip() in df.columns] if columns else list(df.columns)
+    cols = [c for c in cols if pd.api.types.is_numeric_dtype(df[c])][:12]  # limit to 12 numeric cols
+    result = {}
+    for col in cols:
+        vals = df[col].where(df[col].notna(), other=None).tolist()[:3000]
+        result[col] = vals
+    return result
+
+
 # ── Column Summary (Wizard-style: histogram+QQ or donut+bar) ─────────────────
 
 @router.get("/{session_id}/column_summary")

@@ -700,6 +700,263 @@ function ForestPlot({ result, modelType, outcome }: {
   );
 }
 
+// ── Prediction Panel (interactive marginal effects + predicted value) ─────────
+function PredictionPanel({ result }: { result: any }) {
+  const predictorInfo: Record<string, any> = result.predictor_info ?? {};
+  const coefs: any[] = result.coefficients ?? [];
+  const outcome: string = result.outcome ?? "";
+  const residualSe: number = result.residual_se ?? 0;
+  const dfResid: number = result.df_resid ?? 100;
+
+  // ── t quantile approximation (for PI) ─────────────────────────────────────
+  const tQuantile = (ci: number) => {
+    // good approximation for df > 30; exact for df → ∞
+    if (dfResid > 200) return ci === 0.99 ? 2.576 : ci === 0.95 ? 1.96 : 1.645;
+    const z = ci === 0.99 ? 2.576 : ci === 0.95 ? 1.96 : 1.645;
+    return z * (1 + 1 / (4 * dfResid));  // simple correction
+  };
+
+  // ── Initialize slider values: numeric → median, categorical → first cat ───
+  const initVals = () => {
+    const v: Record<string, number | string> = {};
+    for (const [col, info] of Object.entries(predictorInfo)) {
+      if (info.type === "numeric") v[col] = info.median ?? info.mean ?? 0;
+      else v[col] = info.categories?.[0] ?? "";
+    }
+    return v;
+  };
+  const [vals, setVals] = useState<Record<string, number | string>>(initVals);
+  const [ciLevel, setCiLevel] = useState(0.95);
+  const [showPI, setShowPI] = useState(false);
+  const [sortByCat, setSortByCat] = useState(false);
+
+  // ── Client-side prediction ─────────────────────────────────────────────────
+  const predict = (overrides: Record<string, number | string> = {}) => {
+    const v = { ...vals, ...overrides };
+    let yhat = 0;
+    for (const c of coefs) {
+      const name: string = c.variable;
+      const est: number = c.estimate ?? 0;
+      if (name === "const" || name === "Intercept") {
+        yhat += est;
+      } else if (name in predictorInfo && predictorInfo[name].type === "numeric") {
+        yhat += est * (Number(v[name]) || 0);
+      } else {
+        // Dummy variable — find parent by prefix match
+        const parent = Object.keys(predictorInfo).find(
+          (p) => predictorInfo[p]?.type === "categorical" && name.startsWith(p + "_")
+        );
+        if (parent) {
+          const level = name.slice(parent.length + 1);
+          yhat += est * (String(v[parent]) === level ? 1 : 0);
+        } else {
+          // Numeric predictor whose name is not in predictor_info (shouldn't happen but safe)
+          if (name in v) yhat += est * (Number(v[name]) || 0);
+        }
+      }
+    }
+    return yhat;
+  };
+
+  const currentPred = predict();
+  const tQ = tQuantile(ciLevel);
+  const piHalf = tQ * residualSe * Math.sqrt(1 + 1 / Math.max(result.n ?? 100, 1));
+  const piLow  = currentPred - piHalf;
+  const piHigh = currentPred + piHalf;
+
+  const exportCSV = () => {
+    const rows: string[][] = [
+      ["Variable", "Coefficient", "SE", "t", "p", "CI_low", "CI_high"],
+      ...coefs.map((c: any) => [c.variable, c.estimate, c.se, c.t, c.p, c.ci_low, c.ci_high].map(String)),
+      [],
+      ["Outcome", outcome],
+      ["R²", result.r_squared?.toFixed(4) ?? ""],
+      ["Adj R²", result.adj_r_squared?.toFixed(4) ?? ""],
+      ["N", String(result.n ?? "")],
+      ["Residual SE", residualSe.toFixed(5)],
+      [],
+      ["--- Current Prediction ---"],
+      ...Object.entries(vals).map(([k, v]) => [k, String(v)]),
+      ["Predicted " + outcome, currentPred.toFixed(4)],
+    ];
+    const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `Model_${outcome}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  const numPreds = Object.entries(predictorInfo).filter(([, i]) => i.type === "numeric");
+  const catPreds = Object.entries(predictorInfo).filter(([, i]) => i.type === "categorical");
+
+  // Shared Plotly base layout
+  const plotBase = {
+    paper_bgcolor: "transparent", plot_bgcolor: "#ffffff",
+    font: { color: "#374151", size: 10 },
+    margin: { t: 32, r: 10, b: 44, l: 44 },
+    showlegend: false,
+  };
+
+  return (
+    <div className="panel space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h4 className="font-semibold text-gray-900">
+          Predicted <span className="text-indigo-600">{outcome}</span>
+        </h4>
+        <button
+          onClick={exportCSV}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs text-indigo-600 border border-indigo-200 hover:bg-indigo-50 transition-colors"
+        >
+          ↓ Export Model (CSV)
+        </button>
+      </div>
+
+      {/* Charts grid */}
+      {(numPreds.length > 0 || catPreds.length > 0) && (
+        <div className="grid grid-cols-2 gap-4">
+          {/* Numeric predictor line charts */}
+          {numPreds.map(([col, info]) => {
+            const N = 120;
+            const lo = info.min, hi = info.max;
+            const xs = Array.from({ length: N + 1 }, (_, i) => lo + (hi - lo) * i / N);
+            const ys = xs.map((x) => predict({ [col]: x }));
+            const cx = Number(vals[col]);
+            const cy = predict();
+            return (
+              <div key={col} className="space-y-1">
+                <p className="text-xs font-medium text-gray-600 text-center">
+                  Predicted <em>{outcome}</em> vs. {col}
+                </p>
+                <Plot
+                  data={[
+                    { type: "scatter" as const, mode: "lines" as const, x: xs, y: ys,
+                      line: { color: "#6366f1", width: 2 }, hovertemplate: `${col}: %{x:.2f}<br>Ŷ: %{y:.3f}<extra></extra>` },
+                    ...(showPI ? [{
+                      type: "scatter" as const, mode: "lines" as const,
+                      x: [...xs, ...xs.slice().reverse()],
+                      y: [...ys.map((y) => y + piHalf), ...ys.map((y) => y - piHalf).reverse()],
+                      fill: "toself" as const, fillcolor: "rgba(99,102,241,0.10)",
+                      line: { color: "transparent" }, hoverinfo: "skip" as const, showlegend: false,
+                    }] : []),
+                    { type: "scatter" as const, mode: "markers" as const, x: [cx], y: [cy],
+                      marker: { color: "white", size: 11, line: { color: "#6366f1", width: 2.5 } },
+                      hovertemplate: `${col} = ${cx.toFixed(1)}<br>Ŷ = ${cy.toFixed(3)}<extra></extra>` },
+                  ]}
+                  layout={{
+                    ...plotBase, height: 200, autosize: true,
+                    xaxis: { title: { text: col, font: { size: 10 } }, gridcolor: "#f3f4f6" },
+                    yaxis: { title: { text: outcome, font: { size: 10 } }, gridcolor: "#f3f4f6", zeroline: false },
+                  }}
+                  style={{ width: "100%", height: 200 }}
+                  useResizeHandler
+                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+                />
+                {/* Slider */}
+                <div className="flex items-center gap-2 px-1">
+                  <input
+                    type="number"
+                    value={Number(vals[col]).toFixed(1)}
+                    onChange={(e) => setVals((p) => ({ ...p, [col]: Number(e.target.value) }))}
+                    className="w-16 text-xs border border-gray-300 rounded px-1.5 py-0.5 text-right font-mono"
+                  />
+                  <input
+                    type="range"
+                    min={info.min} max={info.max}
+                    step={(info.max - info.min) / 200}
+                    value={Number(vals[col])}
+                    onChange={(e) => setVals((p) => ({ ...p, [col]: Number(e.target.value) }))}
+                    className="flex-1 accent-indigo-500"
+                  />
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Categorical predictor bar charts */}
+          {catPreds.map(([col, info]) => {
+            const cats: string[] = info.categories ?? [];
+            const preds = cats.map((cat: string) => predict({ [col]: cat }));
+            const selectedCat = String(vals[col]);
+            const pairs = cats.map((cat: string, i: number) => ({ cat, pred: preds[i] }));
+            const sorted = sortByCat ? [...pairs].sort((a, b) => b.pred - a.pred) : pairs;
+            return (
+              <div key={col} className="space-y-1">
+                <p className="text-xs font-medium text-gray-600 text-center">
+                  Predicted <em>{outcome}</em> by {col}
+                </p>
+                <Plot
+                  data={[{
+                    type: "bar" as const,
+                    orientation: "h" as const,
+                    x: sorted.map((p) => p.pred),
+                    y: sorted.map((p) => p.cat),
+                    text: sorted.map((p) => p.pred.toFixed(2)),
+                    textposition: "outside" as const,
+                    marker: {
+                      color: sorted.map((p) => p.cat === selectedCat ? "#ef4444" : "#9ca3af"),
+                    },
+                    hovertemplate: `%{y}: Ŷ = %{x:.4f}<extra></extra>`,
+                  }]}
+                  layout={{
+                    ...plotBase, height: Math.max(160, cats.length * 38 + 60), autosize: true,
+                    xaxis: { title: { text: outcome, font: { size: 10 } }, gridcolor: "#f3f4f6" },
+                    yaxis: { gridcolor: "transparent", zeroline: false, autorange: "reversed" as const },
+                  }}
+                  style={{ width: "100%", height: Math.max(160, cats.length * 38 + 60) }}
+                  useResizeHandler
+                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+                />
+                <div className="flex items-center gap-2 px-1">
+                  <select
+                    value={selectedCat}
+                    onChange={(e) => setVals((p) => ({ ...p, [col]: e.target.value }))}
+                    className="select text-xs flex-1"
+                  >
+                    {cats.map((cat: string) => <option key={cat}>{cat}</option>)}
+                  </select>
+                  <label className="flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" checked={sortByCat} onChange={(e) => setSortByCat(e.target.checked)} className="accent-indigo-500" />
+                    Sort by predicted
+                  </label>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Big predicted value display */}
+      <div className="rounded-xl bg-gray-900 text-white p-6 text-center relative">
+        <p className="text-xs text-gray-400 mb-1">Predicted {outcome} =</p>
+        <p className="text-5xl font-bold tracking-tight">{currentPred.toFixed(2)}</p>
+        {showPI && residualSe > 0 && (
+          <p className="text-sm text-gray-400 mt-2">
+            {(ciLevel * 100).toFixed(0)}% PI: [{piLow.toFixed(2)}, {piHigh.toFixed(2)}]
+          </p>
+        )}
+      </div>
+
+      {/* PI controls */}
+      <div className="flex items-center gap-4 px-1">
+        <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-600">
+          <input type="checkbox" checked={showPI} onChange={(e) => setShowPI(e.target.checked)} className="accent-indigo-500" />
+          Show prediction intervals
+        </label>
+        <input
+          type="range" min={0.80} max={0.99} step={0.01} value={ciLevel}
+          onChange={(e) => setCiLevel(Number(e.target.value))}
+          disabled={!showPI}
+          className={`w-28 accent-indigo-500 ${!showPI ? "opacity-30" : ""}`}
+        />
+        <span className="text-xs text-gray-500 font-mono">%{(ciLevel * 100).toFixed(0)}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Coefficient Detail Panel (Plotly normal distribution on click) ────────────
 function CoefDetailPanel({
   coef, nullHyp, onClose,
@@ -1350,6 +1607,11 @@ export default function ModelsPanel() {
                 )}
                 <p className="text-[10px] text-gray-400 mt-2">Click a row to see the coefficient's sampling distribution.</p>
               </div>
+            )}
+
+            {/* Prediction Panel — linear only */}
+            {model === "linear" && result.predictor_info && Object.keys(result.predictor_info).length > 0 && (
+              <PredictionPanel result={result} />
             )}
 
             {/* Forest plot — logistic or cox */}

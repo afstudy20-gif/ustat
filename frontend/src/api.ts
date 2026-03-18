@@ -45,6 +45,9 @@ export const runCox = (data: object) => api.post("/api/models/survival/cox", dat
 export const getSparklines = (sessionId: string) =>
   api.get(`/api/stats/${sessionId}/sparklines`);
 
+export const getRawColumns = (sessionId: string, columns: string[]) =>
+  api.get(`/api/stats/${sessionId}/raw`, { params: { columns: columns.join(",") } });
+
 export const getMissing = (sessionId: string, columns: string[]) =>
   api.get(`/api/stats/${sessionId}/missing`, { params: { columns: columns.join(",") } });
 
