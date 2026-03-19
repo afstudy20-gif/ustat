@@ -172,7 +172,7 @@ export default function App() {
         {/* Row 1: logo · filename · actions */}
         <div className="flex items-center gap-3 px-4 pt-2 pb-1.5">
           <div className="flex items-center gap-2 flex-shrink-0">
-            <img src="/favicon.svg" alt="uStat logo" className="w-7 h-7 rounded-lg" />
+            <img src="/logo.png" alt="uStat logo" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 text-sm tracking-tight">uStat</span>
           </div>
 

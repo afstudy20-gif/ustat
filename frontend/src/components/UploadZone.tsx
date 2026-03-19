@@ -38,7 +38,7 @@ export default function UploadZone() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-8 p-8 bg-gray-50">
       <div className="flex items-center gap-3">
-        <img src="/favicon.svg" alt="uStat logo" className="w-10 h-10 rounded-xl" />
+        <img src="/logo.png" alt="uStat logo" className="w-10 h-10 rounded-xl object-contain" />
         <div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">uStat</h1>
           <p className="text-xs text-gray-400 leading-none">Statistical Analysis Platform</p>
