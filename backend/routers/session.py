@@ -157,3 +157,29 @@ async def export_dataset(
             media_type="application/octet-stream",
             headers={"Content-Disposition": f'attachment; filename="{base}.sav"'},
         )
+
+
+# ── Select Cases ────────────────────────────────────────────────────────────────
+
+class SelectCasesRequest(BaseModel):
+    conditions: list  # [{column, operator, value, join}]
+
+
+@router.post("/{session_id}/select_cases")
+def select_cases(session_id: str, body: SelectCasesRequest):
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    store.save_filter(session_id, body.conditions)
+    from services.store import _apply_conditions
+    df_filtered = _apply_conditions(df, body.conditions)
+    return {"selected": len(df_filtered), "total": len(df)}
+
+
+@router.delete("/{session_id}/select_cases")
+def clear_cases(session_id: str):
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    store.clear_filter(session_id)
+    return {"selected": len(df), "total": len(df)}

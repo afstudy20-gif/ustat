@@ -1,7 +1,8 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store";
-import type { ColMeta } from "../store";
+import type { ColMeta, CaseCondition, CaseOperator } from "../store";
 import api from "../api";
+import { selectCases, clearCases } from "../api";
 
 // ── Kind cycling ───────────────────────────────────────────────────────────────
 
@@ -18,6 +19,210 @@ const KIND_LABEL: Record<string, string> = {
   numeric: "num", categorical: "cat", boolean: "bool", text: "txt",
 };
 
+// ── Select Cases Modal ──────────────────────────────────────────────────────────
+
+const OPERATORS: { value: CaseOperator; label: string; noValue?: boolean }[] = [
+  { value: "eq",          label: "=" },
+  { value: "ne",          label: "≠" },
+  { value: "gt",          label: ">" },
+  { value: "lt",          label: "<" },
+  { value: "gte",         label: "≥" },
+  { value: "lte",         label: "≤" },
+  { value: "contains",    label: "contains" },
+  { value: "missing",     label: "is missing",     noValue: true },
+  { value: "not_missing", label: "is not missing", noValue: true },
+];
+
+function SelectCasesModal({
+  columns,
+  sessionId,
+  existing,
+  onApply,
+  onClear,
+  onClose,
+}: {
+  columns: ColMeta[];
+  sessionId: string;
+  existing: CaseCondition[];
+  onApply: (conditions: CaseCondition[], selected: number, total: number) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const defaultCond = (): CaseCondition => ({
+    column: columns[0]?.name ?? "",
+    operator: "eq",
+    value: "",
+    join: "AND",
+  });
+
+  const [conditions, setConditions] = useState<CaseCondition[]>(
+    existing.length > 0 ? existing : [defaultCond()]
+  );
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<{ selected: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const updateCond = (i: number, patch: Partial<CaseCondition>) => {
+    setConditions((prev) => prev.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+    setPreview(null);
+  };
+
+  const addCond = () => setConditions((prev) => [...prev, defaultCond()]);
+  const removeCond = (i: number) => setConditions((prev) => prev.filter((_, idx) => idx !== i));
+
+  const handlePreview = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await selectCases(sessionId, conditions);
+      setPreview(res.data);
+    } catch { setError("Preview failed"); }
+    finally { setBusy(false); }
+  };
+
+  const handleApply = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await selectCases(sessionId, conditions);
+      onApply(conditions, res.data.selected, res.data.total);
+    } catch { setError("Apply failed"); }
+    finally { setBusy(false); }
+  };
+
+  const handleClear = async () => {
+    setBusy(true);
+    try {
+      await clearCases(sessionId);
+      onClear();
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl p-6 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Select Cases</h2>
+            <p className="text-xs text-gray-400 mt-0.5">All analyses will use only the selected subset</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100">✕</button>
+        </div>
+
+        {/* Condition rows */}
+        <div className="flex flex-col gap-2">
+          {conditions.map((cond, i) => {
+            const opMeta = OPERATORS.find((o) => o.value === cond.operator);
+            return (
+              <div key={i} className="flex items-center gap-2">
+                {/* AND/OR join (only for rows after the first) */}
+                {i > 0 ? (
+                  <select
+                    value={cond.join}
+                    onChange={(e) => updateCond(i, { join: e.target.value as "AND" | "OR" })}
+                    className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 w-16 bg-white text-gray-700 focus:outline-none focus:border-violet-400"
+                  >
+                    <option value="AND">AND</option>
+                    <option value="OR">OR</option>
+                  </select>
+                ) : (
+                  <div className="w-16 text-center text-xs text-gray-400 font-medium">WHERE</div>
+                )}
+
+                {/* Column */}
+                <select
+                  value={cond.column}
+                  onChange={(e) => updateCond(i, { column: e.target.value })}
+                  className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-violet-400 min-w-0"
+                >
+                  {columns.map((c) => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+
+                {/* Operator */}
+                <select
+                  value={cond.operator}
+                  onChange={(e) => updateCond(i, { operator: e.target.value as CaseOperator })}
+                  className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 w-32 bg-white text-gray-700 focus:outline-none focus:border-violet-400"
+                >
+                  {OPERATORS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+
+                {/* Value */}
+                {!opMeta?.noValue ? (
+                  <input
+                    type="text"
+                    value={cond.value}
+                    onChange={(e) => updateCond(i, { value: e.target.value })}
+                    placeholder="value"
+                    className="w-28 text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white text-gray-700 focus:outline-none focus:border-violet-400"
+                  />
+                ) : (
+                  <div className="w-28" />
+                )}
+
+                {/* Remove */}
+                <button
+                  onClick={() => removeCond(i)}
+                  disabled={conditions.length === 1}
+                  className="p-1.5 text-gray-300 hover:text-red-500 disabled:opacity-30 transition-colors"
+                >✕</button>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add condition */}
+        <button
+          onClick={addCond}
+          className="text-xs text-violet-600 hover:text-violet-800 self-start flex items-center gap-1"
+        >
+          + Add condition
+        </button>
+
+        {/* Preview result */}
+        {preview && (
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 text-sm text-violet-800">
+            <span className="font-bold text-lg">{preview.selected.toLocaleString()}</span>
+            <span className="text-violet-500"> of {preview.total.toLocaleString()} cases match</span>
+            <span className="text-violet-400 text-xs ml-2">
+              ({((preview.selected / preview.total) * 100).toFixed(1)}%)
+            </span>
+          </div>
+        )}
+
+        {error && <p className="text-xs text-red-500">{error}</p>}
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            onClick={handlePreview}
+            disabled={busy}
+            className="px-4 py-2 text-sm border border-violet-300 text-violet-700 rounded-xl hover:bg-violet-50 transition-colors disabled:opacity-50"
+          >
+            Preview
+          </button>
+          <button
+            onClick={handleApply}
+            disabled={busy}
+            className="flex-1 px-4 py-2 text-sm bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-colors disabled:opacity-50 font-medium"
+          >
+            {busy ? "Applying…" : "Apply"}
+          </button>
+          <button
+            onClick={handleClear}
+            disabled={busy}
+            className="px-4 py-2 text-sm border border-gray-200 text-gray-500 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────────
 
 type SortDir = "asc" | "desc";
@@ -26,6 +231,8 @@ export default function DataTable() {
   const session          = useStore((s) => s.session);
   const updateColumnKind = useStore((s) => s.updateColumnKind);
   const updatePreviewCell = useStore((s) => s.updatePreviewCell);
+  const caseFilter       = useStore((s) => s.caseFilter);
+  const setCaseFilter    = useStore((s) => s.setCaseFilter);
 
   const [sortCol,     setSortCol]     = useState<string | null>(null);
   const [sortDir,     setSortDir]     = useState<SortDir>("asc");
@@ -36,6 +243,7 @@ export default function DataTable() {
   const [saving,         setSaving]        = useState(false);
   const [showSaveMenu,   setShowSaveMenu]  = useState(false);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
+  const [showSelectCases, setShowSelectCases] = useState(false);
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
@@ -187,6 +395,22 @@ export default function DataTable() {
 
   return (
     <div className="flex flex-col gap-2 h-full" style={{ minHeight: 0 }}>
+      {showSelectCases && session && (
+        <SelectCasesModal
+          columns={columns}
+          sessionId={session.session_id}
+          existing={caseFilter?.conditions ?? []}
+          onApply={(conditions, selected, total) => {
+            setCaseFilter({ conditions, selected, total });
+            setShowSelectCases(false);
+          }}
+          onClear={() => {
+            setCaseFilter(null);
+            setShowSelectCases(false);
+          }}
+          onClose={() => setShowSelectCases(false)}
+        />
+      )}
 
       {/* ── Toolbar ── */}
       <div className="flex items-center justify-between flex-shrink-0">
@@ -237,6 +461,22 @@ export default function DataTable() {
               <span className={`text-[9px] font-bold rounded-full px-1.5 py-0.5
                 ${showMissingOnly ? "bg-amber-600 text-white" : "bg-amber-200 text-amber-800"}`}>
                 {totalMissingRows}
+              </span>
+            )}
+          </button>
+
+          {/* Select Cases */}
+          <button
+            onClick={() => setShowSelectCases(true)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors
+              ${caseFilter
+                ? "bg-violet-100 text-violet-700 border-violet-400"
+                : "text-gray-500 border-gray-300 hover:text-gray-700 hover:border-gray-400"}`}
+          >
+            ⊂ Cases
+            {caseFilter && (
+              <span className="bg-violet-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5">
+                {caseFilter.selected.toLocaleString()}
               </span>
             )}
           </button>

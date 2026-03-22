@@ -1,6 +1,7 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter } from "lucide-react";
+import { clearCases } from "./api";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
@@ -128,7 +129,7 @@ function SaveBeforeOpenModal({
 }
 
 export default function App() {
-  const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid } = useStore();
+  const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
 
@@ -208,6 +209,25 @@ export default function App() {
             </button>
           </div>
         </div>
+
+        {/* Case filter banner */}
+        {caseFilter && (
+          <div className="flex items-center gap-2 px-4 py-1 bg-violet-50 border-t border-violet-200 text-xs text-violet-700">
+            <Filter size={12} className="flex-shrink-0" />
+            <span className="font-semibold">{caseFilter.selected.toLocaleString()} of {caseFilter.total.toLocaleString()} cases selected</span>
+            <span className="text-violet-400">— all analyses use this subset</span>
+            <button
+              onClick={async () => {
+                if (!session) return;
+                await clearCases(session.session_id);
+                setCaseFilter(null);
+              }}
+              className="ml-auto flex items-center gap-1 px-2 py-0.5 rounded bg-violet-200 hover:bg-violet-300 text-violet-800 font-medium transition-colors"
+            >
+              <X size={10} /> Clear filter
+            </button>
+          </div>
+        )}
 
         {/* Row 2: tab strip — scrollable so tabs are never clipped */}
         <nav className="flex gap-0.5 px-3 pb-1.5 overflow-x-auto"

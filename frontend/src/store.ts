@@ -45,16 +45,33 @@ export const PALETTES: Record<PaletteName, string[]> = {
   jama:      ["#003087","#7f0000","#003b00","#5e0070","#663300","#004c4c","#004080","#380038"],
 };
 
+export type CaseOperator = "eq" | "ne" | "gt" | "lt" | "gte" | "lte" | "contains" | "missing" | "not_missing";
+
+export interface CaseCondition {
+  column: string;
+  operator: CaseOperator;
+  value: string;
+  join: "AND" | "OR";
+}
+
+export interface CaseFilter {
+  conditions: CaseCondition[];
+  selected: number;
+  total: number;
+}
+
 interface AppState {
   session: Session | null;
   activeTab: string;
   showGrid: boolean;
   plotTheme: PlotTheme;
+  caseFilter: CaseFilter | null;
   setSession: (s: Session) => void;
   setActiveTab: (t: string) => void;
   toggleGrid: () => void;
   clearSession: () => void;
   setPlotTheme: (patch: Partial<PlotTheme>) => void;
+  setCaseFilter: (f: CaseFilter | null) => void;
   // Column kind override (data tab kind badge)
   updateColumnKind: (name: string, kind: ColMeta["kind"]) => void;
   // Inline cell editing
@@ -79,8 +96,10 @@ export const useStore = create<AppState>((set) => ({
   showGrid: localStorage.getItem("showGrid") !== "false",
   plotTheme: loadTheme(),
   table1Result: null,
-  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null }),
+  caseFilter: null,
+  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null }),
   setActiveTab: (t) => set({ activeTab: t }),
+  setCaseFilter: (f) => set({ caseFilter: f }),
   toggleGrid: () => set((state) => {
     const next = !state.showGrid;
     localStorage.setItem("showGrid", String(next));
@@ -91,7 +110,7 @@ export const useStore = create<AppState>((set) => ({
     localStorage.setItem("plotTheme", JSON.stringify(next));
     return { plotTheme: next };
   }),
-  clearSession: () => set({ session: null, activeTab: "data", table1Result: null }),
+  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null }),
   updateColumnKind: (name, kind) =>
     set((state) => {
       if (!state.session) return state;

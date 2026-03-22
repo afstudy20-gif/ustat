@@ -72,3 +72,8 @@ export const runCorrelationMatrix = (data: object) => api.post("/api/stats/corre
 export const runICC = (data: object) => api.post("/api/stats/icc", data);
 export const runCohensKappa = (data: object) => api.post("/api/stats/cohens_kappa", data);
 export const runPower       = (data: object) => api.post("/api/stats/power", data);
+
+export const selectCases = (sessionId: string, conditions: object[]) =>
+  api.post(`/api/sessions/${sessionId}/select_cases`, { conditions });
+export const clearCases  = (sessionId: string) =>
+  api.delete(`/api/sessions/${sessionId}/select_cases`);
