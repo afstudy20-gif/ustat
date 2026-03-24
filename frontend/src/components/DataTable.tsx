@@ -505,12 +505,10 @@ export default function DataTable() {
     const base     = (session.filename ?? "data").replace(/\.[^.]+$/, "");
     const colKinds = encodeURIComponent(JSON.stringify(Object.fromEntries(columns.map((c) => [c.name, c.kind]))));
     const url      = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}&col_kinds=${colKinds}`;
-    const a        = document.createElement("a");
-    a.href         = url;
-    a.download     = `${base}.${fmt}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+
+    // Use window.location for direct download — backend returns Content-Disposition: attachment
+    // This won't navigate away because the browser intercepts attachment responses
+    window.location.assign(url);
     setShowSaveMenu(false);
   }, [session.session_id, session.filename, columns]);
 
