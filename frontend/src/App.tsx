@@ -46,32 +46,20 @@ const TABS = [
   { id: "charts",      label: "Charts",      icon: BarChart2 },
 ];
 
-/** Download file from backend via fetch+blob — works on all platforms */
-async function downloadFromBackend(sessionId: string, format: "csv" | "xlsx", originalFilename: string) {
+/** Download file via hidden iframe — most reliable cross-platform method */
+function triggerDownload(sessionId: string, format: "csv" | "xlsx", originalFilename: string) {
   const outName = originalFilename.replace(/\.(csv|xlsx|sav|xls|sas7bdat|dta)$/i, "") + `_export.${format}`;
   const url = `/api/sessions/${sessionId}/export/${format}?filename=${encodeURIComponent(outName)}`;
 
-  const resp = await fetch(url);
-  if (!resp.ok) {
-    const detail = await resp.text();
-    throw new Error(`Server returned ${resp.status}: ${detail}`);
+  // Hidden iframe approach: browser downloads file without navigating away
+  let iframe = document.getElementById("download-iframe") as HTMLIFrameElement | null;
+  if (!iframe) {
+    iframe = document.createElement("iframe");
+    iframe.id = "download-iframe";
+    iframe.style.display = "none";
+    document.body.appendChild(iframe);
   }
-
-  const blob = await resp.blob();
-  // Use window.open as ultimate fallback
-  const blobUrl = URL.createObjectURL(blob);
-  window.open(blobUrl, "_blank");
-  // Also try the standard anchor approach
-  setTimeout(() => {
-    const a = document.createElement("a");
-    a.href = blobUrl;
-    a.download = outName;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
-  }, 100);
+  iframe.src = url;
 }
 
 /** Modal asking user to save before opening a new file */
@@ -129,26 +117,18 @@ function SaveBeforeOpenModal({
 export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
-  const [saveBusy, setSaveBusy] = useState(false);
 
   const handleOpenNew = () => setShowSaveModal(true);
 
-  const handleSave = async (fmt: "csv" | "xlsx") => {
-    if (!session || saveBusy) return;
-    setSaveBusy(true);
-    try {
-      await downloadFromBackend(session.session_id, fmt, session.filename);
-      // Delay clearing session so the download has time to start
-      setTimeout(() => {
-        setShowSaveModal(false);
-        clearSession();
-      }, 2000);
-    } catch (e) {
-      console.error(`Error exporting as ${fmt}:`, e);
-      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSaveBusy(false);
-    }
+  const handleSave = (fmt: "csv" | "xlsx") => {
+    if (!session) return;
+    // Trigger download synchronously — no async, no popup blocker issues
+    triggerDownload(session.session_id, fmt, session.filename);
+    // Give browser time to start the download before clearing
+    setTimeout(() => {
+      setShowSaveModal(false);
+      clearSession();
+    }, 3000);
   };
 
   const handleSkip = () => {
