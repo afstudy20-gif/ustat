@@ -183,3 +183,50 @@ def clear_cases(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     store.clear_filter(session_id)
     return {"selected": len(df), "total": len(df)}
+
+
+# ── File Export ─────────────────────────────────────────────────────────────
+
+@router.get("/{session_id}/export/csv")
+def export_csv(session_id: str, filename: str = Query("export.csv")):
+    """Export session data as CSV file."""
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Stream CSV directly instead of loading into memory
+    csv_buffer = io.StringIO()
+    df.to_csv(csv_buffer, index=False)
+    csv_buffer.seek(0)
+
+    return StreamingResponse(
+        iter([csv_buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@router.get("/{session_id}/export/xlsx")
+def export_xlsx(session_id: str, filename: str = Query("export.xlsx")):
+    """Export session data as XLSX file."""
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        import openpyxl
+        from openpyxl.utils.dataframe import dataframe_to_rows
+    except ImportError:
+        raise HTTPException(status_code=400, detail="XLSX export requires openpyxl")
+
+    # Write to bytes buffer
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="Data", index=False)
+    excel_buffer.seek(0)
+
+    return StreamingResponse(
+        iter([excel_buffer.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )

@@ -46,73 +46,33 @@ const TABS = [
   { id: "charts",      label: "Charts",      icon: BarChart2 },
 ];
 
-/** Save current session preview as CSV and trigger download */
-function saveSessionCSV(session: { filename: string; columns: { name: string }[]; preview: Record<string, unknown>[] }) {
+/** Save current session as CSV via backend endpoint */
+async function saveSessionCSV(session: { filename: string; session_id: string }) {
   try {
-    const headers = session.columns.map((c) => c.name);
-    const rows = session.preview.map((row) =>
-      headers.map((h) => {
-        const v = row[h];
-        return `"${String(v ?? "").replace(/"/g, '""')}"`;
-      }).join(",")
-    );
-    const csv = [headers.map((h) => `"${h}"`).join(","), ...rows].join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-
-    // Try modern approach first, then fallback
-    if (navigator.msSaveBlob) {
-      // IE 10+
-      navigator.msSaveBlob(blob, session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv");
-    } else {
-      // Standard approach
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.href = url;
-      link.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      // Revoke after a longer delay to ensure download starts
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
+    const filename = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
+    const url = `/api/sessions/${session.session_id}/export/csv?filename=${encodeURIComponent(filename)}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   } catch (e) {
-    throw new Error(`CSV download failed: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`CSV export failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
-/** Save current session preview as XLSX and trigger download */
-async function saveSessionXLSX(session: { filename: string; columns: { name: string }[]; preview: Record<string, unknown>[] }) {
+/** Save current session as XLSX via backend endpoint */
+async function saveSessionXLSX(session: { filename: string; session_id: string }) {
   try {
-    const XLSX = (await import("xlsx")).default;
-    const headers = session.columns.map((c) => c.name);
-    const data = [headers, ...session.preview.map((row) => headers.map((h) => {
-      const v = row[h];
-      if (v === null || v === undefined) return null;
-      if (v instanceof Date) return v;
-      if (typeof v === "number" || typeof v === "boolean") return v;
-      return String(v);
-    }))];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Data");
-
-    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-
-    // Try standard approaches
-    if (navigator.msSaveBlob) {
-      // IE 10+
-      navigator.msSaveBlob(blob, session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx");
-    } else {
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-      link.href = url;
-      link.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }
+    const filename = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
+    const url = `/api/sessions/${session.session_id}/export/xlsx?filename=${encodeURIComponent(filename)}`;
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   } catch (e) {
     throw new Error(`XLSX export failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -181,29 +141,21 @@ export default function App() {
     if (!session || saveBusy) return;
     setSaveBusy(true);
     try {
-      if (fmt === "csv") {
-        // Trigger download immediately (synchronous) to preserve user interaction context
-        saveSessionCSV(session);
-        setShowSaveModal(false);
-        clearSession();
-        setSaveBusy(false);
-      } else {
-        // XLSX requires async import, but trigger download immediately when available
-        saveSessionXLSX(session)
-          .then(() => {
-            setShowSaveModal(false);
-            clearSession();
-          })
-          .catch((e) => {
-            console.error(`Error saving as ${fmt}:`, e);
-            alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
-          })
-          .finally(() => {
-            setSaveBusy(false);
-          });
-      }
+      // Both CSV and XLSX now use backend endpoints
+      (fmt === "csv" ? saveSessionCSV(session) : saveSessionXLSX(session))
+        .then(() => {
+          setShowSaveModal(false);
+          clearSession();
+        })
+        .catch((e) => {
+          console.error(`Error exporting as ${fmt}:`, e);
+          alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
+        })
+        .finally(() => {
+          setSaveBusy(false);
+        });
     } catch (e) {
-      console.error(`Error saving as ${fmt}:`, e);
+      console.error(`Error exporting as ${fmt}:`, e);
       alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
       setSaveBusy(false);
     }
