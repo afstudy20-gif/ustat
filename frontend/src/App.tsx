@@ -46,36 +46,32 @@ const TABS = [
   { id: "charts",      label: "Charts",      icon: BarChart2 },
 ];
 
-/** Save current session as CSV via backend endpoint */
-async function saveSessionCSV(session: { filename: string; session_id: string }) {
-  try {
-    const filename = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
-    const url = `/api/sessions/${session.session_id}/export/csv?filename=${encodeURIComponent(filename)}`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  } catch (e) {
-    throw new Error(`CSV export failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-}
+/** Download file from backend via fetch+blob — works on all platforms */
+async function downloadFromBackend(sessionId: string, format: "csv" | "xlsx", originalFilename: string) {
+  const outName = originalFilename.replace(/\.(csv|xlsx|sav|xls|sas7bdat|dta)$/i, "") + `_export.${format}`;
+  const url = `/api/sessions/${sessionId}/export/${format}?filename=${encodeURIComponent(outName)}`;
 
-/** Save current session as XLSX via backend endpoint */
-async function saveSessionXLSX(session: { filename: string; session_id: string }) {
-  try {
-    const filename = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
-    const url = `/api/sessions/${session.session_id}/export/xlsx?filename=${encodeURIComponent(filename)}`;
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  } catch (e) {
-    throw new Error(`XLSX export failed: ${e instanceof Error ? e.message : String(e)}`);
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    const detail = await resp.text();
+    throw new Error(`Server returned ${resp.status}: ${detail}`);
   }
+
+  const blob = await resp.blob();
+  // Use window.open as ultimate fallback
+  const blobUrl = URL.createObjectURL(blob);
+  window.open(blobUrl, "_blank");
+  // Also try the standard anchor approach
+  setTimeout(() => {
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = outName;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+  }, 100);
 }
 
 /** Modal asking user to save before opening a new file */
@@ -137,26 +133,20 @@ export default function App() {
 
   const handleOpenNew = () => setShowSaveModal(true);
 
-  const handleSave = (fmt: "csv" | "xlsx") => {
+  const handleSave = async (fmt: "csv" | "xlsx") => {
     if (!session || saveBusy) return;
     setSaveBusy(true);
     try {
-      // Both CSV and XLSX now use backend endpoints
-      (fmt === "csv" ? saveSessionCSV(session) : saveSessionXLSX(session))
-        .then(() => {
-          setShowSaveModal(false);
-          clearSession();
-        })
-        .catch((e) => {
-          console.error(`Error exporting as ${fmt}:`, e);
-          alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
-        })
-        .finally(() => {
-          setSaveBusy(false);
-        });
+      await downloadFromBackend(session.session_id, fmt, session.filename);
+      // Delay clearing session so the download has time to start
+      setTimeout(() => {
+        setShowSaveModal(false);
+        clearSession();
+      }, 2000);
     } catch (e) {
       console.error(`Error exporting as ${fmt}:`, e);
-      alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
+      alert(`Export failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
       setSaveBusy(false);
     }
   };
