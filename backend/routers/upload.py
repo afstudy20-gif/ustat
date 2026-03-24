@@ -21,17 +21,23 @@ _DATE_PATTERNS = [
 ]
 
 def _detect_kind(series: pd.Series) -> str:
-    """Detect column kind with date/time support."""
+    """Detect column kind with date/time and binary auto-detection."""
     dtype = str(series.dtype)
 
     # Already a datetime dtype (pandas parsed it)
     if "datetime" in dtype or "timedelta" in dtype:
         return "date"
 
-    if dtype.startswith("int") or dtype.startswith("float"):
-        return "numeric"
     if dtype == "bool":
-        return "boolean"
+        return "categorical"  # treat bool as categorical
+
+    if dtype.startswith("int") or dtype.startswith("float"):
+        # Binary detection: if only 2 unique non-null values (typically 0/1)
+        # → treat as categorical (e.g. SEX, DM, EXITUS)
+        unique_vals = set(series.dropna().unique())
+        if len(unique_vals) <= 2:
+            return "categorical"
+        return "numeric"
 
     # For object/string columns: check if values look like dates/times
     sample = series.dropna().head(50).astype(str)
@@ -39,6 +45,11 @@ def _detect_kind(series: pd.Series) -> str:
         matches = sum(1 for v in sample if any(p.match(v.strip()) for p in _DATE_PATTERNS))
         if matches / len(sample) >= 0.7:  # ≥70% match → date
             return "date"
+
+    # String binary detection: Yes/No, True/False, M/F, etc.
+    unique_str = set(series.dropna().astype(str).str.strip().str.lower().unique())
+    if len(unique_str) <= 2:
+        return "categorical"
 
     n_unique = series.nunique()
     return "categorical" if n_unique <= 50 else "text"

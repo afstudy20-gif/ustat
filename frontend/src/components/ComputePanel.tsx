@@ -26,7 +26,7 @@ import { Tip } from "./Tip";
 interface ComputeResult {
   name: string;
   dtype: string;
-  kind: "numeric" | "categorical" | "boolean" | "text";
+  kind: "numeric" | "categorical" | "text" | "date";
   preview_values: (number | string | null)[];
   n_computed: number;
   n_missing: number;

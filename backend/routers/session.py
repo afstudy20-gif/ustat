@@ -127,7 +127,7 @@ async def export_dataset(
             if kind == "date":
                 variable_measure[col] = "scale"
                 # Keep as string for SPSS — dates stored as text labels
-            elif kind in ("categorical", "boolean", "text"):
+            elif kind in ("categorical", "text"):
                 variable_measure[col] = "nominal"
                 # Numeric columns marked as categorical → add value labels so
                 # SPSS knows the numbers map to categories

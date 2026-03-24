@@ -509,18 +509,18 @@ function StatBadge({ label, value }: { label: string; value: string | number }) 
 
 // ── Main panel ───────────────────────────────────────────────────────────────
 
-const KIND_CYCLE: Record<string, "numeric" | "categorical" | "boolean" | "text"> = {
+const KIND_CYCLE: Record<string, "numeric" | "categorical" | "text" | "date"> = {
   numeric: "categorical",
-  categorical: "boolean",
-  boolean: "text",
-  text: "numeric",
+  categorical: "text",
+  text: "date",
+  date: "numeric",
 };
 
 const KIND_STYLE: Record<string, { label: string; cls: string }> = {
   numeric:     { label: "N", cls: "bg-blue-100 text-blue-700" },
   categorical: { label: "C", cls: "bg-purple-100 text-purple-700" },
-  boolean:     { label: "B", cls: "bg-green-100 text-green-700" },
   text:        { label: "T", cls: "bg-gray-100 text-gray-500" },
+  date:        { label: "D", cls: "bg-purple-100 text-purple-700" },
 };
 
 export default function DescriptivePanel() {

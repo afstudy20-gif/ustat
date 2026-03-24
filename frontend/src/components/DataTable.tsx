@@ -6,18 +6,17 @@ import { selectCases, clearCases, getUniqueValues } from "../api";
 
 // ── Kind cycling ───────────────────────────────────────────────────────────────
 
-const KIND_CYCLE: ColMeta["kind"][] = ["numeric", "categorical", "boolean", "text", "date"];
+const KIND_CYCLE: ColMeta["kind"][] = ["numeric", "categorical", "text", "date"];
 
 const KIND_STYLE: Record<string, string> = {
   numeric:     "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200",
   categorical: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-200",
-  boolean:     "bg-green-100 text-green-700 border-green-300 hover:bg-green-200",
   text:        "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200",
   date:        "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200",
 };
 
 const KIND_LABEL: Record<string, string> = {
-  numeric: "num", categorical: "cat", boolean: "bool", text: "txt", date: "date",
+  numeric: "num", categorical: "cat", text: "txt", date: "date",
 };
 
 // ── Select Cases Modal ──────────────────────────────────────────────────────────

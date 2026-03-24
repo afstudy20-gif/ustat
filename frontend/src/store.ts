@@ -3,7 +3,7 @@ import { create } from "zustand";
 export interface ColMeta {
   name: string;
   dtype: string;
-  kind: "numeric" | "categorical" | "boolean" | "text" | "date";
+  kind: "numeric" | "categorical" | "text" | "date";
 }
 
 export interface Session {
