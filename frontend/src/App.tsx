@@ -61,8 +61,12 @@ function saveSessionCSV(session: { filename: string; columns: { name: string }[]
   const a = document.createElement("a");
   a.href = url;
   a.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
-  a.click();
-  URL.revokeObjectURL(url);
+  a.style.display = "none";
+  document.body.appendChild(a);
+  // Use dispatchEvent instead of click() for better macOS compatibility
+  a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 500);
 }
 
 /** Save current session preview as XLSX and trigger download */
@@ -72,7 +76,6 @@ async function saveSessionXLSX(session: { filename: string; columns: { name: str
     const headers = session.columns.map((c) => c.name);
     const data = [headers, ...session.preview.map((row) => headers.map((h) => {
       const v = row[h];
-      // Handle dates, numbers, and null values properly
       if (v === null || v === undefined) return null;
       if (v instanceof Date) return v;
       if (typeof v === "number" || typeof v === "boolean") return v;
@@ -81,7 +84,20 @@ async function saveSessionXLSX(session: { filename: string; columns: { name: str
     const ws = XLSX.utils.aoa_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Data");
-    XLSX.writeFile(wb, session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx");
+
+    // Use write() + manual download instead of writeFile() for better macOS compatibility
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    // Use dispatchEvent instead of click() for better macOS compatibility
+    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 500);
   } catch (e) {
     throw new Error(`XLSX export failed: ${e instanceof Error ? e.message : String(e)}`);
   }
