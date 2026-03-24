@@ -278,18 +278,20 @@ function SelectCasesModal({
                             width: "100%",
                             textAlign: "left",
                             fontSize: 12,
-                            padding: "5px 10px",
-                            borderRadius: 8,
-                            border: isSelected ? "1px solid #7c3aed" : "1px solid #e5e7eb",
-                            background: isSelected ? "#7c3aed" : "#f9fafb",
-                            color: isSelected ? "#ffffff" : "#111827",
-                            fontWeight: isSelected ? 600 : 400,
+                            padding: "8px 10px",
+                            borderRadius: 6,
+                            border: isSelected ? "1.5px solid #7c3aed" : "1px solid #d1d5db",
+                            background: isSelected ? "#7c3aed" : "#ffffff",
+                            color: isSelected ? "#ffffff" : "#1f2937",
+                            fontWeight: isSelected ? 600 : 500,
                             cursor: "pointer",
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
                             boxSizing: "border-box",
+                            transition: "all 0.15s",
                           }}
+                          title={val}
                         >
                           {val}
                         </button>
