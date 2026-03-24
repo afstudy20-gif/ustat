@@ -1478,7 +1478,7 @@ def run_power(req: PowerRequest):
     import numpy as np
     from scipy.stats import norm
     from statsmodels.stats.power import (
-        TTestIndPower, TTestOneSamplePower,
+        TTestIndPower, TTestPower,
         FTestAnovaPower, NormalIndPower, GofChisquarePower,
     )
 
@@ -1523,7 +1523,7 @@ def run_power(req: PowerRequest):
 
     # ── One-sample / paired t-test ─────────────────────────────────────────────
     elif req.test == "t_one":
-        ana = TTestOneSamplePower()
+        ana = TTestPower()
         def pw(n): return ana.solve_power(effect_size=req.effect_size, nobs=n, alpha=a, power=None, alternative=alt)
 
         if req.solve_for == "n":
