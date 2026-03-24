@@ -48,25 +48,36 @@ const TABS = [
 
 /** Save current session preview as CSV and trigger download */
 function saveSessionCSV(session: { filename: string; columns: { name: string }[]; preview: Record<string, unknown>[] }) {
-  const headers = session.columns.map((c) => c.name);
-  const rows = session.preview.map((row) =>
-    headers.map((h) => {
-      const v = row[h];
-      return `"${String(v ?? "").replace(/"/g, '""')}"`;
-    }).join(",")
-  );
-  const csv = [headers.map((h) => `"${h}"`).join(","), ...rows].join("\r\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
-  a.style.display = "none";
-  document.body.appendChild(a);
-  // Use dispatchEvent instead of click() for better macOS compatibility
-  a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 500);
+  try {
+    const headers = session.columns.map((c) => c.name);
+    const rows = session.preview.map((row) =>
+      headers.map((h) => {
+        const v = row[h];
+        return `"${String(v ?? "").replace(/"/g, '""')}"`;
+      }).join(",")
+    );
+    const csv = [headers.map((h) => `"${h}"`).join(","), ...rows].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+
+    // Try modern approach first, then fallback
+    if (navigator.msSaveBlob) {
+      // IE 10+
+      navigator.msSaveBlob(blob, session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv");
+    } else {
+      // Standard approach
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+      link.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.csv";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      // Revoke after a longer delay to ensure download starts
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  } catch (e) {
+    throw new Error(`CSV download failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Save current session preview as XLSX and trigger download */
@@ -85,19 +96,23 @@ async function saveSessionXLSX(session: { filename: string; columns: { name: str
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Data");
 
-    // Use write() + manual download instead of writeFile() for better macOS compatibility
     const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
     const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
-    a.style.display = "none";
-    document.body.appendChild(a);
-    // Use dispatchEvent instead of click() for better macOS compatibility
-    a.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 500);
+
+    // Try standard approaches
+    if (navigator.msSaveBlob) {
+      // IE 10+
+      navigator.msSaveBlob(blob, session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx");
+    } else {
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.href = url;
+      link.download = session.filename.replace(/\.(csv|xlsx|sav|xls)$/i, "") + "_export.xlsx";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
   } catch (e) {
     throw new Error(`XLSX export failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -162,18 +177,34 @@ export default function App() {
 
   const handleOpenNew = () => setShowSaveModal(true);
 
-  const handleSave = async (fmt: "csv" | "xlsx") => {
+  const handleSave = (fmt: "csv" | "xlsx") => {
     if (!session || saveBusy) return;
     setSaveBusy(true);
     try {
-      if (fmt === "csv") saveSessionCSV(session);
-      else await saveSessionXLSX(session);
-      setShowSaveModal(false);
-      clearSession();
+      if (fmt === "csv") {
+        // Trigger download immediately (synchronous) to preserve user interaction context
+        saveSessionCSV(session);
+        setShowSaveModal(false);
+        clearSession();
+        setSaveBusy(false);
+      } else {
+        // XLSX requires async import, but trigger download immediately when available
+        saveSessionXLSX(session)
+          .then(() => {
+            setShowSaveModal(false);
+            clearSession();
+          })
+          .catch((e) => {
+            console.error(`Error saving as ${fmt}:`, e);
+            alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
+          })
+          .finally(() => {
+            setSaveBusy(false);
+          });
+      }
     } catch (e) {
       console.error(`Error saving as ${fmt}:`, e);
       alert(`Failed to export as ${fmt.toUpperCase()}: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
       setSaveBusy(false);
     }
   };
