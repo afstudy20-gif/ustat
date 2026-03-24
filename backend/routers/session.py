@@ -77,25 +77,24 @@ async def export_dataset(
     # Strip any extension the user might have included
     base = filename.rsplit(".", 1)[0] if "." in filename else filename
 
+    # Build Content-Disposition header safely for non-ASCII filenames (Turkish, etc.)
+    from urllib.parse import quote
+    ascii_base = base.encode("ascii", errors="replace").decode("ascii")  # fallback for latin-1
+    utf8_base = quote(base, safe="")  # RFC 5987 percent-encoded
+    def _cd(ext: str) -> dict:
+        return {"Content-Disposition": f"attachment; filename=\"{ascii_base}.{ext}\"; filename*=UTF-8''{utf8_base}.{ext}"}
+
     if fmt == "csv":
         buf = io.StringIO()
         df.to_csv(buf, index=False)
         content = buf.getvalue().encode("utf-8-sig")  # BOM for Excel compat
-        return Response(
-            content=content,
-            media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{base}.csv"'},
-        )
+        return Response(content=content, media_type="text/csv", headers=_cd("csv"))
 
     if fmt == "tsv":
         buf = io.StringIO()
         df.to_csv(buf, index=False, sep="\t")
         content = buf.getvalue().encode("utf-8-sig")
-        return Response(
-            content=content,
-            media_type="text/tab-separated-values",
-            headers={"Content-Disposition": f'attachment; filename="{base}.tsv"'},
-        )
+        return Response(content=content, media_type="text/tab-separated-values", headers=_cd("tsv"))
 
     if fmt == "xlsx":
         buf = io.BytesIO()
@@ -105,7 +104,7 @@ async def export_dataset(
         return Response(
             content=buf.read(),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{base}.xlsx"'},
+            headers=_cd("xlsx"),
         )
 
     if fmt == "sav":
@@ -152,11 +151,7 @@ async def export_dataset(
         finally:
             os.unlink(tmp_path)
 
-        return Response(
-            content=content,
-            media_type="application/octet-stream",
-            headers={"Content-Disposition": f'attachment; filename="{base}.sav"'},
-        )
+        return Response(content=content, media_type="application/octet-stream", headers=_cd("sav"))
 
 
 # ── Select Cases ────────────────────────────────────────────────────────────────
