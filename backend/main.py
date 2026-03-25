@@ -30,7 +30,7 @@ app.include_router(compute.router, prefix="/api/compute", tags=["compute"])
 
 @app.get("/api/health")
 def health():
-    """Health check with memory usage stats."""
+    """Lightweight health check — no expensive deep memory scan."""
     result: dict = {"status": "ok", "active_sessions": len(store.list_sessions())}
 
     if psutil:
@@ -40,14 +40,6 @@ def health():
             "process_rss_mb": round(mem_info.rss / (1024 * 1024), 1),
             "process_percent": round(process.memory_percent(), 1),
         }
-
-    # DataFrame memory
-    df_mb = 0.0
-    for sid in store.list_sessions():
-        df = store.get(sid)
-        if df is not None:
-            df_mb += df.memory_usage(deep=True).sum() / (1024 * 1024)
-    result["dataframe_memory_mb"] = round(df_mb, 2)
 
     return result
 

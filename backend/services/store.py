@@ -9,8 +9,8 @@ _filters: Dict[str, List[dict]] = {}
 _lock = Lock()
 
 # Session configuration
-SESSION_TTL_SECONDS = 3600  # 1 hour
-MAX_SESSIONS = 50  # Limit concurrent sessions
+SESSION_TTL_SECONDS = 1800  # 30 minutes
+MAX_SESSIONS = 20  # Limit concurrent sessions
 _last_cleanup = time.time()
 
 
