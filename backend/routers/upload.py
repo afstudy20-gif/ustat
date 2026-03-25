@@ -22,6 +22,7 @@ _DATE_PATTERNS = [
 
 def _detect_kind(series: pd.Series) -> str:
     """Detect column kind with date/time and binary auto-detection."""
+    import datetime as _dt
     dtype = str(series.dtype)
 
     # Already a datetime dtype (pandas parsed it)
@@ -38,6 +39,14 @@ def _detect_kind(series: pd.Series) -> str:
         if len(unique_vals) <= 2:
             return "categorical"
         return "numeric"
+
+    # Object column: check for datetime.time / datetime.date / datetime.datetime objects
+    # (SPSS/SAS often store these as Python objects, not pandas datetime)
+    sample_vals = series.dropna().head(20)
+    if len(sample_vals) > 0:
+        first_nonnull = sample_vals.iloc[0]
+        if isinstance(first_nonnull, (_dt.time, _dt.date, _dt.datetime)):
+            return "date"
 
     # For object/string columns: check if values look like dates/times
     sample = series.dropna().head(50).astype(str)
