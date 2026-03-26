@@ -526,6 +526,9 @@ const KIND_STYLE: Record<string, { label: string; cls: string }> = {
 export default function DescriptivePanel() {
   const session = useStore((s) => s.session);
   const updateColumnKind = useStore((s) => s.updateColumnKind);
+  const reorderColumns   = useStore((s) => s.reorderColumns);
+  const [dragIdx,  setDragIdx]  = useState<number | null>(null);
+  const [dropIdx,  setDropIdx]  = useState<number | null>(null);
   const [colMeta, setColMeta] = useState<any[]>([]);
   const [sparklines, setSparklines] = useState<Record<string, SparkData>>({});
   const [selected, setSelected] = useState<string | null>(null);
@@ -602,14 +605,25 @@ export default function DescriptivePanel() {
           {filtered.map((c) => {
             const meta = colMeta.find((m) => m.name === c.name);
             const isActive = selected === c.name;
+            const realIdx = session!.columns.findIndex((sc) => sc.name === c.name);
+            const isDragOver = dropIdx === realIdx && dragIdx !== realIdx;
             return (
               <div
                 key={c.name}
+                draggable
+                onDragStart={(e) => { setDragIdx(realIdx); e.dataTransfer.effectAllowed = "move"; }}
+                onDragOver={(e) => { e.preventDefault(); setDropIdx(realIdx); }}
+                onDragLeave={() => { if (dropIdx === realIdx) setDropIdx(null); }}
+                onDrop={(e) => { e.preventDefault(); if (dragIdx !== null && dragIdx !== realIdx) reorderColumns(dragIdx, realIdx); setDragIdx(null); setDropIdx(null); }}
+                onDragEnd={() => { setDragIdx(null); setDropIdx(null); }}
                 onClick={() => { setView("distribution"); loadSummary(c.name); }}
-                className={`flex items-center justify-between px-3 py-2 cursor-pointer border-b border-gray-100 transition-colors
+                className={`flex items-center justify-between px-3 py-2 cursor-grab active:cursor-grabbing border-b border-gray-100 transition-colors select-none
+                  ${dragIdx === realIdx ? "opacity-40" : ""}
+                  ${isDragOver ? "border-t-2 border-t-indigo-500" : ""}
                   ${isActive ? "bg-indigo-50 border-l-2 border-l-indigo-500" : "hover:bg-gray-50"}`}
               >
                 <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-gray-300 text-[8px] flex-shrink-0">⠿</span>
                   <span
                     title={`Type: ${c.kind} — click to change`}
                     onClick={(e) => {
