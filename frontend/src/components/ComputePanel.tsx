@@ -40,13 +40,16 @@ const TABS = ["Formula", "Transform", "Recode", "Clinical"] as const;
 type Tab = (typeof TABS)[number];
 
 const TRANSFORMS = [
-  { id: "ln",     label: "Ln (natural log)",   note: "Negative/zero values → NaN" },
-  { id: "log10",  label: "Log₁₀",              note: "Negative/zero values → NaN" },
-  { id: "sqrt",   label: "√ Square root",       note: "Negative values → NaN" },
-  { id: "square", label: "x² Square",           note: "" },
-  { id: "exp",    label: "eˣ Exponential",      note: "Large values may overflow" },
-  { id: "abs",    label: "|x| Absolute value",  note: "" },
-  { id: "zscore", label: "Z-score (standardise)", note: "Mean=0, SD=1" },
+  { id: "ln",       label: "Ln (natural log)",      note: "Negative/zero values → NaN" },
+  { id: "log10",    label: "Log₁₀",                 note: "Negative/zero values → NaN" },
+  { id: "sqrt",     label: "√ Square root",          note: "Negative values → NaN" },
+  { id: "square",   label: "x² Square",              note: "" },
+  { id: "exp",      label: "eˣ Exponential",         note: "Large values may overflow" },
+  { id: "abs",      label: "|x| Absolute value",     note: "" },
+  { id: "zscore",   label: "Z-score (standardise)",  note: "Mean=0, SD=1" },
+  { id: "tertile",  label: "Tertile (3 groups)",     note: "Equal-sized groups: 1=low, 2=mid, 3=high" },
+  { id: "quartile", label: "Quartile (4 groups)",    note: "Equal-sized groups: 1=Q1, 2=Q2, 3=Q3, 4=Q4" },
+  { id: "median_split", label: "Median split (2 groups)", note: "Below median=0, Above median=1" },
 ];
 
 const OPS = ["<", "<=", ">", ">=", "==", "!="] as const;

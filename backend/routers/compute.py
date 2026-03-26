@@ -101,13 +101,16 @@ def formula_compute(session_id: str, req: FormulaRequest):
 # ── 2. Transformations ────────────────────────────────────────────────────────
 
 TRANSFORMS = {
-    "ln":     "Ln (natural log)",
-    "log10":  "Log₁₀",
-    "sqrt":   "√ Square root",
-    "square": "x² Square",
-    "exp":    "eˣ Exponential",
-    "abs":    "|x| Absolute value",
-    "zscore": "Z-score",
+    "ln":           "Ln (natural log)",
+    "log10":        "Log₁₀",
+    "sqrt":         "√ Square root",
+    "square":       "x² Square",
+    "exp":          "eˣ Exponential",
+    "abs":          "|x| Absolute value",
+    "zscore":       "Z-score",
+    "tertile":      "Tertile (3 groups)",
+    "quartile":     "Quartile (4 groups)",
+    "median_split": "Median split (2 groups)",
 }
 
 
@@ -147,6 +150,13 @@ def transform_compute(session_id: str, req: TransformRequest):
         if sd == 0:
             raise HTTPException(status_code=422, detail="Standard deviation is 0 — cannot compute Z-score for a constant column")
         df[new_col] = (col - mu) / sd
+    elif req.transform == "tertile":
+        df[new_col] = pd.qcut(col, q=3, labels=[1, 2, 3], duplicates="drop").astype(float)
+    elif req.transform == "quartile":
+        df[new_col] = pd.qcut(col, q=4, labels=[1, 2, 3, 4], duplicates="drop").astype(float)
+    elif req.transform == "median_split":
+        med = col.median()
+        df[new_col] = (col > med).astype(float)  # 0 = ≤ median, 1 = > median
 
     store.save(session_id, df)
     return _build_result(df, new_col)
