@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info } from "lucide-react";
 import { clearCases } from "./api";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -114,9 +114,183 @@ function SaveBeforeOpenModal({
   );
 }
 
+const ABOUT_SECTIONS = [
+  {
+    title: "Hypothesis Testing",
+    items: [
+      ["Independent t-test", "scipy.stats.ttest_ind"],
+      ["Paired t-test", "scipy.stats.ttest_rel"],
+      ["Mann-Whitney U", "scipy.stats.mannwhitneyu"],
+      ["Wilcoxon signed-rank", "scipy.stats.wilcoxon"],
+      ["One-way ANOVA", "scipy.stats.f_oneway"],
+      ["Kruskal-Wallis H", "scipy.stats.kruskal"],
+      ["Chi-square test", "scipy.stats.chi2_contingency"],
+      ["Fisher's exact test", "scipy.stats.fisher_exact"],
+    ],
+  },
+  {
+    title: "Normality & Diagnostics",
+    items: [
+      ["Shapiro-Wilk (n \u2264 2000)", "scipy.stats.shapiro"],
+      ["Lilliefors (n > 2000)", "statsmodels.stats.diagnostic.lilliefors"],
+      ["Skewness (CLT bypass)", "scipy.stats.skew"],
+      ["Levene's test", "scipy.stats.levene"],
+    ],
+  },
+  {
+    title: "Correlation & Agreement",
+    items: [
+      ["Pearson r", "scipy.stats.pearsonr"],
+      ["Spearman \u03C1", "scipy.stats.spearmanr"],
+      ["ICC", "statsmodels (mixed model)"],
+      ["Cohen's Kappa", "sklearn.metrics.cohen_kappa_score"],
+    ],
+  },
+  {
+    title: "Regression Models",
+    items: [
+      ["Linear (OLS)", "statsmodels.api.OLS"],
+      ["Logistic", "statsmodels.api.Logit"],
+      ["Poisson", "statsmodels.genmod.GLM (Poisson)"],
+      ["Negative Binomial", "statsmodels.genmod.GLM (NegBin)"],
+      ["Gamma", "statsmodels.genmod.GLM (Gamma)"],
+      ["Polynomial", "statsmodels.api.OLS (poly terms)"],
+      ["RCS dose-response", "statsmodels.api.Logit + custom spline basis"],
+    ],
+  },
+  {
+    title: "Mixed Models & GEE",
+    items: [
+      ["Linear Mixed Model (LMM)", "statsmodels.formula.api.mixedlm"],
+      ["GEE (binary clustered)", "statsmodels.genmod.GEE (Binomial)"],
+    ],
+  },
+  {
+    title: "Survival Analysis",
+    items: [
+      ["Kaplan-Meier", "lifelines.KaplanMeierFitter"],
+      ["Log-rank test", "lifelines.statistics.logrank_test"],
+      ["Cox Proportional Hazards", "lifelines.CoxPHFitter"],
+    ],
+  },
+  {
+    title: "ROC & Diagnostic Accuracy",
+    items: [
+      ["ROC curve & AUC", "sklearn.metrics.roc_curve, roc_auc_score"],
+      ["Youden's index / optimal cut-off", "numpy (argmax J = sens + spec - 1)"],
+      ["DeLong test (AUC comparison)", "Custom implementation (Mann-Whitney placements)"],
+      ["95% CI of AUC", "DeLong variance-covariance matrix"],
+    ],
+  },
+  {
+    title: "Power Analysis",
+    items: [
+      ["Two-sample t-test", "statsmodels.stats.power.TTestIndPower"],
+      ["Paired t-test", "statsmodels.stats.power.TTestPower"],
+      ["ANOVA (F-test)", "statsmodels.stats.power.FTestAnovaPower"],
+      ["Chi-square", "statsmodels.stats.power.GofChisquarePower"],
+      ["Correlation", "statsmodels.stats.power.NormalIndPower"],
+      ["Survival (log-rank)", "scipy.stats.norm (Schoenfeld formula)"],
+    ],
+  },
+  {
+    title: "Propensity Score Matching",
+    items: [
+      ["Logistic PS model", "sklearn.linear_model.LogisticRegression"],
+      ["Nearest-neighbor matching", "sklearn.neighbors.NearestNeighbors (KD-tree)"],
+      ["SMD (balance check)", "Custom (Austin 2011 formula)"],
+      ["Outcome analysis", "statsmodels.api.Logit (matched cohort)"],
+    ],
+  },
+  {
+    title: "Data I/O",
+    items: [
+      ["CSV", "pandas.read_csv"],
+      ["Excel (.xlsx/.xls)", "pandas.read_excel (openpyxl)"],
+      ["SPSS (.sav)", "pyreadstat.read_sav"],
+      ["SAS (.sas7bdat)", "pyreadstat.read_sas7bdat"],
+      ["Stata (.dta)", "pyreadstat.read_dta"],
+      ["Export XLSX", "openpyxl"],
+      ["Export SPSS", "pyreadstat.write_sav"],
+    ],
+  },
+  {
+    title: "Compute & Transform",
+    items: [
+      ["Formula engine", "pandas.DataFrame.eval"],
+      ["Recode (IF-THEN)", "numpy.select"],
+      ["Tertile / Quartile", "pandas.qcut"],
+      ["Z-score, Ln, Log, Sqrt, etc.", "numpy / scipy"],
+      ["Clinical scores (15+)", "Custom implementations (BMI, eGFR, CHA\u2082DS\u2082-VASc, GRACE, etc.)"],
+    ],
+  },
+  {
+    title: "Visualization",
+    items: [
+      ["All interactive charts", "Plotly.js (react-plotly.js)"],
+      ["Frontend framework", "React 18 + TypeScript + Vite"],
+      ["Styling", "Tailwind CSS"],
+      ["Backend framework", "FastAPI + Uvicorn"],
+    ],
+  },
+];
+
+function AboutModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <img src="/logo.png" alt="uSTAT" className="w-10 h-10 object-contain" />
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">uSTAT</h2>
+              <p className="text-xs text-gray-400">Statistical Analysis Platform</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+          <p className="text-sm text-gray-600">
+            uSTAT is built on open-source Python and JavaScript libraries.
+            Below is a reference of the statistical methods and the packages that power each analysis.
+          </p>
+
+          {ABOUT_SECTIONS.map((section) => (
+            <div key={section.title}>
+              <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2 border-b border-gray-100 pb-1">
+                {section.title}
+              </h3>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                {section.items.map(([method, pkg]) => (
+                  <div key={method} className="flex items-baseline gap-2 py-0.5">
+                    <span className="text-xs text-gray-700">{method}</span>
+                    <span className="flex-1 border-b border-dotted border-gray-200" />
+                    <code className="text-[10px] text-indigo-600 font-mono whitespace-nowrap">{pkg}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+
+          <div className="text-[10px] text-gray-400 pt-2 border-t border-gray-100">
+            All computations run server-side via FastAPI. Data never leaves your machine.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
 
   const handleOpenNew = () => setShowSaveModal(true);
 
@@ -142,6 +316,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+      {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showSaveModal && (
         <SaveBeforeOpenModal
           session={session}
@@ -169,6 +344,13 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <PlotThemeBar />
+            <button
+              onClick={() => setShowAbout(true)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+              title="About uSTAT — packages & methods"
+            >
+              <Info size={16} />
+            </button>
             <button
               onClick={toggleGrid}
               className={`p-1.5 rounded-lg transition-colors ${showGrid ? "text-indigo-500 bg-indigo-50 hover:bg-indigo-100" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
