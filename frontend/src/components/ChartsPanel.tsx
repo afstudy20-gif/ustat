@@ -37,7 +37,7 @@ export default function ChartsPanel() {
       let res: any;
       if (chartType === "histogram") res = await getHistogram(base);
       else if (chartType === "scatter") res = await getScatter({ ...base, y, color: color || undefined });
-      else if (chartType === "boxplot") res = await getBoxplot({ ...base, color: color || undefined });
+      else if (chartType === "boxplot" || chartType === "violin") res = await getBoxplot({ ...base, color: color || undefined });
       else res = await getBar({ ...base, y: y || undefined, color: color || undefined });
       setPlotData(res.data);
     } catch (e: any) {
@@ -47,7 +47,7 @@ export default function ChartsPanel() {
     }
   };
 
-  const traces = buildTraces(plotData);
+  const traces = buildTraces(plotData, chartType);
 
   return (
     <div className="flex gap-4 h-full">
@@ -55,7 +55,7 @@ export default function ChartsPanel() {
       <div className="w-60 flex-shrink-0 space-y-4">
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Chart Type</h3>
-          {["histogram", "scatter", "boxplot", "bar"].map((t) => (
+          {["histogram", "scatter", "boxplot", "violin", "bar"].map((t) => (
             <label key={t} className="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="chartType" value={t} checked={chartType === t}
                 onChange={() => setChartType(t)} className="accent-indigo-500" />
@@ -69,7 +69,7 @@ export default function ChartsPanel() {
           <div>
             <label className="text-xs text-gray-400 block mb-1">X axis</label>
             <select className="select w-full" value={x} onChange={(e) => setX(e.target.value)}>
-              {(chartType === "boxplot" ? numCols : [...numCols, ...catCols]).map((c) => (
+              {(chartType === "boxplot" || chartType === "violin" ? numCols : [...numCols, ...catCols]).map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>
@@ -125,7 +125,7 @@ export default function ChartsPanel() {
   );
 }
 
-function buildTraces(d: any): any[] | null {
+function buildTraces(d: any, chartType = ""): any[] | null {
   if (!d) return null;
   const COLORS = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899"];
 
@@ -188,6 +188,21 @@ function buildTraces(d: any): any[] | null {
   }
 
   if (d.type === "boxplot") {
+    if (chartType === "violin") {
+      return d.groups.map((g: any, i: number) => ({
+        type: "violin",
+        y: g.values,
+        name: g.group,
+        box: { visible: true },
+        meanline: { visible: true },
+        line: { color: COLORS[i % COLORS.length] },
+        fillcolor: COLORS[i % COLORS.length] + "25",
+        points: g.values.length < 200 ? "all" : false,
+        jitter: 0.3,
+        pointpos: -1.5,
+        marker: { color: COLORS[i % COLORS.length], size: 3, opacity: 0.5 },
+      }));
+    }
     return d.groups.map((g: any, i: number) => ({
       type: "box",
       y: g.values,

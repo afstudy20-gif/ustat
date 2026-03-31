@@ -760,6 +760,7 @@ def column_summary(session_id: str, column: str, kind: Optional[str] = None):
             "iqr": float(q3 - q1), "min": float(s_clean.min()), "max": float(s_clean.max()),
             "skewness": float(s_clean.skew()), "kurtosis": float(s_clean.kurtosis()),
             "histogram": histogram,
+            "raw_values": s_clean.sample(min(2000, len(s_clean)), random_state=42).tolist(),
             "qq": qq,
             "normality_p": float(p_norm),
             "normality_test": norm_test_name,

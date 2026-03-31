@@ -62,6 +62,7 @@ const BASE_LAYOUT = {
 const CHART_TABS = [
   { id: "histogram", label: "Histogram" },
   { id: "boxplot",   label: "Box Plot" },
+  { id: "violin",    label: "Violin" },
   { id: "qq",        label: "Q-Q Plot" },
 ] as const;
 type ChartTab = typeof CHART_TABS[number]["id"];
@@ -159,6 +160,50 @@ function NumericView({ summary }: { summary: any }) {
       {chartTab === "boxplot" && (
         <Plot
           data={boxData}
+          layout={{
+            ...BASE_LAYOUT,
+            autosize: true,
+            yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Value" } },
+            xaxis: { ...BASE_LAYOUT.xaxis, showticklabels: false, zeroline: false, showgrid: false },
+            showlegend: false,
+            annotations: [
+              {
+                x: 0.5, y: 1.0,
+                xref: "paper" as const, yref: "paper" as const,
+                text: `IQR = ${summary.iqr?.toFixed(2)}  ·  Skew = ${summary.skewness?.toFixed(3)}`,
+                showarrow: false,
+                font: { color: "#6b7280", size: 11 },
+                xanchor: "center" as const,
+                yanchor: "bottom" as const,
+              },
+            ],
+          }}
+          style={{ width: "100%", height: 380 }}
+          useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        />
+      )}
+
+      {/* Violin Plot */}
+      {chartTab === "violin" && (
+        <Plot
+          data={[{
+            type: "violin" as any,
+            y: summary.raw_values ?? [],
+            name: "Distribution",
+            box: { visible: true },
+            meanline: { visible: true },
+            line: { color: "#6366f1" },
+            fillcolor: "rgba(99,102,241,0.15)",
+            points: (summary.raw_values?.length ?? 0) < 200 ? "all" : false,
+            jitter: 0.3,
+            pointpos: -1.5,
+            marker: { color: "#818cf8", size: 3, opacity: 0.5 },
+            hovertemplate:
+              `Median: ${summary.median?.toFixed(2)}<br>` +
+              `Mean: ${summary.mean?.toFixed(2)}<br>` +
+              `SD: ${summary.std?.toFixed(2)}<br>` +
+              `IQR: ${summary.q1?.toFixed(2)}–${summary.q3?.toFixed(2)}<extra></extra>`,
+          }]}
           layout={{
             ...BASE_LAYOUT,
             autosize: true,
