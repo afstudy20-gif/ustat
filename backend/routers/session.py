@@ -1,13 +1,15 @@
-"""Session management: cell editing and dataset export."""
+"""Session management: cell editing, dataset export, session save/load, audit."""
 import io
 import json
 import os
 import tempfile
+import time
+import uuid
 import numpy as np
 import pandas as pd
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel
 from services import store
@@ -228,3 +230,122 @@ def export_xlsx(session_id: str, filename: str = Query("export.xlsx")):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ── Session Save/Load ─────────────────────────────────────────────────────────
+
+@router.get("/{session_id}/save_session")
+async def save_session(session_id: str):
+    """Export the full session as a downloadable JSON file."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Build columns metadata (same shape as upload response)
+    from routers.upload import _detect_kind
+    columns = []
+    for col in df.columns:
+        kind = _detect_kind(df[col])
+        columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+
+    payload = {
+        "version": "1.0",
+        "filename": f"session_{session_id[:8]}.json",
+        "created": time.time(),
+        "columns": columns,
+        "col_metadata": store.get_metadata(session_id),
+        "case_filter": store.get_filter(session_id),
+        "audit": store.get_audit(session_id),
+        "data": json.loads(
+            df.replace([np.inf, -np.inf], np.nan).to_json(
+                orient="records", date_format="iso", default_handler=str
+            )
+        ),
+    }
+
+    content = json.dumps(payload, allow_nan=False, default=str).encode("utf-8")
+    safe_name = f"session_{session_id[:8]}.json"
+
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+@router.post("/load_session")
+async def load_session(file: UploadFile = File(...)):
+    """Restore a session from a previously saved JSON file."""
+    raw = await file.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON file")
+
+    if "data" not in payload:
+        raise HTTPException(status_code=400, detail="Missing 'data' key in session file")
+
+    df = pd.DataFrame(payload["data"])
+    new_session_id = str(uuid.uuid4())
+    store.save(new_session_id, df)
+
+    # Restore filters if present
+    case_filter = payload.get("case_filter", [])
+    if case_filter:
+        store.save_filter(new_session_id, case_filter)
+
+    # Restore column metadata if present
+    col_metadata = payload.get("col_metadata", {})
+    if col_metadata:
+        store.save_metadata(new_session_id, col_metadata)
+
+    # Build columns info
+    from routers.upload import _detect_kind
+    columns = []
+    for col in df.columns:
+        kind = _detect_kind(df[col])
+        columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+
+    preview = json.loads(
+        df.head(2000).replace([np.inf, -np.inf], np.nan).to_json(
+            orient="records", default_handler=str, date_format="iso", date_unit="s"
+        )
+    )
+
+    return {
+        "session_id": new_session_id,
+        "filename": payload.get("filename", file.filename),
+        "rows": len(df),
+        "columns": columns,
+        "preview": preview,
+    }
+
+
+# ── Audit ─────────────────────────────────────────────────────────────────────
+
+@router.get("/{session_id}/audit")
+async def get_audit(session_id: str):
+    """Return the audit trail for a session."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return store.get_audit(session_id)
+
+
+# ── Column Metadata ──────────────────────────────────────────────────────────
+
+class ColumnMetadataRequest(BaseModel):
+    columns: Dict[str, dict]  # {COL_NAME: {label, units, role, value_labels, description}}
+
+
+@router.post("/{session_id}/metadata")
+async def save_metadata(session_id: str, body: ColumnMetadataRequest):
+    """Store column-level metadata for the session."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.save_metadata(session_id, body.columns)
+    store.log_action(session_id, "metadata_updated", {"columns": list(body.columns.keys())})
+
+    return {"status": "ok", "columns_updated": list(body.columns.keys())}

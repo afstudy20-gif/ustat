@@ -4,6 +4,11 @@ export interface ColMeta {
   name: string;
   dtype: string;
   kind: "numeric" | "categorical" | "text" | "date";
+  label?: string;
+  description?: string;
+  units?: string;
+  value_labels?: Record<string, string>;
+  role?: "outcome" | "predictor" | "covariate" | "id" | "time" | "event" | "";
 }
 
 export interface Session {

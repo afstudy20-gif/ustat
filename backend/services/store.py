@@ -6,6 +6,8 @@ from threading import Lock
 
 _store: Dict[str, dict] = {}  # {session_id: {"df": DataFrame, "timestamp": float}}
 _filters: Dict[str, List[dict]] = {}
+_audit: Dict[str, list] = {}
+_metadata: Dict[str, dict] = {}
 _lock = Lock()
 
 # Session configuration
@@ -28,6 +30,8 @@ def _cleanup_old_sessions() -> None:
         for sid in expired:
             _store.pop(sid, None)
             _filters.pop(sid, None)
+            _audit.pop(sid, None)
+            _metadata.pop(sid, None)
 
         # If still over limit, remove oldest sessions
         if len(_store) > MAX_SESSIONS:
@@ -36,6 +40,8 @@ def _cleanup_old_sessions() -> None:
             for sid, _ in sorted_sids[:to_remove]:
                 _store.pop(sid, None)
                 _filters.pop(sid, None)
+                _audit.pop(sid, None)
+                _metadata.pop(sid, None)
 
 
 def save(session_id: str, df: pd.DataFrame) -> None:
@@ -43,6 +49,7 @@ def save(session_id: str, df: pd.DataFrame) -> None:
     _cleanup_old_sessions()
     with _lock:
         _store[session_id] = {"df": df, "timestamp": time.time()}
+    log_action(session_id, "data_updated")
 
 
 def get(session_id: str) -> Optional[pd.DataFrame]:
@@ -128,7 +135,34 @@ def get_filtered(session_id: str) -> Optional[pd.DataFrame]:
 def delete(session_id: str) -> None:
     _store.pop(session_id, None)
     _filters.pop(session_id, None)
+    _audit.pop(session_id, None)
+    _metadata.pop(session_id, None)
 
 
 def list_sessions() -> list[str]:
     return list(_store.keys())
+
+
+# ── Audit trail ───────────────────────────────────────────────────────────────
+
+def log_action(session_id: str, action: str, params: Optional[dict] = None) -> None:
+    """Append an audit entry for the given session."""
+    entry = {"action": action, "params": params, "timestamp": time.time()}
+    _audit.setdefault(session_id, []).append(entry)
+
+
+def get_audit(session_id: str) -> list:
+    """Return the audit trail for a session."""
+    return _audit.get(session_id, [])
+
+
+# ── Column metadata ──────────────────────────────────────────────────────────
+
+def save_metadata(session_id: str, meta: dict) -> None:
+    """Store column-level metadata for a session."""
+    _metadata[session_id] = meta
+
+
+def get_metadata(session_id: str) -> dict:
+    """Return column-level metadata for a session."""
+    return _metadata.get(session_id, {})

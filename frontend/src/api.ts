@@ -119,6 +119,19 @@ export const runDCA            = (data: object) => api.post("/api/decision_curve
 export const runNestedLR       = (data: object) => api.post("/api/model_compare/nested_lr_test", data);
 export const runCompareModels  = (data: object) => api.post("/api/model_compare/compare_models", data);
 
+// Session management
+export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${sessionId}/save_session`, { responseType: "blob" });
+export const loadSession   = (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post("/api/sessions/load_session", fd); };
+export const getAuditTrail = (sessionId: string) => api.get(`/api/sessions/${sessionId}/audit`);
+export const saveMetadata  = (sessionId: string, columns: Record<string, any>) => api.post(`/api/sessions/${sessionId}/metadata`, { columns });
+
+// Publication export
+export const exportTableDocx = (data: object) => api.post("/api/pub_export/table_docx", data, { responseType: "blob" });
+export const getFigureCaption = (data: object) => api.post("/api/pub_export/figure_caption", data);
+
+// Nomogram
+export const buildNomogram = (data: object) => api.post("/api/nomogram/build", data);
+
 export const selectCases = (sessionId: string, conditions: object[]) =>
   api.post(`/api/sessions/${sessionId}/select_cases`, { conditions });
 export const clearCases  = (sessionId: string) =>

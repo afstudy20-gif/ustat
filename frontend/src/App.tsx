@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, RefreshCw, ToggleLeft, Shield } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, RefreshCw, ToggleLeft, Shield, BookOpen } from "lucide-react";
 import { clearCases } from "./api";
 import AboutModal from "./components/AboutModal";
 
@@ -33,6 +33,7 @@ import PSMPanel from "./components/PSMPanel";
 import RepeatedMeasuresPanel from "./components/RepeatedMeasuresPanel";
 import CategoricalTestsPanel from "./components/CategoricalTestsPanel";
 import ReliabilityPanel from "./components/ReliabilityPanel";
+import DataDictionaryPanel from "./components/DataDictionaryPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
 
 const TABS = [
@@ -49,6 +50,7 @@ const TABS = [
   { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "power",       label: "Power",       icon: Zap },
   { id: "compute",     label: "Compute",     icon: Calculator },
+  { id: "dictionary",  label: "Dictionary",  icon: BookOpen },
   { id: "psm",         label: "PSM",         icon: Target },
 ];
 
@@ -277,6 +279,7 @@ export default function App() {
           {activeTab === "repeated"    && <div className="flex-1 p-4 overflow-y-auto"><RepeatedMeasuresPanel /></div>}
           {activeTab === "categorical" && <div className="flex-1 p-4 overflow-y-auto"><CategoricalTestsPanel /></div>}
           {activeTab === "reliability" && <div className="flex-1 p-4 overflow-y-auto"><ReliabilityPanel /></div>}
+          {activeTab === "dictionary" && <div className="flex-1 p-4 overflow-y-auto"><DataDictionaryPanel /></div>}
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
           {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}

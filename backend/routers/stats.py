@@ -7,6 +7,13 @@ from pydantic import BaseModel
 from typing import Optional, List
 from services import store
 from services.impute import apply_imputation, missing_info
+from services.text_generators import (
+    methods_ttest_ind, methods_ttest_one, methods_chisquare, methods_mannwhitney,
+    methods_fisher, methods_kruskal, methods_anova,
+    results_ttest_ind, results_ttest_one, results_chisquare, results_mannwhitney,
+    results_fisher, results_kruskal, results_anova,
+    r_ttest_ind, r_ttest_one, r_chisquare, r_mannwhitney, r_fisher, r_kruskal, r_anova,
+)
 from services.stat_utils import (
     cohen_d, cohen_d_one_sample, eta_squared, partial_eta_squared, omega_squared,
     rank_biserial_r, cramers_v, odds_ratio_effect, epsilon_squared,
@@ -152,7 +159,7 @@ def ttest(req: TTestRequest):
         es = cohen_d(g1, g2)
         p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
 
-        return {
+        ret = {
             "test": f"Independent samples t-test{' (Welch)' if use_welch else ''}",
             "group1": str(groups[0]), "n1": len(g1), "mean1": float(g1.mean()),
             "group2": str(groups[1]), "n2": len(g2), "mean2": float(g2.mean()),
@@ -163,7 +170,11 @@ def ttest(req: TTestRequest):
             "summary": {str(groups[0]): group_summary(g1, str(groups[0])),
                         str(groups[1]): group_summary(g2, str(groups[1]))},
             "interpretation": f"{'Significant' if sig else 'No significant'} difference between groups (t = {stat:.3f}, p = {p_str}, Hedges' g = {es['value']:.3f} [{es['magnitude']}])",
+            "methods_text": methods_ttest_ind(req.column, req.group_column, use_welch),
+            "r_code": r_ttest_ind(req.column, req.group_column),
         }
+        ret["result_text"] = results_ttest_ind(ret)
+        return ret
     else:
         x = col.astype(float).values
         stat, p = scipy_stats.ttest_1samp(x, req.mu)
@@ -171,7 +182,7 @@ def ttest(req: TTestRequest):
         es = cohen_d_one_sample(x, req.mu)
         p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
 
-        return {
+        ret = {
             "test": "One-sample t-test",
             "mu": req.mu, "n": len(x),
             "mean": float(x.mean()), "std": float(x.std(ddof=1)),
@@ -181,7 +192,11 @@ def ttest(req: TTestRequest):
             "assumptions": [check_normality(x, req.column)],
             "summary": {"sample": group_summary(x, "Sample")},
             "interpretation": f"Mean {'differs from' if sig else 'does not differ from'} {req.mu} (t = {stat:.3f}, p = {p_str}, Cohen's d = {es['value']:.3f} [{es['magnitude']}])",
+            "methods_text": methods_ttest_one(req.column, req.mu),
+            "r_code": r_ttest_one(req.column, req.mu),
         }
+        ret["result_text"] = results_ttest_one(ret)
+        return ret
 
 
 # ── Chi-Square ───────────────────────────────────────────────────────────────
@@ -210,7 +225,7 @@ def chisquare(req: ChiSqRequest):
     if (expected < 5).any():
         warnings.append("Some expected cell counts < 5. Consider Fisher's exact test instead.")
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
-    return {
+    ret = {
         "test": "Chi-square test of independence",
         "chi2": float(chi2), "p": float(p), "dof": int(dof), "n": int(n),
         "significant": sig,
@@ -218,7 +233,11 @@ def chisquare(req: ChiSqRequest):
         "warnings": warnings,
         "crosstab": ct.to_dict(),
         "interpretation": f"{'Significant' if sig else 'No significant'} association (\u03C7\u00B2({dof}) = {chi2:.2f}, p = {p_str}, Cramer's V = {es['value']:.3f} [{es['magnitude']}])",
+        "methods_text": methods_chisquare(req.row_column, req.col_column),
+        "r_code": r_chisquare(req.row_column, req.col_column),
     }
+    ret["result_text"] = results_chisquare(ret)
+    return ret
 
 
 # ── Correlation ──────────────────────────────────────────────────────────────
@@ -278,7 +297,7 @@ def mannwhitney(req: MannWhitneyRequest):
     sig = bool(p < 0.05)
     es = rank_biserial_r(float(stat), len(g1), len(g2))
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
-    return {
+    ret = {
         "test": "Mann-Whitney U test",
         "group1": str(groups[0]), "n1": int(len(g1)),
         "median1": float(np.median(g1)), "iqr1": float(np.percentile(g1, 75) - np.percentile(g1, 25)),
@@ -290,7 +309,11 @@ def mannwhitney(req: MannWhitneyRequest):
         "summary": {str(groups[0]): group_summary(g1, str(groups[0])),
                     str(groups[1]): group_summary(g2, str(groups[1]))},
         "interpretation": f"{'Significant' if sig else 'No significant'} difference (U = {stat:.1f}, p = {p_str}, r = {es['value']:.3f} [{es['magnitude']}])",
+        "methods_text": methods_mannwhitney(req.column, req.group_column),
+        "r_code": r_mannwhitney(req.column, req.group_column),
     }
+    ret["result_text"] = results_mannwhitney(ret)
+    return ret
 
 
 # ── Fisher's Exact Test ───────────────────────────────────────────────────────
@@ -312,7 +335,7 @@ def fisher_exact(req: FisherRequest):
     sig = bool(p < 0.05)
     es = odds_ratio_effect(ct.values)
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
-    return {
+    ret = {
         "test": "Fisher's exact test",
         "odds_ratio": float(or_val), "p": float(p),
         "significant": sig,
@@ -321,7 +344,11 @@ def fisher_exact(req: FisherRequest):
         "row_labels": ct.index.tolist(),
         "col_labels": ct.columns.tolist(),
         "interpretation": f"{'Significant' if sig else 'No significant'} association (p = {p_str}, OR = {es['value']:.2f}, 95% CI: {es['ci_low']:.2f}\u2013{es['ci_high']:.2f})",
+        "methods_text": methods_fisher(req.row_column, req.col_column),
+        "r_code": r_fisher(req.row_column, req.col_column),
     }
+    ret["result_text"] = results_fisher(ret)
+    return ret
 
 
 # ── Kruskal-Wallis ────────────────────────────────────────────────────────────
@@ -354,7 +381,7 @@ def kruskal(req: KruskalRequest):
         q1=lambda x: x.quantile(0.25),
         q3=lambda x: x.quantile(0.75),
     ).reset_index()
-    return {
+    ret = {
         "test": "Kruskal-Wallis test",
         "H": float(stat), "p": float(p),
         "significant": sig,
@@ -366,7 +393,11 @@ def kruskal(req: KruskalRequest):
             for row in group_stats.to_dict(orient="records")
         ],
         "interpretation": f"{'Significant' if sig else 'No significant'} difference across groups (H = {stat:.2f}, p = {p_str}, \u03B5\u00B2 = {es['value']:.3f} [{es['magnitude']}])",
+        "methods_text": methods_kruskal(req.column, req.group_column),
+        "r_code": r_kruskal(req.column, req.group_column),
     }
+    ret["result_text"] = results_kruskal(ret)
+    return ret
 
 
 # ── ROC Analysis ──────────────────────────────────────────────────────────────
@@ -1180,7 +1211,7 @@ def anova(req: AnovaRequest):
 
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
     group_stats = df.groupby(req.group_column)[req.column].agg(["count", "mean", "std"]).reset_index()
-    return {
+    ret = {
         "test": "One-way ANOVA",
         "F": float(stat), "p": float(p),
         "df_between": df_between, "df_within": df_within,
@@ -1194,7 +1225,11 @@ def anova(req: AnovaRequest):
             for row in group_stats.to_dict(orient="records")
         ],
         "interpretation": f"{'Significant' if sig else 'No significant'} difference across groups (F({df_between},{df_within}) = {stat:.2f}, p = {p_str}, \u03B7\u00B2 = {es_eta['value']:.3f} [{es_eta['magnitude']}])",
+        "methods_text": methods_anova(req.column, req.group_column),
+        "r_code": r_anova(req.column, req.group_column),
     }
+    ret["result_text"] = results_anova(ret)
+    return ret
 
 
 # ── Pairwise Correlation ──────────────────────────────────────────────────────
