@@ -119,6 +119,10 @@ export const runDCA            = (data: object) => api.post("/api/decision_curve
 export const runNestedLR       = (data: object) => api.post("/api/model_compare/nested_lr_test", data);
 export const runCompareModels  = (data: object) => api.post("/api/model_compare/compare_models", data);
 
+// Column operations
+export const renameColumn = (sessionId: string, oldName: string, newName: string) =>
+  api.post(`/api/compute/${sessionId}/rename`, { old_name: oldName, new_name: newName });
+
 // Session management
 export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${sessionId}/save_session`, { responseType: "blob" });
 export const loadSession   = (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post("/api/sessions/load_session", fd); };

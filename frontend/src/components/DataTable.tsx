@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useStore } from "../store";
 import type { ColMeta, CaseCondition, CaseOperator } from "../store";
 import api from "../api";
-import { selectCases, clearCases, getUniqueValues } from "../api";
+import { selectCases, clearCases, getUniqueValues, renameColumn } from "../api";
 
 // ── Kind cycling ───────────────────────────────────────────────────────────────
 
@@ -373,6 +373,11 @@ export default function DataTable() {
   const [dragIdx,  setDragIdx]  = useState<number | null>(null);
   const [dropIdx,  setDropIdx]  = useState<number | null>(null);
 
+  // Column rename
+  const [renameCol, setRenameCol] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const renameRef = useRef<HTMLInputElement>(null);
+
   const inputRef   = useRef<HTMLInputElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
 
@@ -457,6 +462,35 @@ export default function DataTable() {
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [filtered, sortCol, sortDir]);
+
+  useEffect(() => {
+    if (renameCol) setTimeout(() => renameRef.current?.focus(), 0);
+  }, [renameCol]);
+
+  const startRename = (colName: string) => {
+    setRenameCol(colName);
+    setRenameVal(colName);
+  };
+
+  const commitRename = async () => {
+    if (!renameCol || !session) return;
+    const newName = renameVal.trim();
+    setRenameCol(null);
+    if (!newName || newName === renameCol) return;
+    try {
+      await renameColumn(session.session_id, renameCol, newName);
+      // Update local state
+      const updatedCols = session.columns.map((c) =>
+        c.name === renameCol ? { ...c, name: newName } : c
+      );
+      const updatedPreview = session.preview.map((row) => {
+        const r = { ...row };
+        if (renameCol in r) { r[newName] = r[renameCol]; delete r[renameCol]; }
+        return r;
+      });
+      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+    } catch { /* revert silently */ }
+  };
 
   const toggleSort = (colName: string) => {
     if (sortCol === colName) {
@@ -719,9 +753,21 @@ export default function DataTable() {
                         >
                           {KIND_LABEL[col.kind] ?? col.kind}
                         </button>
-                        <span className="text-left text-gray-700 text-xs font-medium truncate">
-                          {col.name}
-                        </span>
+                        {renameCol === col.name ? (
+                          <input ref={renameRef}
+                            className="text-xs font-medium text-gray-900 bg-white border border-indigo-400 rounded px-1 py-0 w-24 focus:outline-none"
+                            value={renameVal}
+                            onChange={(e) => setRenameVal(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenameCol(null); }}
+                            onBlur={commitRename}
+                          />
+                        ) : (
+                          <span className="text-left text-gray-700 text-xs font-medium truncate cursor-text"
+                            onDoubleClick={() => startRename(col.name)}
+                            title="Double-click to rename">
+                            {col.name}
+                          </span>
+                        )}
                         {nMissing > 0 && (
                           <button
                             onClick={() => {

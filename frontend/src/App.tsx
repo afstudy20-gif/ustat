@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, RefreshCw, ToggleLeft, Shield, BookOpen } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info } from "lucide-react";
 import { clearCases } from "./api";
 import AboutModal from "./components/AboutModal";
 
@@ -40,17 +40,13 @@ const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
   { id: "summary",     label: "Summary",     icon: BarChart2 },
   { id: "table1",      label: "Table",       icon: ClipboardList },
-  { id: "hypothesis",  label: "Hypothesis",  icon: FlaskConical },
-  { id: "repeated",    label: "Repeated",    icon: RefreshCw },
-  { id: "categorical", label: "Categorical", icon: ToggleLeft },
-  { id: "reliability", label: "Reliability", icon: Shield },
+  { id: "tests",       label: "Tests",       icon: FlaskConical },
   { id: "correlation", label: "Correlation", icon: GitMerge },
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
   { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "power",       label: "Power",       icon: Zap },
   { id: "compute",     label: "Compute",     icon: Calculator },
-  { id: "dictionary",  label: "Dictionary",  icon: BookOpen },
   { id: "psm",         label: "PSM",         icon: Target },
 ];
 
@@ -117,6 +113,51 @@ function SaveBeforeOpenModal({
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TestsCombo() {
+  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability">("hypothesis");
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto">
+        {sub === "hypothesis" && <HypothesisPanel />}
+        {sub === "repeated" && <RepeatedMeasuresPanel />}
+        {sub === "categorical" && <CategoricalTestsPanel />}
+        {sub === "reliability" && <ReliabilityPanel />}
+      </div>
+    </div>
+  );
+}
+
+function ComputeCombo() {
+  const [sub, setSub] = useState<"compute" | "dictionary">("compute");
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        {([["compute", "Compute"], ["dictionary", "Dictionary"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto">
+        {sub === "compute" ? <ComputePanel /> : <DataDictionaryPanel />}
       </div>
     </div>
   );
@@ -275,17 +316,13 @@ export default function App() {
           {activeTab === "data"        && <div className="flex-1 p-4 overflow-hidden flex flex-col" style={{minHeight:0}}><DataTable /></div>}
           {activeTab === "summary"     && <DescriptivePanel />}
           {activeTab === "table1"      && <Table1Panel />}
-          {activeTab === "hypothesis"  && <div className="flex-1 p-4 overflow-y-auto"><HypothesisPanel /></div>}
-          {activeTab === "repeated"    && <div className="flex-1 p-4 overflow-y-auto"><RepeatedMeasuresPanel /></div>}
-          {activeTab === "categorical" && <div className="flex-1 p-4 overflow-y-auto"><CategoricalTestsPanel /></div>}
-          {activeTab === "reliability" && <div className="flex-1 p-4 overflow-y-auto"><ReliabilityPanel /></div>}
-          {activeTab === "dictionary" && <div className="flex-1 p-4 overflow-y-auto"><DataDictionaryPanel /></div>}
+          {activeTab === "tests"       && <TestsCombo />}
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
           {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
           {activeTab === "visual"      && <VisualChartsCombo />}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
-          {activeTab === "compute"     && <div className="flex-1 p-4 overflow-y-auto"><ComputePanel /></div>}
+          {activeTab === "compute"     && <ComputeCombo />}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
         </ErrorBoundary>
       </main>

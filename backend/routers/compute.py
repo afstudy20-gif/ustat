@@ -860,7 +860,30 @@ def delete_column(session_id: str, col_name: str):
     return {"deleted": col_name}
 
 
-# ── 6. List unique values (for sex mapping UI) ────────────────────────────────
+# ── 6. Rename column ────────────────────────────────────────────────────────
+
+class RenameRequest(BaseModel):
+    old_name: str
+    new_name: str
+
+
+@router.post("/{session_id}/rename")
+def rename_column(session_id: str, req: RenameRequest):
+    df = _get_df(session_id)
+    if req.old_name not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{req.old_name}' not found")
+    new = req.new_name.strip()
+    if not new:
+        raise HTTPException(status_code=422, detail="New column name cannot be empty")
+    if new in df.columns and new != req.old_name:
+        raise HTTPException(status_code=422, detail=f"Column '{new}' already exists")
+    df = df.rename(columns={req.old_name: new})
+    store.save(session_id, df)
+    store.log_action(session_id, "rename_column", {"old": req.old_name, "new": new})
+    return {"old_name": req.old_name, "new_name": new}
+
+
+# ── 7. List unique values (for sex mapping UI) ────────────────────────────────
 
 @router.get("/{session_id}/unique/{col_name:path}")
 def unique_values(session_id: str, col_name: str):
