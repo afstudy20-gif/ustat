@@ -219,7 +219,14 @@ def logistic_regression(req: LogisticRequest):
         le = LabelEncoder()
         y = le.fit_transform(y)
     else:
+        y = pd.to_numeric(y, errors="coerce")
+        unique_vals = sorted(y.dropna().unique())
+        if set(unique_vals) - {0, 1, 0.0, 1.0}:
+            raise HTTPException(status_code=422, detail=f"Logistic regression requires a binary 0/1 outcome. Found values: {unique_vals[:10]}")
         y = y.astype(int)
+
+    if len(set(y)) < 2:
+        raise HTTPException(status_code=422, detail="Outcome column has only one unique value — logistic regression requires both 0 and 1.")
 
     cov_type = "HC3" if req.robust_se else "nonrobust"
     model = sm.Logit(y, X_const).fit(disp=False, cov_type=cov_type)
@@ -270,7 +277,13 @@ def poisson_regression(req: PoissonRequest):
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
-    y = df[req.outcome].astype(float)
+    y = pd.to_numeric(df[req.outcome], errors="coerce")
+    if y.isna().all():
+        raise HTTPException(status_code=422, detail="Outcome column has no numeric values.")
+    if (y.dropna() < 0).any():
+        raise HTTPException(status_code=422, detail="Poisson regression requires non-negative integer counts. Negative values found.")
+    if (y.dropna() % 1 != 0).any():
+        raise HTTPException(status_code=422, detail="Poisson regression requires integer counts. Fractional values found — consider Gamma regression instead.")
     cov_type = "HC3" if req.robust_se else "nonrobust"
     model = sm.GLM(y, X, family=sm.families.Poisson()).fit(cov_type=cov_type)
     ci = model.conf_int()
@@ -313,13 +326,19 @@ def logistic_or_table(req: LogisticRequest):
     # Apply unit scaling (renames columns & divides values)
     df, pred_list = _apply_scaling(df, req.predictors, req.scale_factors)
 
-    # Encode outcome
+    # Encode outcome — must be binary 0/1
     y_raw = df[req.outcome]
     if y_raw.dtype == object:
         le = LabelEncoder()
         y = le.fit_transform(y_raw)
     else:
-        y = y_raw.astype(int).values
+        y_num = pd.to_numeric(y_raw, errors="coerce")
+        unique_vals = sorted(y_num.dropna().unique())
+        if set(unique_vals) - {0, 1, 0.0, 1.0}:
+            raise HTTPException(status_code=422, detail=f"Logistic regression requires a binary 0/1 outcome. Found: {unique_vals[:10]}")
+        y = y_num.astype(int).values
+    if len(set(y)) < 2:
+        raise HTTPException(status_code=422, detail="Outcome has only one unique value — needs both 0 and 1.")
 
     # Helper: fit logit and extract first non-const row OR all predictor rows
     def _fit_row(X_df, variable_names):
@@ -452,6 +471,15 @@ def kaplan_meier(req: KMRequest):
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric. Check that both columns contain numbers.")
 
+    # Validate event indicator is binary 0/1
+    event_vals = sorted(df[req.event_col].dropna().unique())
+    if set(event_vals) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1 (0=censored, 1=event). Found: {event_vals[:10]}")
+
+    # Validate duration is positive
+    if (df[req.duration_col] < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values. All durations must be ≥ 0.")
+
     results = []
     groups = df[req.group_col].unique() if req.group_col else [None]
     for grp in groups:
@@ -537,6 +565,13 @@ def cox_regression(req: CoxRequest):
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric.")
 
+    # Validate event indicator is binary 0/1
+    event_vals = sorted(df[req.event_col].dropna().unique())
+    if set(event_vals) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {event_vals[:10]}")
+    if (df[req.duration_col] < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
+
     cph = CoxPHFitter()
     fit_df = df[[req.duration_col, req.event_col] + req.predictors]
     try:
@@ -607,6 +642,9 @@ def _rcs_basis(x: np.ndarray, knots: np.ndarray) -> np.ndarray:
 def rcs_regression(req: RCSRequest):
     from services.impute import apply_imputation as _imp
 
+    if req.n_knots not in _KNOT_PERCENTILES:
+        raise HTTPException(status_code=422, detail=f"n_knots must be 3, 4, or 5. Got: {req.n_knots}")
+
     df_full = _get_df(req.session_id)
     cols_needed = [req.predictor, req.outcome] + req.covariates
     df = df_full[cols_needed].copy()
@@ -619,6 +657,17 @@ def rcs_regression(req: RCSRequest):
 
     x_raw = df[req.predictor].values.astype(float)
     y     = df[req.outcome].values.astype(float)
+
+    # Validate predictor has enough unique values for the spline
+    n_unique_x = len(np.unique(x_raw))
+    if n_unique_x < req.n_knots + 2:
+        raise HTTPException(status_code=422, detail=f"Predictor '{req.predictor}' has only {n_unique_x} unique values — need ≥ {req.n_knots + 2} for {req.n_knots}-knot spline.")
+
+    # Validate logistic outcome
+    if req.model_type == "logistic":
+        unique_y = sorted(set(y.tolist()))
+        if set(unique_y) - {0.0, 1.0}:
+            raise HTTPException(status_code=422, detail=f"Logistic RCS requires binary 0/1 outcome. Found: {unique_y[:10]}")
 
     # Knot positions
     pcts = _KNOT_PERCENTILES.get(req.n_knots, _KNOT_PERCENTILES[4])
@@ -731,7 +780,14 @@ def polynomial_regression(req: PolynomialRequest):
     df = apply_imputation(df_full, cols, req.imputation or "listwise")
     n_excluded = n_total - len(df)
 
+    if req.degree < 1 or req.degree > 10:
+        raise HTTPException(status_code=422, detail="Polynomial degree must be between 1 and 10.")
+
     x = df[req.predictor].astype(float)
+    n_unique = x.nunique()
+    if n_unique <= req.degree:
+        raise HTTPException(status_code=422, detail=f"Predictor has only {n_unique} unique values — need more than degree ({req.degree}) for polynomial fit.")
+
     X_parts = {"const": np.ones(len(df))}
     for d in range(1, req.degree + 1):
         X_parts[f"{req.predictor}^{d}"] = x ** d
@@ -1024,8 +1080,13 @@ def gamma_regression(req: GammaRequest):
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
-    y = df[req.outcome].astype(float)
+    y = pd.to_numeric(df[req.outcome], errors="coerce")
+    if (y.dropna() <= 0).any():
+        raise HTTPException(status_code=422, detail="Gamma regression requires strictly positive outcomes (> 0). Non-positive values found.")
 
+    valid_links = {"log", "identity", "inverse"}
+    if req.link and req.link not in valid_links:
+        raise HTTPException(status_code=422, detail=f"Invalid link function '{req.link}'. Valid: {valid_links}")
     link_map = {"log": sm.families.links.Log(), "identity": sm.families.links.Identity(), "inverse": sm.families.links.InversePower()}
     family = sm.families.Gamma(link=link_map.get(req.link, sm.families.links.Log()))
     cov_type = "HC3" if req.robust_se else "nonrobust"
@@ -1078,9 +1139,20 @@ def negative_binomial_regression(req: NegBinomRequest):
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
-    y = df[req.outcome].astype(float)
+    y = pd.to_numeric(df[req.outcome], errors="coerce")
+    if (y.dropna() < 0).any():
+        raise HTTPException(status_code=422, detail="Negative binomial requires non-negative integer counts.")
+    if (y.dropna() % 1 != 0).any():
+        raise HTTPException(status_code=422, detail="Negative binomial requires integer counts. Fractional values found.")
     cov_type = "HC3" if req.robust_se else "nonrobust"
-    model = sm.GLM(y, X, family=sm.families.NegativeBinomial()).fit(cov_type=cov_type)
+    # Estimate alpha (dispersion) from Poisson residuals instead of fixed alpha=1
+    try:
+        poisson_fit = sm.GLM(y, X, family=sm.families.Poisson()).fit()
+        mu = poisson_fit.mu
+        alpha_est = max(1e-6, float(((((y - mu) ** 2 - mu) / mu ** 2).mean())))
+    except Exception:
+        alpha_est = 1.0
+    model = sm.GLM(y, X, family=sm.families.NegativeBinomial(alpha=alpha_est)).fit(cov_type=cov_type)
     ci = model.conf_int()
 
     coefs = []
@@ -1300,6 +1372,14 @@ def _run_psm(req: PSMRequest):
     matched_all_idx = matched_treated + matched_controls
     df_matched = df.iloc[matched_all_idx].copy()
 
+    # Assign match-set IDs for downstream paired/clustered analysis
+    match_ids = []
+    for i, ti in enumerate(matched_treated):
+        match_ids.append(i)  # treated
+    for i in range(len(matched_controls)):
+        match_ids.append(i // ratio)  # controls get same match_id as their treated pair
+    df_matched["_match_id_"] = match_ids
+
     # ── Step 3: SMD before and after matching ─────────────────────────────────
     smd_before, smd_after = {}, {}
     treat_mask = df["_treat_"].values   # numpy array, same length as df (reset index)
@@ -1335,43 +1415,85 @@ def _run_psm(req: PSMRequest):
     outcome_result = None
     if req.outcome_col and req.outcome_col in df_matched.columns:
         try:
-            y_out = df_matched[req.outcome_col].astype(float).astype(int)
-            out_vals = set(y_out.unique().tolist())
-            if out_vals <= {0, 1}:
-                # Binary: logistic on matched data
-                feat_cols = [c for c in req.covariates if c in df_matched.columns]
-                X_out = pd.get_dummies(df_matched[feat_cols + [req.treatment_col]], drop_first=True).astype(float)
-                X_out = sm.add_constant(X_out)
-                m_out = sm.Logit(y_out.values, X_out).fit(disp=False)
-                ci_out = m_out.conf_int()
-                coefs_out = []
-                for var in m_out.params.index:
-                    est = float(m_out.params[var])
-                    coefs_out.append({
-                        "variable": str(var),
-                        "estimate": round(est, 6),
-                        "or": round(float(np.exp(est)), 4),
-                        "se": round(float(m_out.bse[var]), 6),
-                        "z": round(float(m_out.tvalues[var]), 4),
-                        "p": round(float(m_out.pvalues[var]), 6),
-                        "ci_low":  round(float(ci_out.loc[var, 0]), 4),
-                        "ci_high": round(float(ci_out.loc[var, 1]), 4),
-                        "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
-                        "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
-                    })
-                outcome_result = {
-                    "type": "logistic",
-                    "model": "Logistic Regression (matched cohort)",
-                    "n": int(len(df_matched)),
-                    "coefficients": coefs_out,
-                    "aic": round(float(m_out.aic), 2),
-                    "bic": round(float(m_out.bic), 2),
-                }
+            y_out = pd.to_numeric(df_matched[req.outcome_col], errors="coerce")
+            out_vals = set(y_out.dropna().unique().tolist())
+
+            if not out_vals <= {0, 1, 0.0, 1.0}:
+                outcome_result = {"error": f"Outcome must be binary 0/1 for matched analysis. Found: {sorted(out_vals)[:10]}"}
+            else:
+                # Use GEE with matched-pair clustering for valid SEs
+                from statsmodels.genmod.generalized_estimating_equations import GEE
+                from statsmodels.genmod.families import Binomial
+                from statsmodels.genmod.cov_struct import Exchangeable
+
+                df_out = df_matched[[req.treatment_col, req.outcome_col, "_match_id_"]].copy()
+                df_out[req.outcome_col] = y_out.astype(int)
+                df_out[req.treatment_col] = df_out[req.treatment_col].astype(float)
+
+                formula = f"Q('{req.outcome_col}') ~ Q('{req.treatment_col}')"
+                try:
+                    gee_model = GEE.from_formula(
+                        formula, groups="_match_id_", data=df_out,
+                        family=Binomial(), cov_struct=Exchangeable()
+                    )
+                    m_out = gee_model.fit()
+                    ci_out = m_out.conf_int()
+                    coefs_out = []
+                    for var in m_out.params.index:
+                        est = float(m_out.params[var])
+                        coefs_out.append({
+                            "variable": str(var),
+                            "estimate": round(est, 6),
+                            "or": round(float(np.exp(est)), 4),
+                            "se": round(float(m_out.bse[var]), 6),
+                            "z": round(float(m_out.tvalues[var]), 4),
+                            "p": round(float(m_out.pvalues[var]), 6),
+                            "ci_low":  round(float(ci_out.loc[var, 0]), 4),
+                            "ci_high": round(float(ci_out.loc[var, 1]), 4),
+                            "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
+                            "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
+                        })
+                    outcome_result = {
+                        "type": "gee_matched",
+                        "model": "GEE Logistic (matched-pair clusters)",
+                        "n": int(len(df_matched)),
+                        "n_clusters": int(len(matched_treated)),
+                        "coefficients": coefs_out,
+                    }
+                except Exception:
+                    # Fallback to standard logistic with robust SE
+                    X_out = sm.add_constant(df_out[[req.treatment_col]].astype(float))
+                    m_out = sm.Logit(y_out.astype(int).values, X_out).fit(disp=False, cov_type="HC1")
+                    ci_out = m_out.conf_int()
+                    coefs_out = []
+                    for var in m_out.params.index:
+                        est = float(m_out.params[var])
+                        coefs_out.append({
+                            "variable": str(var),
+                            "estimate": round(est, 6),
+                            "or": round(float(np.exp(est)), 4),
+                            "se": round(float(m_out.bse[var]), 6),
+                            "z": round(float(m_out.tvalues[var]), 4),
+                            "p": round(float(m_out.pvalues[var]), 6),
+                            "ci_low":  round(float(ci_out.loc[var, 0]), 4),
+                            "ci_high": round(float(ci_out.loc[var, 1]), 4),
+                            "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
+                            "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
+                        })
+                    outcome_result = {
+                        "type": "logistic_robust",
+                        "model": "Logistic Regression [Robust SE] (matched cohort)",
+                        "n": int(len(df_matched)),
+                        "coefficients": coefs_out,
+                        "aic": round(float(m_out.aic), 2),
+                        "bic": round(float(m_out.bic), 2),
+                    }
         except Exception as ex:
             outcome_result = {"error": str(ex)}
 
-    # Persist matched dataset for downstream analysis
+    # Persist matched dataset for downstream analysis (keep match_id for paired tests)
     df_export = df_matched.drop(columns=["_ps_", "_treat_"], errors="ignore")
+    df_export = df_export.rename(columns={"_match_id_": "match_set_id"})
     store.save(req.session_id + "_psm", df_export)
 
     return {

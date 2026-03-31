@@ -69,12 +69,16 @@ def descriptive(session_id: str, column: Optional[str] = None):
             continue
         q1, q3 = s.quantile([0.25, 0.75])
         n = len(s)
-        if n < 50:
+        if n <= 2000:
             _, p_norm = scipy_stats.shapiro(s[:5000])
             norm_test = "Shapiro-Wilk"
+        elif abs(float(scipy_stats.skew(s))) <= 1.5:
+            p_norm = 0.999  # CLT bypass — mild skewness at large n
+            norm_test = "Skewness (CLT bypass)"
         else:
-            p_norm = scipy_stats.kstest(s, "norm", args=(float(s.mean()), float(s.std()))).pvalue
-            norm_test = "Kolmogorov-Smirnov"
+            from statsmodels.stats.diagnostic import lilliefors as _lilliefors
+            _, p_norm = _lilliefors(s.values, dist="norm")
+            norm_test = "Lilliefors"
         results[col] = {
             "n": int(s.count()),
             "missing": int(df[col].isna().sum()),
@@ -192,14 +196,21 @@ def correlation(session_id: str, method: str = "pearson"):
             if c1 == c2:
                 p_values[c1][c2] = 0.0
             else:
-                s1, s2 = num_df[[c1, c2]].dropna().values.T
-                if method == "pearson":
-                    _, p = scipy_stats.pearsonr(s1, s2)
-                elif method == "spearman":
-                    _, p = scipy_stats.spearmanr(s1, s2)
-                else:
-                    _, p = scipy_stats.kendalltau(s1, s2)
-                p_values[c1][c2] = float(p)
+                pair = num_df[[c1, c2]].dropna()
+                if len(pair) < 3 or pair[c1].std() == 0 or pair[c2].std() == 0:
+                    p_values[c1][c2] = None  # too few obs or constant
+                    continue
+                s1, s2 = pair.values.T
+                try:
+                    if method == "pearson":
+                        _, p = scipy_stats.pearsonr(s1, s2)
+                    elif method == "spearman":
+                        _, p = scipy_stats.spearmanr(s1, s2)
+                    else:
+                        _, p = scipy_stats.kendalltau(s1, s2)
+                    p_values[c1][c2] = float(p)
+                except Exception:
+                    p_values[c1][c2] = None
     return {
         "method": method,
         "columns": corr.columns.tolist(),
@@ -550,18 +561,22 @@ def roc_compare(req: ROCCompareRequest):
     higher_auc = max(auc1, auc2)
     lower_auc  = min(auc1, auc2)
 
+    # CI bounds should always be reported low→high
+    ci_report_lo = min(ci_lo, ci_hi)
+    ci_report_hi = max(ci_lo, ci_hi)
+
     if result["significant"]:
         result["interpretation"] = (
             f"{winner} significantly improved discrimination over {loser} "
             f"(AUC {higher_auc:.3f} vs. {lower_auc:.3f}; "
-            f"ΔAUC = {abs(diff):.3f}, 95% CI: {abs(ci_lo):.3f}–{abs(ci_hi):.3f}, "
+            f"ΔAUC = {abs(diff):.3f}, 95% CI: {ci_report_lo:.3f}–{ci_report_hi:.3f}, "
             f"DeLong p = {p_str})."
         )
     else:
         result["interpretation"] = (
             f"No significant difference between {req.score_column_1} and {req.score_column_2} "
             f"(AUC {auc1:.3f} vs. {auc2:.3f}; "
-            f"ΔAUC = {abs(diff):.3f}, 95% CI: {ci_lo:.3f}–{ci_hi:.3f}, "
+            f"ΔAUC = {abs(diff):.3f}, 95% CI: {ci_report_lo:.3f}–{ci_report_hi:.3f}, "
             f"DeLong p = {p_str})."
         )
 
@@ -617,13 +632,16 @@ def roc_combined(req: ROCCombinedRequest):
     if set(uniq) != {0, 1}:
         raise HTTPException(status_code=400, detail=f"Outcome must be exactly 0 and 1. Found: {uniq}")
 
-    # Fit logistic regression
+    # Fit logistic regression with cross-validated predictions to avoid overfitting bias
     try:
+        from sklearn.model_selection import cross_val_predict
         scaler = StandardScaler()
         X_sc = scaler.fit_transform(X)
         model = LogisticRegression(max_iter=2000, solver="lbfgs", C=1.0)
+        n_cv = min(10, max(3, len(y) // 10))  # adaptive CV folds
+        prob = cross_val_predict(model, X_sc, y, cv=n_cv, method="predict_proba")[:, 1]
+        # Also fit the full model for coefficients / reporting
         model.fit(X_sc, y)
-        prob = model.predict_proba(X_sc)[:, 1]
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Model fitting failed: {exc}")
 
@@ -889,19 +907,21 @@ def _build_stat_rows(
 
 
 def _normality_test(s_clean: pd.Series) -> tuple[float, str]:
-    """Return (p_value, test_name). Uses Shapiro-Wilk for n<50, K-S for n≥50."""
+    """Return (p_value, test_name). Three-tier: Shapiro ≤2000, CLT bypass, Lilliefors."""
     n = len(s_clean)
     if n < 3:
         return 1.0, "—"
-    if n < 50:
+    if n <= 2000:
         _, p = scipy_stats.shapiro(s_clean[:5000])
         return float(p), "Shapiro-Wilk"
-    else:
-        # Kolmogorov-Smirnov against N(μ,σ) with estimated parameters
-        _, p = scipy_stats.kstest(
-            s_clean, "norm", args=(float(s_clean.mean()), float(s_clean.std()))
-        )
-        return float(p), "Kolmogorov-Smirnov"
+    # Large n — check skewness first (CLT bypass)
+    skewness = float(scipy_stats.skew(s_clean))
+    if abs(skewness) <= 1.5:
+        return 0.999, "Skewness (CLT bypass)"
+    # Marked skewness — Lilliefors-corrected KS test
+    from statsmodels.stats.diagnostic import lilliefors as _lilliefors
+    _, p = _lilliefors(s_clean.values, dist="norm")
+    return float(p), "Lilliefors"
 
 
 @router.post("/table1")
@@ -1268,13 +1288,19 @@ def correlation_matrix_post(req: CorrelationMatrixRequest):
                 p_matrix[c1][c2] = None
             else:
                 pair = df[[c1, c2]].dropna()
-                if method == "spearman":
-                    _, pv = scipy_stats.spearmanr(pair[c1], pair[c2])
-                elif method == "kendall":
-                    _, pv = scipy_stats.kendalltau(pair[c1], pair[c2])
-                else:
-                    _, pv = scipy_stats.pearsonr(pair[c1], pair[c2])
-                p_matrix[c1][c2] = float(pv)
+                if len(pair) < 3 or pair[c1].std() == 0 or pair[c2].std() == 0:
+                    p_matrix[c1][c2] = None
+                    continue
+                try:
+                    if method == "spearman":
+                        _, pv = scipy_stats.spearmanr(pair[c1], pair[c2])
+                    elif method == "kendall":
+                        _, pv = scipy_stats.kendalltau(pair[c1], pair[c2])
+                    else:
+                        _, pv = scipy_stats.pearsonr(pair[c1], pair[c2])
+                    p_matrix[c1][c2] = float(pv)
+                except Exception:
+                    p_matrix[c1][c2] = None
 
     # Multicollinearity warnings: |r| >= 0.70
     warnings = []
