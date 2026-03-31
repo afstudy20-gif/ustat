@@ -52,7 +52,7 @@ const TRANSFORMS = [
   { id: "median_split", label: "Median split (2 groups)", note: "Below median=0, Above median=1" },
 ];
 
-const OPS = ["<", "<=", ">", ">=", "==", "!="] as const;
+const OPS = ["<", "<=", ">", ">=", "==", "!=", "contains", "!contains"] as const;
 
 const TEMPLATES_KEY = "compute_templates";
 
@@ -591,11 +591,11 @@ function RecodeTab({
                   </select>
 
                   <select
-                    className="select text-xs w-16"
+                    className="select text-xs w-24"
                     value={cond.op}
                     onChange={(e) => updateCond(ri, ci, { op: e.target.value })}
                   >
-                    {OPS.map((op) => <option key={op}>{op}</option>)}
+                    {OPS.map((op) => <option key={op} value={op}>{op}</option>)}
                   </select>
 
                   {/* Datalist gives dropdown suggestions but still allows free typing */}

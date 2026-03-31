@@ -180,12 +180,14 @@ class RecodeRequest(BaseModel):
 
 
 _OPS = {
-    "<":  lambda s, v: s < v,
-    "<=": lambda s, v: s <= v,
-    ">":  lambda s, v: s > v,
-    ">=": lambda s, v: s >= v,
-    "==": lambda s, v: s == v,
-    "!=": lambda s, v: s != v,
+    "<":        lambda s, v: s < v,
+    "<=":       lambda s, v: s <= v,
+    ">":        lambda s, v: s > v,
+    ">=":       lambda s, v: s >= v,
+    "==":       lambda s, v: s == v,
+    "!=":       lambda s, v: s != v,
+    "contains": lambda s, v: s.astype(str).str.contains(str(v), case=False, na=False),
+    "!contains": lambda s, v: ~s.astype(str).str.contains(str(v), case=False, na=False),
 }
 
 
@@ -221,12 +223,37 @@ def recode_compute(session_id: str, req: RecodeRequest):
         for cond in rule.conditions:
             if cond.op not in _OPS:
                 raise HTTPException(status_code=422, detail=f"Unknown operator '{cond.op}'")
-            col_s = pd.to_numeric(df[cond.col], errors="coerce") if pd.api.types.is_numeric_dtype(df[cond.op if False else cond.col]) else df[cond.col]
-            # Coerce to numeric when possible
-            col_num = pd.to_numeric(df[cond.col], errors="coerce")
-            if col_num.notna().sum() > 0:
-                col_s = col_num
-            v = _cast_val(col_s, cond.val)
+
+            raw_col = df[cond.col]
+            val = cond.val
+
+            # Decide whether to compare as numeric or string
+            # If the value looks numeric, try numeric comparison
+            val_is_numeric = False
+            try:
+                val_num = float(val)
+                val_is_numeric = True
+            except (TypeError, ValueError):
+                pass
+
+            if val_is_numeric and cond.op in ("<", "<=", ">", ">="):
+                # Numeric comparison — coerce column to numeric
+                col_s = pd.to_numeric(raw_col, errors="coerce")
+                v = val_num
+            elif val_is_numeric and cond.op in ("==", "!="):
+                # For ==  / !=, try numeric first, fall back to string
+                col_num = pd.to_numeric(raw_col, errors="coerce")
+                if col_num.notna().sum() > col_num.isna().sum():
+                    col_s = col_num
+                    v = val_num
+                else:
+                    col_s = raw_col.astype(str).str.strip()
+                    v = str(val).strip()
+            else:
+                # String comparison (value is text, or == / != on text column)
+                col_s = raw_col.astype(str).str.strip()
+                v = str(val).strip()
+
             try:
                 cond_mask = _OPS[cond.op](col_s, v)
             except Exception as exc:
@@ -250,15 +277,35 @@ def recode_compute(session_id: str, req: RecodeRequest):
             default = req.else_val
 
     df = df.copy()
-    df[new_col] = np.select(conditions, choices, default=default)
 
-    # Convert int-like float columns to int if no NaN
-    if df[new_col].notna().all():
+    # If all choices + default are numeric, use np.select normally
+    # If any is a string, cast everything to string to avoid mixed-type issues
+    all_numeric = all(isinstance(c, (int, float)) for c in choices)
+    if default is not np.nan:
         try:
-            if (df[new_col].astype(float) % 1 == 0).all():
-                df[new_col] = df[new_col].astype(int)
-        except (ValueError, TypeError):
-            pass
+            float(default)
+        except (TypeError, ValueError):
+            all_numeric = False
+
+    if all_numeric:
+        df[new_col] = np.select(conditions, choices, default=default)
+        # Convert int-like float columns to int if no NaN
+        if df[new_col].notna().all():
+            try:
+                vals = df[new_col].astype(float)
+                if (vals % 1 == 0).all():
+                    df[new_col] = vals.astype(int)
+            except (ValueError, TypeError):
+                pass
+    else:
+        # String mode: cast all choices to string
+        str_choices = [str(c) for c in choices]
+        str_default = "" if default is np.nan else str(default)
+        result = np.select(conditions, str_choices, default=str_default)
+        df[new_col] = result
+        # Replace empty string default with NaN
+        if default is np.nan:
+            df.loc[df[new_col] == "", new_col] = np.nan
 
     store.save(session_id, df)
     return _build_result(df, new_col)
