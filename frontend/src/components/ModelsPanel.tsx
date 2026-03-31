@@ -19,6 +19,45 @@ const PLOT_LAYOUT = {
   yaxis: { gridcolor: "#e5e7eb" },
 };
 
+// ── Model guidance ──────────────────────────────────────────────────────────
+const MODEL_GUIDANCE: Record<string, { use: string; check: string; interpret: string }> = {
+  linear: {
+    use: "Predict a continuous outcome from one or more predictors. Best for dose-response, biomarker prediction, and adjusted mean comparisons.",
+    check: "Residuals vs Fitted should show no pattern (linearity). Q-Q plot should be roughly diagonal (normality). Scale-Location should be flat (homoscedasticity). Use Robust SE if heteroscedastic.",
+    interpret: "Each coefficient = change in outcome per 1-unit increase in predictor, holding others constant. R\u00B2 = proportion of variance explained. Check p-values and 95% CIs.",
+  },
+  logistic: {
+    use: "Model a binary outcome (0/1) — e.g. death, readmission, disease presence. Returns Odds Ratios (OR) with 95% CI.",
+    check: "Outcome must be binary 0/1. Check for multicollinearity (VIF > 5). Sample size rule of thumb: \u2265 10 events per predictor variable (EPV).",
+    interpret: "OR > 1 = higher odds of outcome. OR < 1 = protective. OR = 1 = no effect. Report: OR (95% CI), p-value. Pseudo-R\u00B2 is NOT comparable to linear R\u00B2.",
+  },
+  ortable: {
+    use: "Publication-standard univariate + multivariate OR table. Shows each predictor's effect both alone and adjusted for all others.",
+    check: "Same as logistic. The forest plot visually compares unadjusted vs adjusted ORs — large shifts suggest confounding.",
+    interpret: "Univariate OR = crude effect. Multivariate OR = adjusted effect. If they differ substantially, the variable is confounded by others in the model.",
+  },
+  poisson: {
+    use: "Model count outcomes (0, 1, 2, 3...) — e.g. number of events, hospital visits, complications. Returns Incidence Rate Ratios (IRR).",
+    check: "Outcome must be non-negative integers. Check for overdispersion: if variance >> mean, use Negative Binomial instead. Robust SE helps with mild overdispersion.",
+    interpret: "IRR > 1 = higher rate. IRR = 1.5 means 50% more events. Report: IRR (95% CI), p-value.",
+  },
+  km: {
+    use: "Visualise time-to-event data. The survival curve shows the probability of surviving beyond each time point. Log-rank test compares curves between groups.",
+    check: "Event column must be binary 0/1 (1 = event occurred). Duration must be positive. Censoring is assumed non-informative.",
+    interpret: "Curves that separate early = strong effect. Log-rank p < 0.05 = significant difference between groups. Median survival = time at which 50% have had the event.",
+  },
+  cox: {
+    use: "Regression for time-to-event data with multiple predictors. Returns Hazard Ratios (HR) — the multiplicative effect on the event rate.",
+    check: "Proportional hazards assumption: HR should be constant over time (check Schoenfeld residuals). Event column must be binary 0/1.",
+    interpret: "HR > 1 = higher hazard (worse prognosis). HR < 1 = protective. HR = 1 = no effect. Report: HR (95% CI), p-value.",
+  },
+  rcs: {
+    use: "Model non-linear (U/J-shaped) dose-response relationships using Restricted Cubic Splines. Essential for continuous biomarkers where the effect is not a straight line.",
+    check: "Predictor must have enough unique values (\u2265 knots + 2). Logistic RCS requires binary 0/1 outcome. 4 knots is the standard default.",
+    interpret: "The dose-response curve shows how OR (or outcome) changes across the predictor range. Reference value = OR 1.0. Non-linearity p-value tests whether the curve is significantly non-linear.",
+  },
+};
+
 // ── p-value adjustment for one/two-tailed hypothesis ─────────────────────────
 function adjustP(p: number, beta: number, nullHyp: string): number {
   if (nullHyp === "leq") return beta > 0 ? Math.min(p / 2, 1) : Math.min(1 - p / 2, 1);
@@ -1437,6 +1476,22 @@ export default function ModelsPanel() {
       </div>
 
       <div className="flex-1 space-y-4">
+        {/* Model guidance */}
+        {MODEL_GUIDANCE[model] && (
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { icon: "🎯", title: "Use when", text: MODEL_GUIDANCE[model].use },
+              { icon: "✅", title: "Check", text: MODEL_GUIDANCE[model].check },
+              { icon: "📖", title: "Interpret", text: MODEL_GUIDANCE[model].interpret },
+            ].map(({ icon, title, text }) => (
+              <div key={title} className="panel bg-indigo-50 border-indigo-200 p-3">
+                <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mb-1">{icon} {title}</p>
+                <p className="text-xs text-indigo-800 leading-relaxed">{text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {result && isRCS ? (
           /* ── RCS dose-response result ─────────────────────────────────────── */
           <div className="panel space-y-3">

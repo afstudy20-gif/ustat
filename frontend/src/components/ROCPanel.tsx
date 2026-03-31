@@ -42,6 +42,25 @@ const fmtAUC = (auc: number, lo?: number, hi?: number) =>
     ? `AUC ${auc} (95% CI ${lo}–${hi})`
     : `AUC ${auc}`;
 
+// ── ROC Guidance ────────────────────────────────────────────────────────────
+const ROC_GUIDANCE = {
+  single: {
+    use: "Evaluate how well a single continuous predictor (biomarker, score) discriminates between two groups (e.g. disease vs. healthy, event vs. no event).",
+    check: "Outcome must be binary 0/1. The predictor should have a reasonable spread of values. AUC = 0.5 means no better than chance.",
+    interpret: "AUC 0.9-1.0 = Excellent, 0.8-0.9 = Good, 0.7-0.8 = Fair, <0.7 = Poor. Youden's index gives the optimal cut-off that maximises Sensitivity + Specificity. Report: AUC (95% CI).",
+  },
+  compare: {
+    use: "Compare two biomarkers' discriminative ability using the DeLong test. Essential for proving a new marker outperforms an existing one.",
+    check: "Both markers measured on the SAME patients (paired design). DeLong test is valid for correlated AUCs from the same sample.",
+    interpret: "p < 0.05 means one AUC is significantly higher. Report: AUC\u2081 vs AUC\u2082, \u0394AUC (95% CI), DeLong p. The overlaid ROC plot visualises the difference.",
+  },
+  multi: {
+    use: "Screen multiple biomarkers simultaneously to find the best single predictor. Overlay ROC curves for visual comparison.",
+    check: "Each predictor is evaluated independently against the same binary outcome. The combined model uses cross-validated predictions to avoid overfitting bias.",
+    interpret: "Compare AUCs and 95% CIs across predictors. Overlapping CIs suggest no significant difference. The combined model shows the joint discriminative power of all predictors together.",
+  },
+};
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface CurveStyle { color: string; width: number; dash: string; }
@@ -683,7 +702,7 @@ export default function ROCPanel() {
               {showCombined && (
                 <>
                   <p className="text-xs text-gray-400 leading-relaxed">
-                    Fits logistic regression on selected variables and plots the combined model ROC.
+                    Fits logistic regression on selected variables using cross-validated predictions (no overfitting bias) and plots the combined model ROC.
                   </p>
 
                   {/* Model name */}
@@ -804,6 +823,25 @@ export default function ROCPanel() {
 
       {/* ── Plot area ────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto">
+
+        {/* ROC Guidance */}
+        {(() => {
+          const g = mode === "single" ? ROC_GUIDANCE.single : ROC_GUIDANCE.multi;
+          return (
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                { icon: "🎯", title: "Use when", text: g.use },
+                { icon: "✅", title: "Check", text: g.check },
+                { icon: "📖", title: "Interpret", text: g.interpret },
+              ].map(({ icon, title, text }) => (
+                <div key={title} className="panel bg-indigo-50 border-indigo-200 p-3">
+                  <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mb-1">{icon} {title}</p>
+                  <p className="text-xs text-indigo-800 leading-relaxed">{text}</p>
+                </div>
+              ))}
+            </div>
+          );
+        })()}
 
         {/* Style controls bar */}
         {mode === "single" && result && (
