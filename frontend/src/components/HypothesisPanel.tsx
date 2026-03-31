@@ -13,6 +13,44 @@ const TESTS = [
   { id: "fisher",         label: "Fisher's exact",        group: "Categorical" },
 ];
 
+const TEST_GUIDANCE: Record<string, { when: string; assumptions: string; reading: string }> = {
+  ttest_1sample: {
+    when: "Compare one group's mean to a known reference value (e.g. population norm, clinical threshold).",
+    assumptions: "Outcome is continuous and approximately normally distributed (check Q-Q plot in Summary tab). Robust to mild non-normality if n > 30 (CLT).",
+    reading: "If p < 0.05, the sample mean is significantly different from the test value. Report: t(df) = X.XX, p = Y.YYY, mean difference = Z.ZZ.",
+  },
+  ttest_2sample: {
+    when: "Compare means between two independent groups (e.g. treatment vs. control, male vs. female).",
+    assumptions: "Both groups approximately normal (or n > 30 each). Levene's test checks equal variances — if violated, Welch's t-test is used automatically.",
+    reading: "p < 0.05 means the groups differ significantly. Report: t(df) = X.XX, p = Y.YYY. Add Cohen's d for effect size (small 0.2, medium 0.5, large 0.8).",
+  },
+  anova: {
+    when: "Compare means across 3+ groups simultaneously (e.g. drug A vs. B vs. C). Avoids multiple-comparison inflation from running many t-tests.",
+    assumptions: "Each group approximately normal, roughly equal variances (Levene's test). Robust if groups are balanced and n > 20 per group.",
+    reading: "A significant F-test (p < 0.05) means at least one group differs. Use post-hoc tests (Tukey, Bonferroni) to identify which pairs differ.",
+  },
+  mannwhitney: {
+    when: "Non-parametric alternative to the independent t-test. Use when data are ordinal, heavily skewed, or n < 20 per group.",
+    assumptions: "Both samples are independent. Tests whether one distribution is stochastically greater than the other (rank-based).",
+    reading: "p < 0.05 means the groups' rank distributions differ significantly. Report U statistic and p-value. Effect size: r = Z / sqrt(N).",
+  },
+  kruskal: {
+    when: "Non-parametric alternative to one-way ANOVA. Use when comparing 3+ groups with non-normal or ordinal data.",
+    assumptions: "Groups are independent. Tests whether at least one group's distribution differs from the others (rank-based).",
+    reading: "p < 0.05 means at least one group differs in rank distribution. Follow up with pairwise Mann-Whitney tests (with Bonferroni correction).",
+  },
+  chisquare: {
+    when: "Test association between two categorical variables (e.g. treatment group vs. outcome category). Use when all expected cell counts are >= 5.",
+    assumptions: "Each observation is independent. Expected frequency in each cell >= 5. If any cell < 5, use Fisher's exact test instead.",
+    reading: "p < 0.05 means the variables are significantly associated. Report: \u03C7\u00B2(df) = X.XX, p = Y.YYY. Add Cramer's V for effect size.",
+  },
+  fisher: {
+    when: "Exact test for 2\u00D72 tables, especially when sample is small or any expected cell count < 5. Preferred over chi-square for small samples.",
+    assumptions: "Fixed marginals. No minimum sample size requirement — valid even for very small tables.",
+    reading: "p < 0.05 means the row and column variables are significantly associated. Also report the odds ratio and its 95% CI.",
+  },
+};
+
 function ResultCard({ result }: { result: any }) {
   const fmt = (v: any) => {
     if (typeof v !== "number") return String(v);
@@ -151,6 +189,18 @@ export default function HypothesisPanel() {
             </div>
           ))}
         </div>
+
+        {/* Test guidance */}
+        {TEST_GUIDANCE[test] && (
+          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">When to use</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].when}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">Assumptions</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].assumptions}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">How to read</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].reading}</p>
+          </div>
+        )}
 
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>

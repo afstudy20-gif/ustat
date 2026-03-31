@@ -1660,4 +1660,43 @@ def run_power(req: PowerRequest):
     else:
         raise HTTPException(400, f"Unknown test: {req.test}")
 
-    return {"result": float(result) if result is not None else None, "label": label, "curve": curve}
+    result_text = _power_result_text(req, result)
+    return {"result": float(result) if result is not None else None, "label": label, "curve": curve, "result_text": result_text}
+
+
+def _power_result_text(req, result) -> str:
+    """Generate a plain-English interpretation of the power analysis result."""
+    if result is None:
+        return ""
+
+    test_names = {
+        "t_two": "two-sample t-test", "t_one": "one-sample/paired t-test",
+        "anova": "one-way ANOVA", "correlation": "correlation test",
+        "proportion": "two-proportion z-test", "chi2": "chi-square test",
+    }
+    test_name = test_names.get(req.test, req.test)
+    a_str = f"{req.alpha}" if req.alpha else "0.05"
+
+    if req.solve_for == "n":
+        n = int(np.ceil(result))
+        total = n * 2 if req.test in ("t_two", "proportion") else n
+        ratio_note = f" (ratio {req.ratio}:1)" if hasattr(req, "ratio") and req.ratio and req.ratio != 1 else ""
+        return (
+            f"You need {n} participants per group{ratio_note} (total N = {total}) "
+            f"for a {test_name} to detect an effect size of {req.effect_size} "
+            f"with {int((req.power or 0.8) * 100)}% power at alpha = {a_str}."
+        )
+    elif req.solve_for == "power":
+        pwr = round(result * 100, 1)
+        return (
+            f"With n = {req.n} per group and effect size = {req.effect_size}, "
+            f"your {test_name} has {pwr}% power to detect a real effect at alpha = {a_str}. "
+            f"{'This exceeds the 80% minimum standard.' if result >= 0.8 else 'This is below the 80% minimum — consider increasing your sample size.'}"
+        )
+    elif req.solve_for == "effect_size":
+        return (
+            f"With n = {req.n} per group at {int((req.power or 0.8) * 100)}% power (alpha = {a_str}), "
+            f"your {test_name} can detect a minimum effect size of {result:.3f}. "
+            f"Effects smaller than this will likely be missed."
+        )
+    return ""

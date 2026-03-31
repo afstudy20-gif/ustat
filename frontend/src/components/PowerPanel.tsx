@@ -13,7 +13,7 @@ type TestId   = "t_two" | "t_one" | "anova" | "correlation" | "proportion" | "ch
 type SolveFor = "n" | "power" | "effect_size";
 
 interface CurvePoint { n: number; power: number }
-interface PowerResult { result: number | null; label: string; curve: CurvePoint[] }
+interface PowerResult { result: number | null; label: string; curve: CurvePoint[]; result_text?: string }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -521,7 +521,7 @@ export default function PowerPanel() {
               <div className="rounded-xl border border-indigo-100 bg-white px-4 py-3 flex gap-3">
                 <span className="text-indigo-400 text-xl flex-shrink-0 mt-0.5">💬</span>
                 <p className="text-sm text-gray-700 leading-relaxed">
-                  {plainEnglish(test, solveFor, result.result, {
+                  {result.result_text || plainEnglish(test, solveFor, result.result, {
                     alpha, power, effectSize, n, p1, p2, testInfo,
                   })}
                 </p>

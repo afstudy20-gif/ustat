@@ -538,16 +538,16 @@ export default function Table1Panel() {
               </table>
             </div>
 
-            {/* Footer */}
-            <div className="mt-3 px-1 text-[11px] text-gray-400 space-y-1 leading-relaxed">
+            {/* Interpretation banner */}
+            <div className="mt-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-[11px] text-indigo-800 space-y-1 leading-relaxed">
+              <p className="font-semibold text-indigo-900">How to read this table</p>
               <p>
-                Normality: <span className="text-gray-500">n &lt; 50 → Shapiro-Wilk · n ≥ 50 → Kolmogorov-Smirnov</span>
-                {" · "}Normal → Mean±SD (t-test/ANOVA) · Non-normal → Median[IQR] (Mann-Whitney/Kruskal-Wallis)
+                Continuous variables are tested for normality to decide how they are summarised and compared:
+                <span className="font-medium"> n ≤ 2000 → Shapiro-Wilk · |skewness| ≤ 1.5 at large n → CLT bypass · otherwise → Lilliefors.</span>
               </p>
-              <p>
-                Categorical: Chi-square · Fisher's exact when expected cell &lt; 5
-                {" · "}*** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · ns = not significant
-              </p>
+              <p>Normal → <span className="font-medium">Mean ± SD</span> with t-test/ANOVA · Non-normal → <span className="font-medium">Median [IQR]</span> with Mann-Whitney/Kruskal-Wallis.</p>
+              <p>Categorical: Chi-square · Fisher's exact when any expected cell &lt; 5.</p>
+              <p className="text-indigo-600">*** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · ns = not significant</p>
             </div>
           </div>
         )}

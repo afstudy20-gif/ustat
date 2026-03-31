@@ -99,6 +99,18 @@ export default function ChartsPanel() {
           </button>
           {error && <p className="text-red-500 text-xs">{error}</p>}
         </div>
+
+        {/* Chart guidance */}
+        <div className="panel bg-gray-50 border-gray-200">
+          <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Tip</p>
+          <p className="text-xs text-gray-600 leading-relaxed">{
+            chartType === "histogram" ? "Shows the frequency distribution of a single numeric variable. The KDE (kernel density) overlay estimates the smooth probability density. Skewed histograms suggest using median instead of mean." :
+            chartType === "scatter" ? "Reveals relationships between two continuous variables. The regression line and R\u00B2 show linear fit strength. Add a Color variable to see group-specific patterns." :
+            chartType === "boxplot" ? "Compares distributions across groups. The box shows Q1\u2013Q3 (IQR), the line is the median, whiskers extend to 1.5\u00D7IQR. Points beyond whiskers are outliers." :
+            chartType === "violin" ? "Combines a box plot with a kernel density estimate. The wider the violin, the more data points at that value. Better than box plots for showing bimodal or skewed distributions." :
+            "Shows counts or aggregated values for categories. Use for comparing frequencies across groups. Add a Color variable for stacked/grouped comparisons."
+          }</p>
+        </div>
       </div>
 
       {/* Plot area */}

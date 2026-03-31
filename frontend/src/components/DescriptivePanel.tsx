@@ -845,6 +845,27 @@ export default function DescriptivePanel() {
                     <StatBadge label="Skew" value={fmt(summary.skewness)} />
                   </div>
                 )}
+                {/* Interpretation guidance */}
+                {summary.type === "numeric" && (
+                  <div className="px-4 py-1.5 border-b border-gray-100 bg-amber-50 flex-shrink-0">
+                    <p className="text-[10px] text-amber-800 leading-relaxed">
+                      {summary.normal
+                        ? `Normal distribution (${summary.normality_test}, p=${summary.normality_p?.toFixed(3)}) \u2014 report Mean \u00B1 SD (${summary.mean?.toFixed(1)} \u00B1 ${summary.std?.toFixed(1)}).`
+                        : `Non-normal (${summary.normality_test}, p=${summary.normality_p?.toFixed(3)}) \u2014 report Median [IQR] (${summary.median?.toFixed(1)} [${summary.q1?.toFixed(1)}\u2013${summary.q3?.toFixed(1)}]).`
+                      }
+                      {Math.abs(summary.skewness) > 2 ? " Highly skewed \u2014 consider log-transformation." :
+                       Math.abs(summary.skewness) > 1 ? " Moderately skewed." : ""}
+                    </p>
+                  </div>
+                )}
+                {summary.type === "categorical" && (
+                  <div className="px-4 py-1.5 border-b border-gray-100 bg-amber-50 flex-shrink-0">
+                    <p className="text-[10px] text-amber-800 leading-relaxed">
+                      {summary.categories?.length} categories, n = {summary.n}. Report as n (%). Most frequent: {summary.categories?.[0]?.value} ({summary.categories?.[0]?.pct}%).
+                      {summary.missing > 0 ? ` Missing: ${summary.missing} (${(summary.missing / (summary.n + summary.missing) * 100).toFixed(1)}%).` : ""}
+                    </p>
+                  </div>
+                )}
 
                 {/* Charts */}
                 <div className="flex-1 overflow-y-auto p-4">
