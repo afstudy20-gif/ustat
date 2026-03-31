@@ -84,6 +84,28 @@ export const runMixedAnova   = (data: object) => api.post("/api/repeated/mixed_a
 export const runAncova       = (data: object) => api.post("/api/advanced_anova/ancova", data);
 export const runTwoWayAnova  = (data: object) => api.post("/api/advanced_anova/two_way_anova", data);
 
+// Categorical
+export const runBinomial     = (data: object) => api.post("/api/categorical/binomial", data);
+export const runOneProportion = (data: object) => api.post("/api/categorical/one_proportion", data);
+export const runTwoProportions = (data: object) => api.post("/api/categorical/two_proportions", data);
+export const runMcNemar      = (data: object) => api.post("/api/categorical/mcnemar", data);
+export const runCochranQ     = (data: object) => api.post("/api/categorical/cochran_q", data);
+export const runMantelHaenszel = (data: object) => api.post("/api/categorical/mantel_haenszel", data);
+
+// Agreement
+export const runBlandAltman  = (data: object) => api.post("/api/agreement/bland_altman", data);
+export const runDeming       = (data: object) => api.post("/api/agreement/deming", data);
+export const runPassingBablok = (data: object) => api.post("/api/agreement/passing_bablok", data);
+export const runConcordance  = (data: object) => api.post("/api/agreement/concordance", data);
+
+// Reliability
+export const runCronbach     = (data: object) => api.post("/api/reliability/cronbach", data);
+
+// Missing data
+export const runMissingPattern = (data: object) => api.post("/api/missing_data/pattern", data);
+export const runMCARTest     = (data: object) => api.post("/api/missing_data/mcar_test", data);
+export const runImputationCompare = (data: object) => api.post("/api/missing_data/imputation_compare", data);
+
 export const selectCases = (sessionId: string, conditions: object[]) =>
   api.post(`/api/sessions/${sessionId}/select_cases`, { conditions });
 export const clearCases  = (sessionId: string) =>

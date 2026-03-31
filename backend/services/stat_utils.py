@@ -503,3 +503,35 @@ def matched_rank_biserial(w_stat: float, n: int) -> dict:
     ci_hi = min(1, r + 1.96 * se)
     return {"name": "rank_biserial_r", "value": round(r, 4), "ci_low": round(ci_lo, 4),
             "ci_high": round(ci_hi, 4), "magnitude": _es_magnitude("rank_biserial_r", r)}
+
+
+def cohens_h(p1: float, p2: float) -> dict:
+    """Cohen's h for comparing two proportions."""
+    h = 2 * (np.arcsin(np.sqrt(max(0, min(1, p1)))) - np.arcsin(np.sqrt(max(0, min(1, p2)))))
+    return {"name": "cohens_h", "value": round(float(h), 4), "ci_low": None, "ci_high": None,
+            "magnitude": _es_magnitude("cohen_d", h)}
+
+
+def lins_ccc(x: np.ndarray, y: np.ndarray) -> dict:
+    """Lin's concordance correlation coefficient with 95% CI."""
+    n = len(x)
+    mx, my = float(x.mean()), float(y.mean())
+    sx, sy = float(x.std(ddof=1)), float(y.std(ddof=1))
+    r = float(np.corrcoef(x, y)[0, 1]) if sx > 0 and sy > 0 else 0.0
+    precision = r
+    denom = sx**2 + sy**2 + (mx - my)**2
+    accuracy = 2 * sx * sy / denom if denom > 0 else 0.0
+    ccc = precision * accuracy
+    if n > 3 and abs(ccc) < 1:
+        z = np.arctanh(ccc)
+        se = np.sqrt(1 / (n - 3))
+        ci_lo = float(np.tanh(z - 1.96 * se))
+        ci_hi = float(np.tanh(z + 1.96 * se))
+    else:
+        ci_lo, ci_hi = float(ccc), float(ccc)
+    return {
+        "name": "lins_ccc", "value": round(float(ccc), 4),
+        "ci_low": round(ci_lo, 4), "ci_high": round(ci_hi, 4),
+        "precision": round(float(precision), 4), "accuracy": round(float(accuracy), 4),
+        "magnitude": _es_magnitude("r", ccc),
+    }

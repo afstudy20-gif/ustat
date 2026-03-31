@@ -8,7 +8,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore
 
-from routers import upload, stats, charts, models, session, compute, repeated, advanced_anova
+from routers import upload, stats, charts, models, session, compute, repeated, advanced_anova, categorical, agreement, reliability, missing_data
 from services import store
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
@@ -28,6 +28,10 @@ app.include_router(session.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(compute.router, prefix="/api/compute", tags=["compute"])
 app.include_router(repeated.router, prefix="/api/repeated", tags=["repeated"])
 app.include_router(advanced_anova.router, prefix="/api/advanced_anova", tags=["advanced_anova"])
+app.include_router(categorical.router, prefix="/api/categorical", tags=["categorical"])
+app.include_router(agreement.router, prefix="/api/agreement", tags=["agreement"])
+app.include_router(reliability.router, prefix="/api/reliability", tags=["reliability"])
+app.include_router(missing_data.router, prefix="/api/missing_data", tags=["missing_data"])
 
 
 @app.get("/api/health")

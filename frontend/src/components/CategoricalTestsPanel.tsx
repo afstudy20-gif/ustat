@@ -1,0 +1,213 @@
+import { useState } from "react";
+import { useStore } from "../store";
+import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel } from "../api";
+// ResultExporter available via ResultCard pattern
+
+const TESTS = [
+  { id: "binomial",       label: "Binomial test",         group: "One-sample" },
+  { id: "one_prop",       label: "One proportion z-test", group: "One-sample" },
+  { id: "two_prop",       label: "Two proportions z-test", group: "Two-sample" },
+  { id: "mcnemar",        label: "McNemar test",          group: "Paired" },
+  { id: "cochran_q",      label: "Cochran's Q",           group: "Paired" },
+  { id: "mantel_haenszel", label: "Mantel-Haenszel",      group: "Stratified" },
+] as const;
+
+const GUIDANCE: Record<string, { when: string; reading: string }> = {
+  binomial:  { when: "Test whether the observed proportion differs from an expected proportion (e.g. 50% heads).", reading: "p < 0.05 means the observed proportion significantly differs from the expected." },
+  one_prop:  { when: "z-test version of the binomial test, using normal approximation. Better for larger samples (n > 30).", reading: "Report: z, p, observed proportion, and 95% CI." },
+  two_prop:  { when: "Compare proportions between two independent groups (e.g. treatment vs control event rates).", reading: "Cohen's h measures the effect size. Report proportions, z, p, and h." },
+  mcnemar:   { when: "Test change in a binary outcome for paired data (e.g. before/after intervention on the same patients).", reading: "Tests whether discordant pairs (changed responses) are symmetric. OR of discordant pairs is the effect size." },
+  cochran_q: { when: "Extension of McNemar for 3+ related binary measures. Tests whether proportions differ across conditions.", reading: "Significant Q means at least one proportion differs. Follow up with pairwise McNemar (Holm-corrected)." },
+  mantel_haenszel: { when: "Test association between two binary variables while controlling for a stratifying variable (e.g. hospital site).", reading: "Common OR summarises the overall effect across strata. Homogeneity test checks whether the OR is consistent." },
+};
+
+function ResultCard({ result }: { result: any }) {
+  const fmt = (v: any) => typeof v !== "number" ? String(v ?? "") : Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(3) : v.toFixed(4);
+  const skip = new Set(["test","interpretation","result_text","significant","effect_sizes","assumptions","warnings","summary","posthoc","posthoc_method","export_rows","r_code","effects","table","row_labels","col_labels","plot_data","crosstab","strata_tables"]);
+  const stats = Object.entries(result).filter(([k, v]) => !skip.has(k) && typeof v !== "object");
+  return (
+    <div className="panel space-y-3">
+      <div className="flex items-center justify-between">
+        <h4 className="font-semibold text-gray-900">{result.test}</h4>
+        {"significant" in result && <span className={result.significant ? "badge-sig" : "badge-ns"}>{result.significant ? "Significant" : "Not significant"}</span>}
+      </div>
+      <p className="text-sm text-gray-500 italic">{result.interpretation}</p>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        {stats.map(([k, v]) => (
+          <div key={k} className="flex justify-between border-b border-gray-100 py-1">
+            <span className="text-gray-400">{k}</span><span className="text-gray-700 font-mono">{fmt(v)}</span>
+          </div>
+        ))}
+      </div>
+      {result.effect_sizes?.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
+          {result.effect_sizes.map((es: any, i: number) => (
+            <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
+              <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
+              <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
+              {es.ci_low != null && <span className="text-indigo-500">95% CI: [{es.ci_low?.toFixed(3)}, {es.ci_high?.toFixed(3)}]</span>}
+              {es.magnitude && <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${es.magnitude==="large"?"bg-red-100 text-red-700":es.magnitude==="medium"?"bg-amber-100 text-amber-700":"bg-blue-100 text-blue-700"}`}>{es.magnitude}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+      {result.posthoc?.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-600 mb-1">Post-hoc: {result.posthoc_method ?? "Pairwise"}</p>
+          <div className="overflow-auto rounded border border-gray-200">
+            <table className="w-full text-xs"><thead><tr className="bg-gray-50">
+              <th className="px-2 py-1 text-left">Comparison</th><th className="px-2 py-1 text-right">p (adj)</th><th className="px-2 py-1 text-center">Sig</th>
+            </tr></thead><tbody>
+              {result.posthoc.map((ph: any, i: number) => (
+                <tr key={i} className={`border-t border-gray-100 ${ph.significant?"":"text-gray-400"}`}>
+                  <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
+                  <td className="px-2 py-1 text-right font-mono">{ph.p_adj<0.001?"<0.001":ph.p_adj?.toFixed(4)}</td>
+                  <td className="px-2 py-1 text-center">{ph.significant?"\u2713":"\u2014"}</td>
+                </tr>
+              ))}
+            </tbody></table>
+          </div>
+        </div>
+      )}
+      {result.result_text && (
+        <div className="rounded-lg border border-indigo-100 bg-white px-3 py-2 text-xs text-gray-600 leading-relaxed">
+          <span className="text-indigo-400 mr-1">\uD83D\uDCAC</span> {result.result_text}
+        </div>
+      )}
+      {result.r_code && (
+        <details className="text-xs"><summary className="text-gray-400 cursor-pointer hover:text-indigo-600">R code</summary>
+          <pre className="mt-1 p-2 bg-gray-50 rounded-lg text-gray-600 font-mono text-[10px] whitespace-pre-wrap">{result.r_code}</pre>
+        </details>
+      )}
+    </div>
+  );
+}
+
+export default function CategoricalTestsPanel() {
+  const session = useStore((s) => s.session);
+  if (!session) return null;
+  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const binCols = [...catCols, ...numCols]; // binary cols could be either
+
+  const [test, setTest] = useState<string>("binomial");
+  const [col, setCol] = useState(binCols[0] ?? "");
+  const [col2, setCol2] = useState(binCols[1] ?? binCols[0] ?? "");
+  const [groupCol, setGroupCol] = useState(catCols[0] ?? "");
+  const [strataCol, setStrataCol] = useState(catCols[1] ?? catCols[0] ?? "");
+  const [nullProp, setNullProp] = useState("0.5");
+  const [friedmanCols, setFriedmanCols] = useState<string[]>([]);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const isPaired = test === "mcnemar";
+  const isCochran = test === "cochran_q";
+  const isMH = test === "mantel_haenszel";
+  const isTwoProp = test === "two_prop";
+  const needsNull = test === "binomial" || test === "one_prop";
+
+  const run = async () => {
+    setLoading(true); setError(null); setResult(null);
+    const sid = session.session_id;
+    try {
+      let res: any;
+      if (test === "binomial") res = await runBinomial({ session_id: sid, column: col, expected_proportion: +nullProp });
+      else if (test === "one_prop") res = await runOneProportion({ session_id: sid, column: col, null_proportion: +nullProp });
+      else if (test === "two_prop") res = await runTwoProportions({ session_id: sid, column: col, group_column: groupCol });
+      else if (test === "mcnemar") res = await runMcNemar({ session_id: sid, col1: col, col2: col2 });
+      else if (test === "cochran_q") res = await runCochranQ({ session_id: sid, columns: friedmanCols });
+      else if (test === "mantel_haenszel") res = await runMantelHaenszel({ session_id: sid, row_col: col, col_col: col2, strata_col: strataCol });
+      setResult(res?.data);
+    } catch (e: any) { setError(e.response?.data?.detail ?? "Error"); }
+    finally { setLoading(false); }
+  };
+
+  const g = GUIDANCE[test];
+  return (
+    <div className="flex gap-4">
+      <div className="w-64 flex-shrink-0 space-y-4">
+        <div className="panel space-y-1">
+          {["One-sample", "Two-sample", "Paired", "Stratified"].map((grp) => (
+            <div key={grp}>
+              <p className="text-xs text-gray-400 uppercase tracking-wider mt-3 mb-1 first:mt-0">{grp}</p>
+              {TESTS.filter((t) => t.group === grp).map(({ id, label }) => (
+                <label key={id} className="flex items-center gap-2 cursor-pointer py-0.5">
+                  <input type="radio" name="cat_test" value={id} checked={test === id}
+                    onChange={() => { setTest(id); setResult(null); }} className="accent-indigo-500" />
+                  <span className="text-sm text-gray-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+        {g && (
+          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
+            <p className="text-[10px] font-bold text-indigo-900 uppercase">When to use</p>
+            <p className="text-xs text-indigo-800">{g.when}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase mt-2">How to read</p>
+            <p className="text-xs text-indigo-800">{g.reading}</p>
+          </div>
+        )}
+        <div className="panel space-y-3">
+          <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">{isMH ? "Row variable" : "Binary column"}</label>
+            <select className="select w-full" value={col} onChange={(e) => setCol(e.target.value)}>
+              {binCols.map((c) => <option key={c}>{c}</option>)}
+            </select>
+          </div>
+          {needsNull && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Expected proportion</label>
+              <input className="select w-full" type="number" step="0.01" min="0" max="1" value={nullProp} onChange={(e) => setNullProp(e.target.value)} />
+            </div>
+          )}
+          {isTwoProp && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Group column</label>
+              <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
+                {catCols.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {(isPaired || isMH) && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">{isMH ? "Column variable" : "Second measurement"}</label>
+              <select className="select w-full" value={col2} onChange={(e) => setCol2(e.target.value)}>
+                {binCols.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {isMH && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Stratifying variable</label>
+              <select className="select w-full" value={strataCol} onChange={(e) => setStrataCol(e.target.value)}>
+                {catCols.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          {isCochran && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Binary columns (3+)</label>
+              <select multiple className="select w-full h-28" value={friedmanCols}
+                onChange={(e) => setFriedmanCols(Array.from(e.target.selectedOptions, o => o.value))}>
+                {binCols.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+          <button className="btn-primary w-full" onClick={run} disabled={loading || (isCochran && friedmanCols.length < 3)}>
+            {loading ? "Running\u2026" : "Run Test"}
+          </button>
+          {error && <p className="text-red-400 text-xs">{error}</p>}
+        </div>
+      </div>
+      <div className="flex-1">
+        {result ? <ResultCard result={result} /> : (
+          <div className="panel text-center text-gray-400 py-12">Select a test and configure variables</div>
+        )}
+      </div>
+    </div>
+  );
+}

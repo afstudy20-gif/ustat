@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, RefreshCw } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, RefreshCw, ToggleLeft, Shield } from "lucide-react";
 import { clearCases } from "./api";
 import AboutModal from "./components/AboutModal";
 
@@ -31,6 +31,8 @@ import PowerPanel from "./components/PowerPanel";
 import ComputePanel from "./components/ComputePanel";
 import PSMPanel from "./components/PSMPanel";
 import RepeatedMeasuresPanel from "./components/RepeatedMeasuresPanel";
+import CategoricalTestsPanel from "./components/CategoricalTestsPanel";
+import ReliabilityPanel from "./components/ReliabilityPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
 
 const TABS = [
@@ -39,6 +41,8 @@ const TABS = [
   { id: "table1",      label: "Table",       icon: ClipboardList },
   { id: "hypothesis",  label: "Hypothesis",  icon: FlaskConical },
   { id: "repeated",    label: "Repeated",    icon: RefreshCw },
+  { id: "categorical", label: "Categorical", icon: ToggleLeft },
+  { id: "reliability", label: "Reliability", icon: Shield },
   { id: "correlation", label: "Correlation", icon: GitMerge },
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
@@ -271,6 +275,8 @@ export default function App() {
           {activeTab === "table1"      && <Table1Panel />}
           {activeTab === "hypothesis"  && <div className="flex-1 p-4 overflow-y-auto"><HypothesisPanel /></div>}
           {activeTab === "repeated"    && <div className="flex-1 p-4 overflow-y-auto"><RepeatedMeasuresPanel /></div>}
+          {activeTab === "categorical" && <div className="flex-1 p-4 overflow-y-auto"><CategoricalTestsPanel /></div>}
+          {activeTab === "reliability" && <div className="flex-1 p-4 overflow-y-auto"><ReliabilityPanel /></div>}
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
           {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
