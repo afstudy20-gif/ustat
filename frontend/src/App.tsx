@@ -44,7 +44,6 @@ const TABS = [
   { id: "power",       label: "Power",       icon: Zap },
   { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
-  { id: "charts",      label: "Charts",      icon: BarChart2 },
 ];
 
 /** Download file via hidden iframe — most reliable cross-platform method */
@@ -110,6 +109,27 @@ function SaveBeforeOpenModal({
             Cancel
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function VisualChartsCombo() {
+  const [sub, setSub] = useState<"models" | "charts">("models");
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        {([["models", "Models & Diagnostics"], ["charts", "Charts"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto">
+        {sub === "models" ? <VisualModelPanel /> : <ChartsPanel />}
       </div>
     </div>
   );
@@ -251,11 +271,10 @@ export default function App() {
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
           {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
-          {activeTab === "visual"      && <div className="flex-1 p-4 overflow-y-auto"><VisualModelPanel /></div>}
+          {activeTab === "visual"      && <VisualChartsCombo />}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "compute"     && <div className="flex-1 p-4 overflow-y-auto"><ComputePanel /></div>}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
-          {activeTab === "charts"      && <div className="flex-1 p-4 overflow-y-auto"><ChartsPanel /></div>}
         </ErrorBoundary>
       </main>
     </div>
