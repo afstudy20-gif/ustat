@@ -137,7 +137,10 @@ export default function PowerPanel() {
   const [p1,         setP1]         = useState("0.50");
   const [p2,         setP2]         = useState("0.30");
 
-  const [result,  setResult]  = useState<PowerResult | null>(null);
+  const cachedPower = useStore((s) => s.panelCache.power);
+  const setCachePower = useStore((s) => s.setPanelCache);
+  const [result,  _setResultPower]  = useState<PowerResult | null>(cachedPower?.result ?? null);
+  const setResult = (r: PowerResult | null) => { _setResultPower(r); setCachePower("power", { result: r }); };
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 

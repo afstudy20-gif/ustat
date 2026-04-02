@@ -245,9 +245,12 @@ export default function HypothesisPanel() {
   const [mu, setMu] = useState("0");
   const [covariates, setCovariates] = useState<string[]>([]);
   const [factor2, setFactor2] = useState(catCols[1] ?? catCols[0] ?? "");
-  const [result, setResult] = useState<any>(null);
+  const cached = useStore((s) => s.panelCache.hypothesis);
+  const setCache = useStore((s) => s.setPanelCache);
+  const [result, _setResult] = useState<any>(cached?.result ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const setResult = (r: any) => { _setResult(r); setCache("hypothesis", { result: r }); };
 
   const isCat = test === "chisquare" || test === "fisher";
   const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "ancova"].includes(test);

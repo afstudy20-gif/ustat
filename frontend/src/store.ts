@@ -90,6 +90,10 @@ interface AppState {
   table1Result: any;
   setTable1Result: (r: any) => void;
   clearTable1: () => void;
+  // Generic panel result cache — persists results across tab switches
+  panelCache: Record<string, any>;
+  setPanelCache: (panel: string, data: any) => void;
+  clearPanelCache: (panel: string) => void;
 }
 
 const loadTheme = (): PlotTheme => {
@@ -104,7 +108,7 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
-  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null }),
+  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {} }),
   setActiveTab: (t) => set({ activeTab: t }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   toggleGrid: () => set((state) => {
@@ -117,7 +121,7 @@ export const useStore = create<AppState>((set) => ({
     localStorage.setItem("plotTheme", JSON.stringify(next));
     return { plotTheme: next };
   }),
-  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null }),
+  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {} }),
   updateColumnKind: (name, kind) =>
     set((state) => {
       if (!state.session) return state;
@@ -172,4 +176,11 @@ export const useStore = create<AppState>((set) => ({
     }),
   setTable1Result: (r) => set({ table1Result: r }),
   clearTable1: () => set({ table1Result: null }),
+  panelCache: {},
+  setPanelCache: (panel, data) => set((state) => ({ panelCache: { ...state.panelCache, [panel]: data } })),
+  clearPanelCache: (panel) => set((state) => {
+    const next = { ...state.panelCache };
+    delete next[panel];
+    return { panelCache: next };
+  }),
 }));

@@ -378,6 +378,10 @@ export default function DataTable() {
   const [renameVal, setRenameVal] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
 
+  // Right-click context menu
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; col: string } | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
+
   const inputRef   = useRef<HTMLInputElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
 
@@ -466,6 +470,29 @@ export default function DataTable() {
   useEffect(() => {
     if (renameCol) setTimeout(() => renameRef.current?.focus(), 0);
   }, [renameCol]);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxMenu(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ctxMenu]);
+
+  const deleteColumn = async (colName: string) => {
+    if (!session) return;
+    setCtxMenu(null);
+    try {
+      await api.delete(`/api/compute/${session.session_id}/column/${encodeURIComponent(colName)}`);
+      const updatedCols = session.columns.filter((c) => c.name !== colName);
+      const updatedPreview = session.preview.map((row) => {
+        const r = { ...row }; delete r[colName]; return r;
+      });
+      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+    } catch { /* ignore */ }
+  };
 
   const startRename = (colName: string) => {
     setRenameCol(colName);
@@ -739,6 +766,7 @@ export default function DataTable() {
                       setDropIdx(null);
                     }}
                     onDragEnd={() => { setDragIdx(null); setDropIdx(null); }}
+                    onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
                     className={`px-2 py-2 border-r border-gray-200 min-w-[130px] max-w-[200px] cursor-grab active:cursor-grabbing select-none
                       ${dragIdx === colIdx ? "opacity-40" : ""}
                       ${isDragOver ? "border-l-2 border-l-indigo-500" : ""}`}
@@ -888,12 +916,38 @@ export default function DataTable() {
 
       {/* ── Legend ── */}
       <div className="flex-shrink-0 flex items-center gap-4 text-[10px] text-gray-400 px-1">
-        <span>Click a <span className="text-blue-600">type badge</span> to toggle num / cat / bool / txt</span>
+        <span>Click a <span className="text-blue-600">type badge</span> to toggle num / cat / txt / date</span>
         <span>·</span>
-        <span>Click any <span className="text-gray-500">cell</span> to edit · Enter to save · Esc to cancel</span>
+        <span>Double-click <span className="text-gray-500">header</span> to rename · Right-click to delete</span>
         <span>·</span>
-        <span>Click <span className="text-gray-500">⇅</span> to sort</span>
+        <span>Click <span className="text-gray-500">cell</span> to edit · <span className="text-gray-500">⇅</span> to sort</span>
       </div>
+
+      {/* ── Right-click context menu ── */}
+      {ctxMenu && (
+        <div ref={ctxRef}
+          className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">{ctxMenu.col}</div>
+          <button onClick={() => { startRename(ctxMenu.col); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ✏️ Rename
+          </button>
+          <button onClick={() => { cycleKind(ctxMenu.col); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            🏷️ Change type
+          </button>
+          <button onClick={() => { toggleSort(ctxMenu.col); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ⇅ Sort
+          </button>
+          <div className="border-t border-gray-100 mt-0.5" />
+          <button onClick={() => deleteColumn(ctxMenu.col)}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 flex items-center gap-2">
+            🗑️ Delete column
+          </button>
+        </div>
+      )}
     </div>
   );
 }

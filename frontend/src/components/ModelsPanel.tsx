@@ -1142,7 +1142,10 @@ export default function ModelsPanel() {
   const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
   const [eventCol, setEventCol] = useState(numCols[1] ?? "");
   const [groupCol, setGroupCol] = useState("");
-  const [result, setResult] = useState<any>(null);
+  const cachedModels = useStore((s) => s.panelCache.models);
+  const setCacheModels = useStore((s) => s.setPanelCache);
+  const [result, _setResultRaw] = useState<any>(cachedModels?.result ?? null);
+  const setResult = (r: any) => { _setResultRaw(r); setCacheModels("models", { result: r }); };
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
