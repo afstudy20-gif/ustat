@@ -564,19 +564,20 @@ export default function DataTable() {
 
   const commitRename = async () => {
     if (!renameCol || !session) return;
+    const oldName = renameCol;  // capture before clearing state
     const newName = renameVal.trim();
     setRenameCol(null);
-    if (!newName || newName === renameCol) return;
+    if (!newName || newName === oldName) return;
     pushUndo();
     try {
-      await renameColumn(session.session_id, renameCol, newName);
+      await renameColumn(session.session_id, oldName, newName);
       // Update local state
       const updatedCols = session.columns.map((c) =>
-        c.name === renameCol ? { ...c, name: newName } : c
+        c.name === oldName ? { ...c, name: newName } : c
       );
       const updatedPreview = session.preview.map((row) => {
         const r = { ...row };
-        if (renameCol in r) { r[newName] = r[renameCol]; delete r[renameCol]; }
+        if (oldName in r) { r[newName] = r[oldName]; delete r[oldName]; }
         return r;
       });
       useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
@@ -824,7 +825,7 @@ export default function DataTable() {
                 return (
                   <th
                     key={col.name}
-                    draggable
+                    draggable={renameCol !== col.name}
                     onDragStart={(e) => {
                       setDragIdx(colIdx);
                       e.dataTransfer.effectAllowed = "move";
@@ -844,7 +845,8 @@ export default function DataTable() {
                     }}
                     onDragEnd={() => { setDragIdx(null); setDropIdx(null); }}
                     onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
-                    className={`px-2 py-2 border-r border-gray-200 min-w-[130px] max-w-[200px] cursor-grab active:cursor-grabbing select-none
+                    className={`px-2 py-2 border-r border-gray-200 min-w-[130px] max-w-[200px]
+                      ${renameCol === col.name ? "" : "cursor-grab active:cursor-grabbing select-none"}
                       ${dragIdx === colIdx ? "opacity-40" : ""}
                       ${isDragOver ? "border-l-2 border-l-indigo-500" : ""}`}
                   >
@@ -860,10 +862,12 @@ export default function DataTable() {
                         </button>
                         {renameCol === col.name ? (
                           <input ref={renameRef}
-                            className="text-xs font-medium text-gray-900 bg-white border border-indigo-400 rounded px-1 py-0 w-24 focus:outline-none"
+                            className="text-xs font-medium text-gray-900 bg-white border border-indigo-400 rounded px-1 py-0 w-24 focus:outline-none select-text"
                             value={renameVal}
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onChange={(e) => setRenameVal(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenameCol(null); }}
+                            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenameCol(null); }}
                             onBlur={commitRename}
                           />
                         ) : (
