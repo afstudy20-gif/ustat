@@ -860,7 +860,45 @@ def delete_column(session_id: str, col_name: str):
     return {"deleted": col_name}
 
 
-# ── 6. Rename column ────────────────────────────────────────────────────────
+# ── 6. Fill blanks ──────────────────────────────────────────────────────────
+
+class FillBlanksRequest(BaseModel):
+    column: str
+    value: str  # fill value (will be cast to match column dtype)
+
+
+@router.post("/{session_id}/fill_blanks")
+def fill_blanks(session_id: str, req: FillBlanksRequest):
+    df = _get_df(session_id)
+    if req.column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{req.column}' not found")
+
+    df = df.copy()
+    col = df[req.column]
+    n_before = int(col.isna().sum() + (col.astype(str).str.strip() == "").sum())
+
+    # Try numeric cast first
+    try:
+        fill_val = float(req.value)
+        if fill_val == int(fill_val):
+            fill_val = int(fill_val)
+    except (ValueError, TypeError):
+        fill_val = req.value
+
+    # Fill NaN and empty strings
+    df[req.column] = col.fillna(fill_val)
+    if col.dtype == object:
+        df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+
+    n_after = int(df[req.column].isna().sum())
+    n_filled = n_before - n_after
+
+    store.save(session_id, df)
+    store.log_action(session_id, "fill_blanks", {"column": req.column, "value": req.value, "n_filled": n_filled})
+    return {"column": req.column, "fill_value": fill_val, "n_filled": n_filled}
+
+
+# ── 7. Rename column ────────────────────────────────────────────────────────
 
 class RenameRequest(BaseModel):
     old_name: str

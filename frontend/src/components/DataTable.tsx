@@ -380,7 +380,10 @@ export default function DataTable() {
 
   // Right-click context menu
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; col: string } | null>(null);
+  const [fillMode, setFillMode] = useState<string | null>(null); // col name when fill prompt is open
+  const [fillVal, setFillVal] = useState("");
   const ctxRef = useRef<HTMLDivElement>(null);
+  const fillRef = useRef<HTMLInputElement>(null);
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
@@ -491,6 +494,27 @@ export default function DataTable() {
         const r = { ...row }; delete r[colName]; return r;
       });
       useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+    } catch { /* ignore */ }
+  };
+
+  const sendToEnd = (colName: string) => {
+    if (!session) return;
+    setCtxMenu(null);
+    const idx = session.columns.findIndex((c) => c.name === colName);
+    if (idx < 0 || idx === session.columns.length - 1) return;
+    reorderColumns(idx, session.columns.length - 1);
+  };
+
+  const fillBlanks = async (colName: string, fillValue: string) => {
+    if (!session || !fillValue.trim()) return;
+    setCtxMenu(null);
+    try {
+      await api.post(`/api/compute/${session.session_id}/fill_blanks`, {
+        column: colName, value: fillValue.trim(),
+      });
+      // Refresh preview
+      const res = await api.get(`/api/stats/${session.session_id}/refresh`);
+      useStore.getState().setSession({ ...session, ...res.data });
     } catch { /* ignore */ }
   };
 
@@ -928,7 +952,12 @@ export default function DataTable() {
         <div ref={ctxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">{ctxMenu.col}</div>
+          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
+            {ctxMenu.col}
+            {(missingCounts[ctxMenu.col] ?? 0) > 0 && (
+              <span className="ml-1 text-amber-500">({missingCounts[ctxMenu.col]} missing)</span>
+            )}
+          </div>
           <button onClick={() => { startRename(ctxMenu.col); setCtxMenu(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ✏️ Rename
@@ -941,6 +970,36 @@ export default function DataTable() {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ⇅ Sort
           </button>
+          <button onClick={() => sendToEnd(ctxMenu.col)}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ➡️ Send to end
+          </button>
+          {(missingCounts[ctxMenu.col] ?? 0) > 0 && (
+            <>
+              <div className="border-t border-gray-100 mt-0.5" />
+              {fillMode === ctxMenu.col ? (
+                <div className="px-3 py-1.5 flex items-center gap-1">
+                  <input ref={fillRef} autoFocus
+                    className="text-xs border border-gray-300 rounded px-1.5 py-0.5 w-20 focus:outline-none focus:border-indigo-400"
+                    placeholder="value"
+                    value={fillVal}
+                    onChange={(e) => setFillVal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { fillBlanks(ctxMenu.col, fillVal); setFillMode(null); setFillVal(""); }
+                      if (e.key === "Escape") { setFillMode(null); setFillVal(""); }
+                    }}
+                  />
+                  <button onClick={() => { fillBlanks(ctxMenu.col, fillVal); setFillMode(null); setFillVal(""); }}
+                    className="text-[10px] px-1.5 py-0.5 bg-indigo-600 text-white rounded hover:bg-indigo-700">Fill</button>
+                </div>
+              ) : (
+                <button onClick={() => { setFillMode(ctxMenu.col); setFillVal("0"); }}
+                  className="w-full text-left px-3 py-1.5 text-xs text-amber-600 hover:bg-amber-50 flex items-center gap-2">
+                  📝 Fill blanks with...
+                </button>
+              )}
+            </>
+          )}
           <div className="border-t border-gray-100 mt-0.5" />
           <button onClick={() => deleteColumn(ctxMenu.col)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 flex items-center gap-2">
