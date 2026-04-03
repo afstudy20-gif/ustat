@@ -409,9 +409,12 @@ export default function DataTable() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showSaveMenu]);
 
-  // Ctrl+Z / Ctrl+Y (or Cmd+Z / Cmd+Shift+Z on Mac)
+  // Paste notification
+  const [pasteMsg, setPasteMsg] = useState<string | null>(null);
+
+  // Ctrl+Z / Ctrl+Y / Ctrl+V
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
+    const handler = async (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
       // Don't capture when editing a cell or input
@@ -419,10 +422,28 @@ export default function DataTable() {
       if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
       if (e.key === "z" && e.shiftKey)  { e.preventDefault(); redo(); }
       if (e.key === "y")                { e.preventDefault(); redo(); }
+      // Ctrl+V — paste from clipboard
+      if (e.key === "v" && session) {
+        e.preventDefault();
+        try {
+          const text = await navigator.clipboard.readText();
+          if (!text.trim()) return;
+          const res = await api.post(`/api/compute/${session.session_id}/paste`, {
+            tsv: text, has_header: true, mode: "append",
+          });
+          const refresh = await api.get(`/api/stats/${session.session_id}/refresh`);
+          useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
+          setPasteMsg(`${res.data.n_pasted} rows pasted`);
+          setTimeout(() => setPasteMsg(null), 3000);
+        } catch (err: any) {
+          setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
+          setTimeout(() => setPasteMsg(null), 4000);
+        }
+      }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [undo, redo, editCell, renameCol]);
+  }, [undo, redo, editCell, renameCol, session]);
 
   useEffect(() => {
     if (editCell) setTimeout(() => inputRef.current?.focus(), 0);
@@ -723,6 +744,7 @@ export default function DataTable() {
           <span className="text-gray-900 font-medium">{session.rows.toLocaleString()}</span> total
           {" "}· {columns.length} columns
           {saving && <span className="ml-3 text-indigo-500 text-xs animate-pulse">saving…</span>}
+          {pasteMsg && <span className="ml-3 text-emerald-600 text-xs">{pasteMsg}</span>}
         </p>
 
         <div className="flex items-center gap-2">

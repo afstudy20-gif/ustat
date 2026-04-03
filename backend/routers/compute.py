@@ -1001,7 +1001,58 @@ def add_column(session_id: str, req: AddColumnRequest):
     return _build_result(df, name)
 
 
-# ── 10. Rename column ───────────────────────────────────────────────────────
+# ── 10. Paste rows (from clipboard TSV/CSV) ─────────────────────────────────
+
+class PasteRequest(BaseModel):
+    tsv: str  # tab or comma separated text (with optional header row)
+    has_header: bool = True
+    mode: str = "append"  # "append" or "replace"
+
+
+@router.post("/{session_id}/paste")
+def paste_rows(session_id: str, req: PasteRequest):
+    import io as _io
+    df = _get_df(session_id)
+
+    text = req.tsv.strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="No data to paste")
+
+    # Auto-detect separator (tab or comma)
+    first_line = text.split("\n")[0]
+    sep = "\t" if "\t" in first_line else ","
+
+    try:
+        if req.has_header:
+            pasted = pd.read_csv(_io.StringIO(text), sep=sep)
+        else:
+            pasted = pd.read_csv(_io.StringIO(text), sep=sep, header=None)
+            # Assign column names from existing df if column count matches
+            if len(pasted.columns) == len(df.columns):
+                pasted.columns = df.columns
+            else:
+                pasted.columns = [f"Col_{i+1}" for i in range(len(pasted.columns))]
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Failed to parse pasted data: {exc}")
+
+    if req.mode == "replace":
+        df = pasted
+    else:
+        # Append — align columns (add missing as NaN, ignore extra)
+        for col in df.columns:
+            if col not in pasted.columns:
+                pasted[col] = None
+        for col in pasted.columns:
+            if col not in df.columns:
+                df[col] = None
+        df = pd.concat([df, pasted[df.columns]], ignore_index=True)
+
+    store.save(session_id, df)
+    store.log_action(session_id, "paste_rows", {"n_pasted": len(pasted), "mode": req.mode})
+    return {"n_pasted": len(pasted), "total_rows": len(df)}
+
+
+# ── 11. Rename column ──────────────────────────────────────────────────────
 
 class RenameRequest(BaseModel):
     old_name: str
