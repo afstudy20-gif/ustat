@@ -362,6 +362,8 @@ export default function DataTable() {
   const redo             = useStore((s) => s.redo);
   const undoLen          = useStore((s) => s.undoStack.length);
   const redoLen          = useStore((s) => s.redoStack.length);
+  const columnDecimals   = useStore((s) => s.columnDecimals);
+  const setColumnDecimals = useStore((s) => s.setColumnDecimals);
 
   const [sortCol,     setSortCol]     = useState<string | null>(null);
   const [sortDir,     setSortDir]     = useState<SortDir>("asc");
@@ -974,7 +976,9 @@ export default function DataTable() {
                           <span className="text-amber-400 italic text-[10px] font-medium">null</span>
                         ) : (
                           <span className={col.kind === "numeric" ? "text-gray-700" : "text-gray-600"}>
-                            {String(cellVal)}
+                            {col.name in columnDecimals && typeof cellVal === "number"
+                              ? cellVal.toFixed(columnDecimals[col.name])
+                              : String(cellVal)}
                           </span>
                         )}
                       </td>
@@ -1026,6 +1030,31 @@ export default function DataTable() {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             🏷️ Change type
           </button>
+          {/* Decimal places selector */}
+          {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
+            <div className="px-3 py-1 flex items-center gap-1.5">
+              <span className="text-xs text-gray-500">🔢 Decimals:</span>
+              {[0, 1, 2, 3, 4, "auto"].map((d) => (
+                <button key={String(d)}
+                  onClick={() => {
+                    if (d === "auto") {
+                      const next = { ...columnDecimals }; delete next[ctxMenu.col];
+                      useStore.setState({ columnDecimals: next });
+                    } else {
+                      setColumnDecimals(ctxMenu.col, d as number);
+                    }
+                    setCtxMenu(null);
+                  }}
+                  className={`text-[10px] w-6 h-5 rounded flex items-center justify-center transition-colors ${
+                    (d === "auto" && !(ctxMenu.col in columnDecimals)) || columnDecimals[ctxMenu.col] === d
+                      ? "bg-indigo-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}>
+                  {d === "auto" ? "A" : d}
+                </button>
+              ))}
+            </div>
+          )}
           <button onClick={() => { toggleSort(ctxMenu.col); setCtxMenu(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ⇅ Sort

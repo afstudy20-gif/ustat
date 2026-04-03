@@ -94,6 +94,9 @@ interface AppState {
   panelCache: Record<string, any>;
   setPanelCache: (panel: string, data: any) => void;
   clearPanelCache: (panel: string) => void;
+  // Column decimal formatting
+  columnDecimals: Record<string, number>;  // col name → decimal places
+  setColumnDecimals: (col: string, decimals: number) => void;
   // Undo / Redo
   undoStack: Session[];
   redoStack: Session[];
@@ -114,7 +117,7 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
-  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoStack: [], redoStack: [] }),
+  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoStack: [], redoStack: [], columnDecimals: {} }),
   setActiveTab: (t) => set({ activeTab: t }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   toggleGrid: () => set((state) => {
@@ -189,6 +192,9 @@ export const useStore = create<AppState>((set) => ({
     delete next[panel];
     return { panelCache: next };
   }),
+  // Column decimal formatting
+  columnDecimals: {},
+  setColumnDecimals: (col, decimals) => set((state) => ({ columnDecimals: { ...state.columnDecimals, [col]: decimals } })),
   // Undo / Redo — max 30 steps
   undoStack: [],
   redoStack: [],
