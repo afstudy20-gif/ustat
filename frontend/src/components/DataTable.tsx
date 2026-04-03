@@ -378,12 +378,16 @@ export default function DataTable() {
   const [renameVal, setRenameVal] = useState("");
   const renameRef = useRef<HTMLInputElement>(null);
 
-  // Right-click context menu
+  // Right-click context menu (columns)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; col: string } | null>(null);
-  const [fillMode, setFillMode] = useState<string | null>(null); // col name when fill prompt is open
+  const [fillMode, setFillMode] = useState<string | null>(null);
   const [fillVal, setFillVal] = useState("");
   const ctxRef = useRef<HTMLDivElement>(null);
   const fillRef = useRef<HTMLInputElement>(null);
+
+  // Right-click context menu (rows)
+  const [rowCtx, setRowCtx] = useState<{ x: number; y: number; idx: number } | null>(null);
+  const rowCtxRef = useRef<HTMLDivElement>(null);
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const saveMenuRef = useRef<HTMLDivElement>(null);
@@ -474,15 +478,16 @@ export default function DataTable() {
     if (renameCol) setTimeout(() => renameRef.current?.focus(), 0);
   }, [renameCol]);
 
-  // Close context menu on outside click
+  // Close context menus on outside click
   useEffect(() => {
-    if (!ctxMenu) return;
+    if (!ctxMenu && !rowCtx) return;
     const handler = (e: MouseEvent) => {
-      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxMenu(null);
+      if (ctxMenu && ctxRef.current && !ctxRef.current.contains(e.target as Node)) setCtxMenu(null);
+      if (rowCtx && rowCtxRef.current && !rowCtxRef.current.contains(e.target as Node)) setRowCtx(null);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [ctxMenu]);
+  }, [ctxMenu, rowCtx]);
 
   const deleteColumn = async (colName: string) => {
     if (!session) return;
@@ -494,6 +499,16 @@ export default function DataTable() {
         const r = { ...row }; delete r[colName]; return r;
       });
       useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+    } catch { /* ignore */ }
+  };
+
+  const deleteRow = async (rowIdx: number) => {
+    if (!session) return;
+    setRowCtx(null);
+    try {
+      await api.post(`/api/compute/${session.session_id}/delete_rows`, { row_indices: [rowIdx] });
+      const res = await api.get(`/api/stats/${session.session_id}/refresh`);
+      useStore.getState().setSession({ ...session, ...res.data });
     } catch { /* ignore */ }
   };
 
@@ -878,7 +893,10 @@ export default function DataTable() {
                   key={origIdx}
                   className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
                 >
-                  <td className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right">
+                  <td
+                    className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu"
+                    onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
+                  >
                     {origIdx + 1}
                   </td>
 
@@ -1004,6 +1022,19 @@ export default function DataTable() {
           <button onClick={() => deleteColumn(ctxMenu.col)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 flex items-center gap-2">
             🗑️ Delete column
+          </button>
+        </div>
+      )}
+
+      {/* ── Row right-click context menu ── */}
+      {rowCtx && (
+        <div ref={rowCtxRef}
+          className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-44"
+          style={{ left: rowCtx.x, top: rowCtx.y }}>
+          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100">Row {rowCtx.idx + 1}</div>
+          <button onClick={() => deleteRow(rowCtx.idx)}
+            className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 flex items-center gap-2">
+            🗑️ Delete row
           </button>
         </div>
       )}

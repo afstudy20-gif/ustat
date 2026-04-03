@@ -898,7 +898,27 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
     return {"column": req.column, "fill_value": fill_val, "n_filled": n_filled}
 
 
-# ── 7. Rename column ────────────────────────────────────────────────────────
+# ── 7. Delete rows ──────────────────────────────────────────────────────────
+
+class DeleteRowsRequest(BaseModel):
+    row_indices: List[int]  # 0-based indices to delete
+
+
+@router.post("/{session_id}/delete_rows")
+def delete_rows(session_id: str, req: DeleteRowsRequest):
+    df = _get_df(session_id)
+    if not req.row_indices:
+        raise HTTPException(status_code=422, detail="No row indices provided")
+    invalid = [i for i in req.row_indices if i < 0 or i >= len(df)]
+    if invalid:
+        raise HTTPException(status_code=422, detail=f"Row indices out of range: {invalid}")
+    df = df.drop(df.index[req.row_indices]).reset_index(drop=True)
+    store.save(session_id, df)
+    store.log_action(session_id, "delete_rows", {"n_deleted": len(req.row_indices)})
+    return {"deleted": len(req.row_indices), "remaining_rows": len(df)}
+
+
+# ── 8. Rename column ────────────────────────────────────────────────────────
 
 class RenameRequest(BaseModel):
     old_name: str
