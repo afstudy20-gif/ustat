@@ -8,7 +8,10 @@ _store: Dict[str, dict] = {}  # {session_id: {"df": DataFrame, "timestamp": floa
 _filters: Dict[str, List[dict]] = {}
 _audit: Dict[str, list] = {}
 _metadata: Dict[str, dict] = {}
+_undo: Dict[str, list] = {}   # {session_id: [DataFrame snapshots]}
+_redo: Dict[str, list] = {}
 _lock = Lock()
+MAX_UNDO = 30
 
 # Session configuration
 SESSION_TTL_SECONDS = 1800  # 30 minutes
@@ -32,6 +35,8 @@ def _cleanup_old_sessions() -> None:
             _filters.pop(sid, None)
             _audit.pop(sid, None)
             _metadata.pop(sid, None)
+            _undo.pop(sid, None)
+            _redo.pop(sid, None)
 
         # If still over limit, remove oldest sessions
         if len(_store) > MAX_SESSIONS:
@@ -41,13 +46,25 @@ def _cleanup_old_sessions() -> None:
                 _store.pop(sid, None)
                 _filters.pop(sid, None)
                 _audit.pop(sid, None)
+                _undo.pop(sid, None)
+                _redo.pop(sid, None)
                 _metadata.pop(sid, None)
 
 
-def save(session_id: str, df: pd.DataFrame) -> None:
-    """Save dataframe with timestamp for TTL tracking."""
+def save(session_id: str, df: pd.DataFrame, track_undo: bool = True) -> None:
+    """Save dataframe with timestamp for TTL tracking.
+    If track_undo=True, pushes the previous state onto the undo stack.
+    """
     _cleanup_old_sessions()
     with _lock:
+        # Push current state to undo stack before overwriting
+        if track_undo and session_id in _store:
+            old_df = _store[session_id]["df"]
+            _undo.setdefault(session_id, []).append(old_df.copy())
+            if len(_undo[session_id]) > MAX_UNDO:
+                _undo[session_id] = _undo[session_id][-MAX_UNDO:]
+            # Clear redo stack on new action
+            _redo.pop(session_id, None)
         _store[session_id] = {"df": df, "timestamp": time.time()}
     log_action(session_id, "data_updated")
 
@@ -137,10 +154,52 @@ def delete(session_id: str) -> None:
     _filters.pop(session_id, None)
     _audit.pop(session_id, None)
     _metadata.pop(session_id, None)
+    _undo.pop(session_id, None)
+    _redo.pop(session_id, None)
 
 
 def list_sessions() -> list[str]:
     return list(_store.keys())
+
+
+def undo(session_id: str) -> Optional[pd.DataFrame]:
+    """Pop the last undo snapshot and restore it. Returns the restored DataFrame or None."""
+    with _lock:
+        stack = _undo.get(session_id, [])
+        if not stack:
+            return None
+        prev_df = stack.pop()
+        # Push current state to redo
+        if session_id in _store:
+            _redo.setdefault(session_id, []).append(_store[session_id]["df"].copy())
+            if len(_redo[session_id]) > MAX_UNDO:
+                _redo[session_id] = _redo[session_id][-MAX_UNDO:]
+        _store[session_id] = {"df": prev_df, "timestamp": time.time()}
+    return prev_df
+
+
+def redo(session_id: str) -> Optional[pd.DataFrame]:
+    """Pop the last redo snapshot and restore it. Returns the restored DataFrame or None."""
+    with _lock:
+        stack = _redo.get(session_id, [])
+        if not stack:
+            return None
+        next_df = stack.pop()
+        # Push current state to undo
+        if session_id in _store:
+            _undo.setdefault(session_id, []).append(_store[session_id]["df"].copy())
+            if len(_undo[session_id]) > MAX_UNDO:
+                _undo[session_id] = _undo[session_id][-MAX_UNDO:]
+        _store[session_id] = {"df": next_df, "timestamp": time.time()}
+    return next_df
+
+
+def undo_depth(session_id: str) -> int:
+    return len(_undo.get(session_id, []))
+
+
+def redo_depth(session_id: str) -> int:
+    return len(_redo.get(session_id, []))
 
 
 # ── Audit trail ───────────────────────────────────────────────────────────────

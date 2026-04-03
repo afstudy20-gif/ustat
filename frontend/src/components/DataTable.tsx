@@ -357,11 +357,10 @@ export default function DataTable() {
   const reorderColumns   = useStore((s) => s.reorderColumns);
   const caseFilter       = useStore((s) => s.caseFilter);
   const setCaseFilter    = useStore((s) => s.setCaseFilter);
-  const pushUndo         = useStore((s) => s.pushUndo);
   const undo             = useStore((s) => s.undo);
   const redo             = useStore((s) => s.redo);
-  const undoLen          = useStore((s) => s.undoStack.length);
-  const redoLen          = useStore((s) => s.redoStack.length);
+  const undoLen          = useStore((s) => s.undoDepth);
+  const redoLen          = useStore((s) => s.redoDepth);
   const columnDecimals   = useStore((s) => s.columnDecimals);
   const setColumnDecimals = useStore((s) => s.setColumnDecimals);
 
@@ -511,9 +510,12 @@ export default function DataTable() {
     return () => document.removeEventListener("mousedown", handler);
   }, [ctxMenu, rowCtx]);
 
+  // Bump undo depth after each backend mutation
+  const bumpUndo = () => useStore.setState((s) => ({ undoDepth: s.undoDepth + 1, redoDepth: 0 }));
+
   const deleteColumn = async (colName: string) => {
     if (!session) return;
-    pushUndo();
+
     setCtxMenu(null);
     try {
       await api.delete(`/api/compute/${session.session_id}/column/${encodeURIComponent(colName)}`);
@@ -521,24 +523,24 @@ export default function DataTable() {
       const updatedPreview = session.preview.map((row) => {
         const r = { ...row }; delete r[colName]; return r;
       });
-      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview }); bumpUndo();
     } catch { /* ignore */ }
   };
 
   const deleteRow = async (rowIdx: number) => {
     if (!session) return;
-    pushUndo();
+
     setRowCtx(null);
     try {
       await api.post(`/api/compute/${session.session_id}/delete_rows`, { row_indices: [rowIdx] });
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
-      useStore.getState().setSession({ ...session, ...res.data });
+      useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
     } catch { /* ignore */ }
   };
 
   const sendToEnd = (colName: string) => {
     if (!session) return;
-    pushUndo();
+
     setCtxMenu(null);
     const idx = session.columns.findIndex((c) => c.name === colName);
     if (idx < 0 || idx === session.columns.length - 1) return;
@@ -547,7 +549,7 @@ export default function DataTable() {
 
   const fillBlanks = async (colName: string, fillValue: string) => {
     if (!session || !fillValue.trim()) return;
-    pushUndo();
+
     setCtxMenu(null);
     try {
       await api.post(`/api/compute/${session.session_id}/fill_blanks`, {
@@ -555,7 +557,7 @@ export default function DataTable() {
       });
       // Refresh preview
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
-      useStore.getState().setSession({ ...session, ...res.data });
+      useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
     } catch { /* ignore */ }
   };
 
@@ -570,7 +572,7 @@ export default function DataTable() {
     const newName = renameVal.trim();
     setRenameCol(null);
     if (!newName || newName === oldName) return;
-    pushUndo();
+
     try {
       await renameColumn(session.session_id, oldName, newName);
       // Update local state
@@ -582,7 +584,7 @@ export default function DataTable() {
         if (oldName in r) { r[newName] = r[oldName]; delete r[oldName]; }
         return r;
       });
-      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview }); bumpUndo();
     } catch { /* revert silently */ }
   };
 
@@ -610,7 +612,7 @@ export default function DataTable() {
 
   const commitEdit = async () => {
     if (!editCell || saving) return;
-    pushUndo();
+
     const { rowIdx, col } = editCell;
     setEditCell(null);
 
@@ -628,6 +630,7 @@ export default function DataTable() {
         value: newVal,
       });
       updatePreviewCell(rowIdx, col, res.data.value);
+      bumpUndo();
     } catch {
       // On error silently revert
     } finally {
@@ -841,7 +844,7 @@ export default function DataTable() {
                     onDragLeave={() => { if (dropIdx === colIdx) setDropIdx(null); }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      if (dragIdx !== null && dragIdx !== colIdx) { pushUndo(); reorderColumns(dragIdx, colIdx); }
+                      if (dragIdx !== null && dragIdx !== colIdx) { reorderColumns(dragIdx, colIdx); }
                       setDragIdx(null);
                       setDropIdx(null);
                     }}

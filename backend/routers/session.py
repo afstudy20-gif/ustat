@@ -50,6 +50,7 @@ async def update_cell(session_id: str, body: CellUpdate):
     else:
         val = np.nan  # blank → missing
 
+    df = df.copy()
     df.at[body.row_index, body.column] = val
     store.save(session_id, df)
 
@@ -330,6 +331,55 @@ async def get_audit(session_id: str):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return store.get_audit(session_id)
+
+
+# ── Undo / Redo ──────────────────────────────────────────────────────────────
+
+def _session_preview(df: pd.DataFrame) -> dict:
+    """Build a session-like response from a DataFrame for frontend state update."""
+    import json as _json
+    columns = []
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        if "datetime" in dtype or "timedelta" in dtype:
+            kind = "date"
+        elif dtype.startswith("int") or dtype.startswith("float"):
+            unique_vals = set(df[col].dropna().unique())
+            kind = "categorical" if len(unique_vals) <= 2 else "numeric"
+        elif dtype == "bool":
+            kind = "categorical"
+        else:
+            kind = "categorical" if df[col].nunique() <= 50 else "text"
+        columns.append({"name": col, "dtype": dtype, "kind": kind})
+    preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
+    preview = _json.loads(preview_df.to_json(orient="records", default_handler=str, date_format="iso", date_unit="s"))
+    return {"rows": len(df), "columns": columns, "preview": preview}
+
+
+@router.post("/{session_id}/undo")
+async def undo_action(session_id: str):
+    """Undo the last data mutation (backend DataFrame + return refreshed preview)."""
+    restored = store.undo(session_id)
+    if restored is None:
+        raise HTTPException(status_code=400, detail="Nothing to undo")
+    store.log_action(session_id, "undo")
+    result = _session_preview(restored)
+    result["undo_depth"] = store.undo_depth(session_id)
+    result["redo_depth"] = store.redo_depth(session_id)
+    return result
+
+
+@router.post("/{session_id}/redo")
+async def redo_action(session_id: str):
+    """Redo the last undone mutation."""
+    restored = store.redo(session_id)
+    if restored is None:
+        raise HTTPException(status_code=400, detail="Nothing to redo")
+    store.log_action(session_id, "redo")
+    result = _session_preview(restored)
+    result["undo_depth"] = store.undo_depth(session_id)
+    result["redo_depth"] = store.redo_depth(session_id)
+    return result
 
 
 # ── Column Metadata ──────────────────────────────────────────────────────────

@@ -97,12 +97,11 @@ interface AppState {
   // Column decimal formatting
   columnDecimals: Record<string, number>;  // col name → decimal places
   setColumnDecimals: (col: string, decimals: number) => void;
-  // Undo / Redo
-  undoStack: Session[];
-  redoStack: Session[];
-  pushUndo: () => void;  // call BEFORE mutating session
-  undo: () => void;
-  redo: () => void;
+  // Undo / Redo (backend-driven)
+  undoDepth: number;
+  redoDepth: number;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
 }
 
 const loadTheme = (): PlotTheme => {
@@ -117,7 +116,7 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
-  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoStack: [], redoStack: [], columnDecimals: {} }),
+  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0, columnDecimals: {} }),
   setActiveTab: (t) => set({ activeTab: t }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   toggleGrid: () => set((state) => {
@@ -130,7 +129,7 @@ export const useStore = create<AppState>((set) => ({
     localStorage.setItem("plotTheme", JSON.stringify(next));
     return { plotTheme: next };
   }),
-  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoStack: [], redoStack: [] }),
+  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0 }),
   updateColumnKind: (name, kind) =>
     set((state) => {
       if (!state.session) return state;
@@ -195,27 +194,29 @@ export const useStore = create<AppState>((set) => ({
   // Column decimal formatting
   columnDecimals: {},
   setColumnDecimals: (col, decimals) => set((state) => ({ columnDecimals: { ...state.columnDecimals, [col]: decimals } })),
-  // Undo / Redo — max 30 steps
-  undoStack: [],
-  redoStack: [],
-  pushUndo: () => set((state) => {
-    if (!state.session) return state;
-    const snap = JSON.parse(JSON.stringify(state.session));
-    const stack = [...state.undoStack, snap].slice(-30);
-    return { undoStack: stack, redoStack: [] };
-  }),
-  undo: () => set((state) => {
-    if (state.undoStack.length === 0 || !state.session) return state;
-    const stack = [...state.undoStack];
-    const prev = stack.pop()!;
-    const redoSnap = JSON.parse(JSON.stringify(state.session));
-    return { session: prev, undoStack: stack, redoStack: [...state.redoStack, redoSnap].slice(-30) };
-  }),
-  redo: () => set((state) => {
-    if (state.redoStack.length === 0 || !state.session) return state;
-    const stack = [...state.redoStack];
-    const next = stack.pop()!;
-    const undoSnap = JSON.parse(JSON.stringify(state.session));
-    return { session: next, undoStack: [...state.undoStack, undoSnap].slice(-30), redoStack: stack };
-  }),
+  // Undo / Redo — backend-driven (DataFrame snapshots on server)
+  undoDepth: 0,
+  redoDepth: 0,
+  undo: async () => {
+    const state = useStore.getState();
+    if (!state.session) return;
+    try {
+      const { default: api } = await import("./api");
+      const res = await api.post(`/api/sessions/${state.session.session_id}/undo`);
+      const d = res.data;
+      set({ session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
+            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0 });
+    } catch { /* nothing to undo */ }
+  },
+  redo: async () => {
+    const state = useStore.getState();
+    if (!state.session) return;
+    try {
+      const { default: api } = await import("./api");
+      const res = await api.post(`/api/sessions/${state.session.session_id}/redo`);
+      const d = res.data;
+      set({ session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
+            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0 });
+    } catch { /* nothing to redo */ }
+  },
 }));
