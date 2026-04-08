@@ -643,7 +643,7 @@ export default function DataTable() {
 
   const selectCell = (row: number, col: string, e: React.MouseEvent) => {
     if (e.shiftKey && selAnchor) {
-      // Range selection from anchor to current
+      // Range selection from anchor to current (works with or without Ctrl)
       const colNames = columns.map((c) => c.name);
       const c1 = colNames.indexOf(selAnchor.col);
       const c2 = colNames.indexOf(col);
@@ -658,18 +658,15 @@ export default function DataTable() {
         }
       }
       setSelectedCells(next);
+      // Don't move anchor — allows extending from same anchor
     } else if (e.ctrlKey || e.metaKey) {
-      // Toggle single cell
+      // Ctrl+click: toggle single cell and set anchor
       setSelectedCells((prev) => {
         const next = new Set(prev);
         const k = cellKey(row, col);
         if (next.has(k)) next.delete(k); else next.add(k);
         return next;
       });
-      setSelAnchor({ row, col });
-    } else {
-      // Single select
-      setSelectedCells(new Set([cellKey(row, col)]));
       setSelAnchor({ row, col });
     }
   };
@@ -1180,8 +1177,9 @@ export default function DataTable() {
                             // Multi-select mode — don't open editor
                             selectCell(origIdx, col.name, e);
                           } else {
-                            // Single click: select + open editor
-                            selectCell(origIdx, col.name, e);
+                            // Normal click: clear selection, open editor
+                            setSelectedCells(new Set());
+                            setSelAnchor(null);
                             startEdit(origIdx, col.name);
                           }
                         }}
@@ -1251,7 +1249,7 @@ export default function DataTable() {
         <span>·</span>
         <span>Double-click <span className="text-gray-500">header</span> to rename · Right-click to delete</span>
         <span>·</span>
-        <span>Click <span className="text-gray-500">cell</span> to edit · Shift/Ctrl+click to multi-select · Delete to clear</span>
+        <span>Click <span className="text-gray-500">cell</span> to edit · Ctrl+click to select · Shift+click for range · Delete to clear</span>
       </div>
 
       {/* ── Right-click context menu ── */}
