@@ -35,6 +35,7 @@ import CategoricalTestsPanel from "./components/CategoricalTestsPanel";
 import ReliabilityPanel from "./components/ReliabilityPanel";
 import DataDictionaryPanel from "./components/DataDictionaryPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
+import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -158,6 +159,27 @@ function ComputeCombo() {
       </div>
       <div className="flex-1 p-4 overflow-y-auto">
         {sub === "compute" ? <ComputePanel /> : <DataDictionaryPanel />}
+      </div>
+    </div>
+  );
+}
+
+function ModelsCombo() {
+  const [sub, setSub] = useState<"regression" | "survival">("regression");
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        {([["regression", "Regression"], ["survival", "Survival Advanced"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 p-4 overflow-y-auto">
+        {sub === "regression" ? <ModelsPanel /> : <SurvivalAdvancedPanel />}
       </div>
     </div>
   );
@@ -319,7 +341,7 @@ export default function App() {
           {activeTab === "tests"       && <TestsCombo />}
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}
           {activeTab === "roc"         && <ROCPanel />}
-          {activeTab === "models"      && <div className="flex-1 p-4 overflow-y-auto"><ModelsPanel /></div>}
+          {activeTab === "models"      && <ModelsCombo />}
           {activeTab === "visual"      && <VisualChartsCombo />}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}

@@ -119,6 +119,12 @@ export const runDCA            = (data: object) => api.post("/api/decision_curve
 export const runNestedLR       = (data: object) => api.post("/api/model_compare/nested_lr_test", data);
 export const runCompareModels  = (data: object) => api.post("/api/model_compare/compare_models", data);
 
+// Survival advanced
+export const runMICE       = (data: object) => api.post("/api/survival_advanced/mice", data);
+export const runFineGray   = (data: object) => api.post("/api/survival_advanced/fine_gray", data);
+export const runEValue     = (data: object) => api.post("/api/survival_advanced/evalue", data);
+export const runLandmark   = (data: object) => api.post("/api/survival_advanced/landmark", data);
+
 // Column operations
 export const renameColumn = (sessionId: string, oldName: string, newName: string) =>
   api.post(`/api/compute/${sessionId}/rename`, { old_name: oldName, new_name: newName });
