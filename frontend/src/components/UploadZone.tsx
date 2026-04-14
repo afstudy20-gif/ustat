@@ -81,6 +81,8 @@ export default function UploadZone() {
         <Info size={14} />
         About uSTAT — packages & methods
       </button>
+
+      <p className="text-[11px] text-gray-300 mt-2">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
     </div>
   );
 }
