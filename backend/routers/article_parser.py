@@ -20,11 +20,19 @@ router = APIRouter()
 
 
 # ── Regex patterns for common statistical reporting ──────────────────────────
+# Patterns are intentionally flexible to handle PDF text extraction artifacts
+# (extra spaces, unicode chars, line breaks within values, etc.)
+
+_S = r'[\s\u00a0]*'  # flexible space (incl. non-breaking)
+_NUM = r'[\d]+[.\s]?[\d]*'  # number that may have space in decimal (PDF artifact)
+_P_VAL = r'[pP]' + _S + r'[=<≤>]' + _S + r'([\d.<\s]+)'  # p = 0.023 or p < 0.001
+_DASH = r'[\-–—−\u2012\u2013\u2014\u2212,\s]+'  # any dash variant + spaces
+_CI_BLOCK = r'(?:\(?' + _S + r'95' + _S + r'%?' + _S + r'CI' + _S + r'[:\s=]*' + _S + r'([\d.]+)' + _DASH + r'([\d.]+)' + _S + r'\)?)?'
 
 # t-test: t(48) = 2.34, p = 0.023 / t = 2.34, df = 48, p < 0.001
 _T_TEST = re.compile(
-    r't\s*\((\d+)\)\s*=\s*([\d.]+)\s*,?\s*p\s*[=<]\s*([\d.<]+)'
-    r'|t\s*=\s*([\d.]+)\s*,?\s*(?:df\s*=\s*(\d+)\s*,?\s*)?p\s*[=<]\s*([\d.<]+)',
+    r't' + _S + r'\(' + _S + r'(\d+)' + _S + r'\)' + _S + r'=' + _S + r'([\d.]+)' + _S + r',?' + _S + _P_VAL
+    + r'|t' + _S + r'=' + _S + r'([\d.]+)' + _S + r',?' + _S + r'(?:df' + _S + r'=' + _S + r'(\d+)' + _S + r',?' + _S + r')?' + _P_VAL,
     re.IGNORECASE
 )
 
@@ -36,7 +44,7 @@ _COHENS_D = re.compile(
 
 # ANOVA: F(2, 87) = 4.56, p = 0.013
 _ANOVA_F = re.compile(
-    r'F\s*\((\d+)\s*,\s*(\d+)\)\s*=\s*([\d.]+)\s*,?\s*p\s*[=<]\s*([\d.<]+)',
+    r'F' + _S + r'\(' + _S + r'(\d+)' + _S + r',' + _S + r'(\d+)' + _S + r'\)' + _S + r'=' + _S + r'([\d.]+)' + _S + r',?' + _S + _P_VAL,
     re.IGNORECASE
 )
 
@@ -46,67 +54,98 @@ _ETA_SQ = re.compile(
     re.IGNORECASE
 )
 
-# Correlation: r = 0.45, p < 0.001 / ρ = 0.32, p = 0.012
+# Correlation: r = 0.45, p < 0.001 / ρ = 0.32 / R = −0.45
 _CORR = re.compile(
-    r'(?:r|ρ|\u03C1)\s*=\s*([−\-]?[\d.]+)\s*,?\s*p\s*[=<]\s*([\d.<]+)',
+    r'(?:\b[rR]|ρ|\u03C1)\s*=\s*([−\-\u2212]?[\d.]+)\s*,?\s*' + _P_VAL,
     re.IGNORECASE
 )
 
-# Odds Ratio: OR = 2.5 (95% CI: 1.2-5.1) / OR = 2.5, 95% CI 1.2–5.1
+# Odds Ratio — very flexible: OR = 2.5 / OR: 2.5 / OR 2.5 (95% CI 1.2-5.1) / OR 2.5 [1.2–5.1]
 _OR = re.compile(
-    r'OR\s*[=:]\s*([\d.]+)\s*(?:\(?\s*95\s*%?\s*CI\s*[:\s]*\s*([\d.]+)\s*[–\-,]\s*([\d.]+)\s*\)?)?',
+    r'(?:OR|[Oo]dds\s*[Rr]atio)' + _S + r'[=:\s]' + _S + r'([\d.]+)' + _S
+    + r'(?:'
+    + r'\(?' + _S + r'(?:95' + _S + r'%?' + _S + r'CI' + _S + r'[:\s=]*)?' + _S + r'([\d.]+)' + _DASH + r'([\d.]+)' + _S + r'[\)\]]?'
+    + r')?',
     re.IGNORECASE
 )
 
-# Hazard Ratio: HR = 1.8 (95% CI: 1.2-2.7) / HR 1.8, 95% CI 1.2–2.7
+# Hazard Ratio — very flexible: HR = 1.8 / HR: 1.8 / HR 1.8 (95% CI: 1.2-2.7)
 _HR = re.compile(
-    r'HR\s*[=:]\s*([\d.]+)\s*(?:\(?\s*95\s*%?\s*CI\s*[:\s]*\s*([\d.]+)\s*[–\-,]\s*([\d.]+)\s*\)?)?',
+    r'(?:HR|[Hh]azard\s*[Rr]atio)' + _S + r'[=:\s]' + _S + r'([\d.]+)' + _S
+    + r'(?:'
+    + r'\(?' + _S + r'(?:95' + _S + r'%?' + _S + r'CI' + _S + r'[:\s=]*)?' + _S + r'([\d.]+)' + _DASH + r'([\d.]+)' + _S + r'[\)\]]?'
+    + r')?',
     re.IGNORECASE
 )
 
-# Risk Ratio / Relative Risk: RR = 1.5 (95% CI: 1.1-2.0)
+# Risk Ratio: RR = 1.5 (95% CI: 1.1-2.0)
 _RR = re.compile(
-    r'RR\s*[=:]\s*([\d.]+)\s*(?:\(?\s*95\s*%?\s*CI\s*[:\s]*\s*([\d.]+)\s*[–\-,]\s*([\d.]+)\s*\)?)?',
+    r'(?:RR|[Rr]elative\s*[Rr]isk|[Rr]isk\s*[Rr]atio)' + _S + r'[=:\s]' + _S + r'([\d.]+)' + _S
+    + r'(?:'
+    + r'\(?' + _S + r'(?:95' + _S + r'%?' + _S + r'CI' + _S + r'[:\s=]*)?' + _S + r'([\d.]+)' + _DASH + r'([\d.]+)' + _S + r'[\)\]]?'
+    + r')?',
     re.IGNORECASE
 )
 
-# Chi-square: χ²(2) = 8.45, p = 0.015 / chi-square = 8.45
+# Chi-square: χ²(2) = 8.45, p = 0.015 / χ2 = 8.45 / chi-square = 8.45
 _CHI2 = re.compile(
-    r'(?:\u03C7|chi)[²2\s]*\(?(\d+)?\)?\s*=\s*([\d.]+)\s*,?\s*p\s*[=<]\s*([\d.<]+)',
+    r'(?:\u03C7|\u03A7|chi)[\s\-]*(?:square)?[\s²2]*' + _S + r'\(?(\d+)?\)?' + _S + r'=' + _S + r'([\d.]+)' + _S + r',?' + _S + _P_VAL,
     re.IGNORECASE
 )
 
-# Mean ± SD: 45.2 ± 12.3 / mean = 45.2, SD = 12.3
+# p-value standalone: p = 0.023 / P < 0.001 / p-value = 0.045
+_P_STANDALONE = re.compile(
+    r'(?:p[\s-]*value|[pP])' + _S + r'[=<≤]' + _S + r'([\d.]+(?:\s*[\d]+)?)',
+)
+
+# Mean ± SD: 45.2 ± 12.3 / 45.2±12.3 / 45.2 +/- 12.3
 _MEAN_SD = re.compile(
-    r'([\d.]+)\s*[±\+/-]\s*([\d.]+)',
+    r'([\d.]+)\s*[±\+/\u00b1]\s*-?\s*([\d.]+)',
 )
 
-# Sample size: n = 120 / N = 450 / sample size of 120
+# Sample size: n = 120 / N = 450 / sample size of 120 / (n = 85)
 _SAMPLE_N = re.compile(
-    r'(?:(?:sample\s+size|total)\s+(?:of\s+)?|[nN]\s*=\s*)(\d{2,})',
+    r'(?:(?:sample\s+size|total|enrolled|included|recruited|participants?)\s+(?:of\s+|was\s+|were\s+)?|[nN]\s*=\s*)\(?(\d{2,})\)?',
     re.IGNORECASE
 )
 
-# AUC: AUC = 0.82 / AUC 0.82 / c-statistic = 0.78
+# AUC: AUC = 0.82 / AUC 0.82 / c-statistic = 0.78 / AUC of 0.82 / AUROC 0.82
 _AUC = re.compile(
-    r'(?:AUC|[cC]-statistic|AUROC)\s*[=:]\s*([\d.]+)',
+    r'(?:AUC|[cC][\s-]*statistic|AUROC)' + _S + r'(?:of|was|=|:)?' + _S + r'(0\.\d+|1\.0+)',
     re.IGNORECASE
 )
 
-# Proportions: 45% vs 32% / 0.45 vs 0.32
+# Proportions: 45% vs 32% / 45.2% vs. 32.1% / 45% versus 32%
 _PROPORTIONS = re.compile(
     r'(\d+(?:\.\d+)?)\s*%\s*(?:vs\.?|versus|compared\s+(?:to|with))\s*(\d+(?:\.\d+)?)\s*%',
     re.IGNORECASE
 )
 
+# Beta coefficient: β = 0.45 / beta = 0.45
+_BETA = re.compile(
+    r'(?:\u03B2|[Bb]eta)\s*[=:]\s*([−\-\u2212]?[\d.]+)\s*,?\s*' + _P_VAL,
+    re.IGNORECASE
+)
+
+# Confidence interval standalone: 95% CI 1.2–5.1 / 95%CI: 1.2-5.1
+_CI_STANDALONE = re.compile(
+    r'95\s*%?\s*CI\s*[:\s=]*\s*([\d.]+)' + _DASH + r'([\d.]+)',
+    re.IGNORECASE
+)
+
 
 def _parse_p(p_str: str) -> float:
-    """Parse p-value string like '<0.001' or '0.023'."""
-    p_str = p_str.strip().replace("<", "").replace(" ", "")
+    """Parse p-value string like '<0.001' or '0.023' or '0. 001'."""
+    p_str = p_str.strip().replace("<", "").replace("≤", "").replace(">", "").replace(" ", "")
     try:
         return float(p_str)
     except ValueError:
         return 0.001  # default for unparseable
+
+
+def _clean_num(s: str) -> float:
+    """Parse a number that may have PDF artifacts like spaces in decimal."""
+    return float(s.strip().replace(" ", "").replace("\u00a0", ""))
 
 
 def _cohens_d_from_t(t: float, n: int) -> float:
@@ -319,13 +358,44 @@ def _extract_stats(text: str) -> List[Dict[str, Any]]:
                 "source": m.group(0).strip(),
             })
 
+    # Beta coefficients: β = 0.45, p = 0.012
+    for m in _BETA.finditer(text):
+        try:
+            beta_val = _clean_num(m.group(1))
+            p_val = _parse_p(m.group(2))
+            findings.append({
+                "type": "beta",
+                "test_label": "β coefficient",
+                "power_test": "t_two",
+                "statistic": round(beta_val, 4),
+                "p": round(p_val, 6),
+                "effect_size": round(abs(beta_val), 4),
+                "effect_label": "Standardized β",
+                "source": m.group(0).strip(),
+            })
+        except (ValueError, TypeError):
+            pass
+
+    # P-values standalone (collect for context, no direct power mapping)
+    p_values_found = []
+    for m in _P_STANDALONE.finditer(text):
+        try:
+            pv = _parse_p(m.group(1))
+            if 0 < pv < 1:
+                p_values_found.append(round(pv, 6))
+        except (ValueError, TypeError):
+            pass
+
     # Mean ± SD pairs (useful context)
     means = []
     for m in _MEAN_SD.finditer(text):
-        mean_val = float(m.group(1))
-        sd_val = float(m.group(2))
-        if 0 < sd_val < mean_val * 10:  # sanity check
-            means.append({"mean": round(mean_val, 3), "sd": round(sd_val, 3), "source": m.group(0).strip()})
+        try:
+            mean_val = _clean_num(m.group(1))
+            sd_val = _clean_num(m.group(2))
+            if 0 < sd_val < mean_val * 10:  # sanity check
+                means.append({"mean": round(mean_val, 3), "sd": round(sd_val, 3), "source": m.group(0).strip()})
+        except (ValueError, TypeError):
+            pass
 
     # Compute Cohen's d from consecutive mean±SD pairs
     if len(means) >= 2:
@@ -434,9 +504,13 @@ async def parse_article(file: UploadFile = File(...)):
 
     findings = _extract_stats(text)
 
+    # Text preview for debugging (first 500 chars of extracted text)
+    preview = text[:500].replace("\n", " ").strip()
+
     return {
         "filename": file.filename,
         "n_chars": len(text),
         "n_findings": len(findings),
         "findings": findings,
+        "text_preview": preview,
     }

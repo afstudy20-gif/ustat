@@ -158,7 +158,10 @@ export default function PowerPanel() {
       const res = await parseArticle(file);
       setArticleFindings(res.data.findings);
       setArticleFile(res.data.filename);
-      if (res.data.findings.length === 0) setArticleError("No statistical results found in this document.");
+      if (res.data.findings.length === 0) {
+        const preview = res.data.text_preview ? `\nPreview: "${res.data.text_preview.slice(0, 200)}…"` : "";
+        setArticleError(`No statistical results found (${res.data.n_chars} chars extracted).${preview}`);
+      }
     } catch (e: any) { setArticleError(e?.response?.data?.detail ?? "Failed to parse article"); }
     finally { setArticleLoading(false); }
   };
