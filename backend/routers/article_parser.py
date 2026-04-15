@@ -350,20 +350,41 @@ def _extract_stats(text: str) -> List[Dict[str, Any]]:
 
 
 def _extract_text_from_pdf(file_bytes: bytes) -> str:
-    """Extract text from PDF using pdfplumber."""
-    import pdfplumber
-    text_parts = []
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        for page in pdf.pages:
-            t = page.extract_text()
-            if t:
-                text_parts.append(t)
-    return "\n".join(text_parts)
+    """Extract text from PDF using pdfplumber (preferred) or PyPDF2 (fallback)."""
+    try:
+        import pdfplumber
+        text_parts = []
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    text_parts.append(t)
+        return "\n".join(text_parts)
+    except ImportError:
+        pass
+
+    # Fallback: PyPDF2
+    try:
+        from PyPDF2 import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except ImportError:
+        pass
+
+    # Fallback: pdfminer
+    try:
+        from pdfminer.high_level import extract_text as _pdf_extract
+        return _pdf_extract(io.BytesIO(file_bytes))
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF parsing requires pdfplumber, PyPDF2, or pdfminer. Install: pip install pdfplumber")
 
 
 def _extract_text_from_docx(file_bytes: bytes) -> str:
     """Extract text from DOCX using python-docx."""
-    import docx
+    try:
+        import docx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="DOCX parsing requires python-docx. Install: pip install python-docx")
     doc = docx.Document(io.BytesIO(file_bytes))
     return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
 
