@@ -20,7 +20,25 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
   const [busy, setBusy]     = useState(false);
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40) || "chart";
-  const getEl = (): HTMLElement | null => plotRef.current?.el ?? plotRef.current;
+  const getEl = (): HTMLElement | null => {
+    const ref = plotRef.current;
+    if (!ref) return null;
+    // react-plotly.js component instance → .el
+    if (ref.el) return ref.el;
+    // Direct DOM element with .data (already a plotly div)
+    if (ref.data) return ref;
+    // Wrapper div → find the plotly div inside
+    if (ref instanceof HTMLElement) {
+      const plotlyDiv = ref.querySelector(".js-plotly-plot") ?? ref.querySelector("[class*='plotly']");
+      if (plotlyDiv) return plotlyDiv as HTMLElement;
+      // If the ref IS the container, find first child div with data
+      for (const child of ref.querySelectorAll("div")) {
+        if ((child as any).data) return child as HTMLElement;
+      }
+      return ref;
+    }
+    return null;
+  };
 
   const downloadImage = async () => {
     const el = getEl();

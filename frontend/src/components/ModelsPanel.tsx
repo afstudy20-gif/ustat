@@ -580,10 +580,9 @@ function ForestPlot({ result, modelType, outcome }: {
     });
 
     return (
-      <div className="relative">
+      <div className="relative" ref={forestRef}>
       <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
       <Plot
-        ref={forestRef}
         data={[
           {
             name: "Univariate",
@@ -701,10 +700,9 @@ function ForestPlot({ result, modelType, outcome }: {
   ];
 
   return (
-    <div className="relative">
+    <div className="relative" ref={forestRef}>
     <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
     <Plot
-      ref={forestRef}
       data={[{
         type: "scatter", mode: "markers",
         x: estimates,
