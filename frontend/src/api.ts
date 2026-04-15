@@ -125,6 +125,13 @@ export const runFineGray   = (data: object) => api.post("/api/survival_advanced/
 export const runEValue     = (data: object) => api.post("/api/survival_advanced/evalue", data);
 export const runLandmark   = (data: object) => api.post("/api/survival_advanced/landmark", data);
 
+// Article parser
+export const parseArticle = (file: File) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api.post("/api/article_parser/parse", fd);
+};
+
 // Column operations
 export const renameColumn = (sessionId: string, oldName: string, newName: string) =>
   api.post(`/api/compute/${sessionId}/rename`, { old_name: oldName, new_name: newName });

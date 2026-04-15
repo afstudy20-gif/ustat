@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
-import { runPower } from "../api";
+import { runPower, parseArticle } from "../api";
 import { useStore, PALETTES } from "../store";
 import { Tip } from "./Tip";
 
@@ -144,6 +144,37 @@ export default function PowerPanel() {
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
 
+  // Article import state
+  const [articleFindings, setArticleFindings] = useState<any[] | null>(null);
+  const [articleLoading, setArticleLoading] = useState(false);
+  const [articleError, setArticleError] = useState<string | null>(null);
+  const [articleFile, setArticleFile] = useState<string | null>(null);
+  const [showArticle, setShowArticle] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleArticleUpload = async (file: File) => {
+    setArticleLoading(true); setArticleError(null);
+    try {
+      const res = await parseArticle(file);
+      setArticleFindings(res.data.findings);
+      setArticleFile(res.data.filename);
+      if (res.data.findings.length === 0) setArticleError("No statistical results found in this document.");
+    } catch (e: any) { setArticleError(e?.response?.data?.detail ?? "Failed to parse article"); }
+    finally { setArticleLoading(false); }
+  };
+
+  const applyFinding = (f: any) => {
+    if (f.power_test) setTest(f.power_test);
+    if (f.effect_size != null) setEffectSize(String(f.effect_size));
+    if (f.n_approx) setN(String(f.n_approx));
+    if (f.k_groups) setKGroups(String(f.k_groups));
+    if (f.p1 != null) setP1(String(f.p1));
+    if (f.p2 != null) setP2(String(f.p2));
+    setSolveFor("n");
+    setResult(null);
+    setShowArticle(false);
+  };
+
   const testInfo = TESTS.find((t) => t.id === test)!;
   const presets  = PRESETS[test];
 
@@ -264,6 +295,72 @@ export default function PowerPanel() {
         <p className="text-xs text-gray-500 bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
           <span className="font-medium text-gray-700">{testInfo.label}:</span> {testInfo.desc}
         </p>
+      </div>
+
+      {/* ── Import from Article ── */}
+      <div className="panel">
+        <input ref={fileInputRef} type="file" accept=".pdf,.docx,.doc,.txt" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleArticleUpload(f); e.target.value = ""; }} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setShowArticle(!showArticle)}
+              className="text-xs font-semibold text-gray-500 uppercase tracking-wider hover:text-indigo-600 transition-colors flex items-center gap-1">
+              {showArticle ? "−" : "+"} Import from Article
+            </button>
+            <Tip wide text="Upload a published article (PDF/DOCX) to automatically extract effect sizes, sample sizes, and test statistics. The extracted values can be used directly for power analysis to replicate or extend the study." />
+          </div>
+          {articleFile && <span className="text-[10px] text-gray-400">{articleFile} — {articleFindings?.length ?? 0} findings</span>}
+        </div>
+
+        {showArticle && (
+          <div className="mt-3 space-y-3">
+            <div className="flex items-center gap-3">
+              <button onClick={() => fileInputRef.current?.click()} disabled={articleLoading}
+                className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                {articleLoading ? "Parsing…" : "Upload PDF / DOCX"}
+              </button>
+              {articleError && <p className="text-xs text-red-500">{articleError}</p>}
+            </div>
+
+            {articleFindings && articleFindings.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500 font-medium">{articleFindings.length} statistical results extracted — click to use:</p>
+                <div className="max-h-64 overflow-y-auto space-y-1.5">
+                  {articleFindings.map((f: any, i: number) => (
+                    <button key={i} onClick={() => applyFinding(f)}
+                      className="w-full text-left bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            f.type === "t_test" ? "bg-blue-100 text-blue-700" :
+                            f.type === "anova" ? "bg-purple-100 text-purple-700" :
+                            f.type === "correlation" ? "bg-emerald-100 text-emerald-700" :
+                            f.type === "odds_ratio" ? "bg-amber-100 text-amber-700" :
+                            f.type === "hazard_ratio" ? "bg-red-100 text-red-700" :
+                            f.type === "chi_square" ? "bg-orange-100 text-orange-700" :
+                            f.type === "proportions" ? "bg-pink-100 text-pink-700" :
+                            "bg-gray-100 text-gray-600"
+                          }`}>{f.test_label ?? f.type}</span>
+                          {f.effect_size != null && (
+                            <span className="text-xs text-gray-700 font-mono">{f.effect_label} = {f.effect_size}</span>
+                          )}
+                          {f.statistic != null && !f.effect_size && (
+                            <span className="text-xs text-gray-700 font-mono">{f.statistic}</span>
+                          )}
+                          {f.p != null && (
+                            <span className={`text-[10px] ${f.p < 0.05 ? "text-indigo-600" : "text-gray-400"}`}>p = {f.p < 0.001 ? "<0.001" : f.p}</span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-gray-300 group-hover:text-indigo-500">Use →</span>
+                      </div>
+                      <p className="text-[10px] text-gray-400 mt-0.5 truncate">{f.source}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Solve-for + Parameters + Calculate ── */}
