@@ -97,7 +97,26 @@ def linear_regression(req: LinearRequest):
         "df_resid": int(model.df_resid),
         "predictors": req.predictors,
         "predictor_info": predictor_info,
+        "result_text": _linear_results_text(req.outcome, coefs, model),
     }
+
+
+def _linear_results_text(outcome, coefs, model):
+    sig = [c for c in coefs if c["variable"] != "const" and c["p"] < 0.05]
+    f_p = "<0.001" if model.f_pvalue < 0.001 else f"{model.f_pvalue:.3f}"
+    parts = [
+        f"Multiple linear regression was performed to predict {outcome}. "
+        f"The overall model was {'statistically significant' if model.f_pvalue < 0.05 else 'not significant'} "
+        f"(F({int(model.df_model)},{int(model.df_resid)}) = {model.fvalue:.3f}, p = {f_p}), "
+        f"explaining {model.rsquared*100:.1f}% of the variance (R² = {model.rsquared:.3f}, adjusted R² = {model.rsquared_adj:.3f})."
+    ]
+    if sig:
+        preds = []
+        for c in sig:
+            p_s = "<0.001" if c["p"] < 0.001 else f'{c["p"]:.3f}'
+            preds.append(f'{c["variable"]} (B = {c["estimate"]:.3f}, SE = {c["se"]:.3f}, p = {p_s})')
+        parts.append("Significant predictors: " + "; ".join(preds) + ".")
+    return " ".join(parts)
 
 
 # ── Logistic Regression ───────────────────────────────────────────────────────
@@ -444,7 +463,22 @@ def poisson_regression(req: PoissonRequest):
         "aic": float(model.aic),
         "bic": float(model.bic),
         "coefficients": coefs,
+        "result_text": _poisson_results_text(req.outcome, coefs),
     }
+
+
+def _poisson_results_text(outcome, coefs):
+    sig = [c for c in coefs if c["variable"] != "const" and c["p"] < 0.05]
+    parts = [f"Poisson regression was performed to model {outcome}."]
+    if sig:
+        preds = []
+        for c in sig:
+            p_s = "<0.001" if c["p"] < 0.001 else f'{c["p"]:.3f}'
+            preds.append(f'{c["variable"]} (IRR = {c["irr"]:.2f}, 95% CI: {c["irr_ci_low"]:.2f}–{c["irr_ci_high"]:.2f}, p = {p_s})')
+        parts.append("Significant predictors: " + "; ".join(preds) + ".")
+    else:
+        parts.append("No predictor reached statistical significance.")
+    return " ".join(parts)
 
 
 # ── Logistic OR Table (Univariate + Multivariate) ────────────────────────────

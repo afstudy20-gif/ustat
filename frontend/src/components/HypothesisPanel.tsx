@@ -155,6 +155,17 @@ function ResultCard({ result }: { result: any }) {
         </div>
       )}
 
+      {/* Results Paragraph */}
+      {result.result_text && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-semibold text-gray-400 uppercase">Results Paragraph</span>
+            <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+          </div>
+          <p className="text-sm text-gray-700 leading-relaxed">{result.result_text}</p>
+        </div>
+      )}
+
       {/* Post-hoc results */}
       {result.posthoc?.length > 0 && (
         <div className="mt-3">

@@ -1889,8 +1889,8 @@ export default function ModelsPanel() {
               </div>
             )}
 
-            {/* Results text for logistic (non-OR-table) */}
-            {result.result_text && model === "logistic" && (
+            {/* Results text for all regression models */}
+            {result.result_text && !result.table && (
               <div className="panel">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>

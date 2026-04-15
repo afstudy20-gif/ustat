@@ -528,6 +528,15 @@ export default function ROCPanel() {
                   {result.auc >= 0.9 ? "This predictor is excellent at separating positives from negatives." : result.auc >= 0.8 ? "Good discriminative ability — suitable for clinical use with appropriate cutoff." : result.auc >= 0.7 ? "Fair discrimination — useful as a screening tool but not definitive alone." : "Poor discrimination — the predictor barely outperforms random chance."}
                 </InfoBanner>
 
+                {result.result_text && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase">Results Paragraph</span>
+                      <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                    </div>
+                    <p className="text-sm text-gray-700 leading-relaxed">{result.result_text}</p>
+                  </div>
+                )}
                 {result.n_excluded != null && result.n_excluded > 0 && (
                   <InfoBanner>
                     {result.n_excluded} row{result.n_excluded !== 1 ? "s" : ""} excluded due to missing values

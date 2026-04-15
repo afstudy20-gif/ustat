@@ -593,6 +593,13 @@ def roc_analysis(req: ROCRequest):
             f"{'Excellent' if auc >= 0.9 else 'Good' if auc >= 0.8 else 'Fair' if auc >= 0.7 else 'Poor'} "
             "discriminative ability"
         ),
+        "result_text": (
+            f"ROC analysis was performed for {req.score_column} predicting {req.outcome_column} (n = {len(df)}). "
+            f"The area under the curve was {auc:.3f}, indicating "
+            f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination. "
+            f"At the optimal cutoff ({optimal['cutoff']:.3f}, Youden's J), sensitivity was {optimal['sensitivity']*100:.1f}% "
+            f"and specificity was {optimal['specificity']*100:.1f}%."
+        ),
     })
 
 
@@ -670,6 +677,7 @@ def roc_compare(req: ROCCompareRequest):
             f"DeLong p = {p_str})."
         )
 
+    result["result_text"] = result["interpretation"]
     return _sanitize(result)
 
 
@@ -769,6 +777,14 @@ def roc_combined(req: ROCCombinedRequest):
         "auc": round(auc, 4),
         "optimal": optimal,
         "curve": curve,
+        "result_text": (
+            f"A combined model ({req.model_name}) using {len(req.predictor_columns)} predictors "
+            f"({', '.join(req.predictor_columns)}) was evaluated (n = {len(df)}). "
+            f"The AUC was {auc:.3f}, indicating "
+            f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination. "
+            f"At the optimal cutoff ({optimal['cutoff']:.3f}), sensitivity was {optimal['sensitivity']*100:.1f}% "
+            f"and specificity was {optimal['specificity']*100:.1f}%."
+        ),
     })
 
 
@@ -1363,6 +1379,10 @@ def correlation_pair(req: CorrelationPairRequest):
     t_crit = scipy_stats.t.ppf(0.975, df=n - 2)
     ci_band = t_crit * s_err * np.sqrt(1 / n + (x_line - x_mean) ** 2 / ss_x)
 
+    p_str = "<0.001" if p < 0.001 else f"{p:.3f}"
+    strength = "strong" if abs(r) >= 0.7 else "moderate" if abs(r) >= 0.4 else "weak" if abs(r) >= 0.2 else "negligible"
+    direction = "positive" if r > 0 else "negative"
+
     return {
         "method": method_used,
         "label": label,
@@ -1390,6 +1410,12 @@ def correlation_pair(req: CorrelationPairRequest):
             "y_upper": (y_line + ci_band).tolist(),
             "y_lower": (y_line - ci_band).tolist(),
         },
+        "result_text": (
+            f"{'Pearson' if method_used == 'pearson' else 'Spearman'} correlation analysis revealed a "
+            f"{strength} {direction} {'correlation' if p < 0.05 else 'but non-significant correlation'} "
+            f"between {req.var1} and {req.var2} ({label} = {r:.3f}, 95% CI: {ci_low:.3f}–{ci_high:.3f}, "
+            f"p = {p_str}, n = {n})."
+        ),
     }
 
 

@@ -73,6 +73,7 @@ interface PairResult {
   regression_line: { x: number[]; y: number[] };
   ci_band: { x: number[]; y_upper: number[]; y_lower: number[] };
   autoSwitched: boolean;
+  result_text?: string;
 }
 
 // ── PairwiseTab ───────────────────────────────────────────────────────────────
@@ -370,6 +371,15 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
                     ? `Significant ${Math.abs(active.r) < 0.3 ? "weak" : Math.abs(active.r) < 0.5 ? "moderate" : "strong"} ${active.r > 0 ? "positive" : "negative"} correlation between ${active.var1} and ${active.var2} (${active.label} = ${active.r.toFixed(3)}, p ${pFmt(active.p)}). As one increases, the other tends to ${active.r > 0 ? "increase" : "decrease"}.`
                     : `No statistically significant correlation found between ${active.var1} and ${active.var2} (p = ${pFmt(active.p)}). The sample may be too small, or the relationship may be non-linear.`}
                 </InfoBanner>
+                {active.result_text && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[10px] font-semibold text-gray-400 uppercase">Results Paragraph</span>
+                      <button onClick={() => navigator.clipboard.writeText(active.result_text!)} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                    </div>
+                    <p className="text-sm text-gray-700 leading-relaxed">{active.result_text}</p>
+                  </div>
+                )}
               </div>
             )}
 
