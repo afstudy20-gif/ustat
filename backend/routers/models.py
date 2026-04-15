@@ -348,7 +348,48 @@ def logistic_regression(req: LogisticRequest):
         "auc": round(auc, 4) if auc is not None else None,
         # Coefficients
         "coefficients": coefs,
+        # Auto-generated results text
+        "result_text": _logistic_results_text(req.outcome, coefs, omnibus_chi2, omnibus_df, omnibus_p, nagelkerke_r2, hosmer_lemeshow, classification, auc),
     }
+
+
+def _logistic_results_text(outcome, coefs, chi2_val, df, chi2_p, nagelkerke, hl, classification, auc):
+    """Generate a publication-style results paragraph for logistic regression."""
+    sig_coefs = [c for c in coefs if c["variable"] != "const" and c["p"] < 0.05]
+    ns_coefs = [c for c in coefs if c["variable"] != "const" and c["p"] >= 0.05]
+    n_pred = len([c for c in coefs if c["variable"] != "const"])
+
+    parts = []
+    # Omnibus
+    p_str = "<0.001" if chi2_p < 0.001 else f"{chi2_p:.3f}"
+    parts.append(f"A binary logistic regression was performed to predict {outcome}. "
+                 f"The omnibus test indicated the model was {'statistically significant' if chi2_p < 0.05 else 'not statistically significant'} "
+                 f"(χ²({df}) = {chi2_val:.3f}, p = {p_str}).")
+
+    # Model fit
+    parts.append(f"The model explained {nagelkerke*100:.1f}% of the variance (Nagelkerke R²) "
+                 f"and correctly classified {classification['accuracy']*100:.1f}% of cases." if classification else "")
+
+    # HL
+    if hl:
+        hl_p_str = "<0.001" if hl["p"] < 0.001 else f'{hl["p"]:.3f}'
+        parts.append(f"Hosmer-Lemeshow test indicated {'adequate' if hl['p'] >= 0.05 else 'poor'} model fit (p = {hl_p_str}).")
+
+    # AUC
+    if auc:
+        parts.append(f"The area under the ROC curve was {auc:.3f}.")
+
+    # Significant predictors
+    if sig_coefs:
+        pred_strs = []
+        for c in sig_coefs:
+            p_s = "<0.001" if c["p"] < 0.001 else f'{c["p"]:.3f}'
+            pred_strs.append(f'{c["variable"]} (OR = {c["odds_ratio"]:.2f}, 95% CI: {c["or_ci_low"]:.2f}–{c["or_ci_high"]:.2f}, p = {p_s})')
+        parts.append("Significant predictors were: " + "; ".join(pred_strs) + ".")
+    else:
+        parts.append("No predictor reached statistical significance at the 0.05 level.")
+
+    return " ".join(p for p in parts if p)
 
 
 # ── Poisson Regression ───────────────────────────────────────────────────────
@@ -437,7 +478,7 @@ def logistic_or_table(req: LogisticRequest):
         raise HTTPException(status_code=422, detail="Outcome has only one unique value — needs both 0 and 1.")
 
     # Helper: fit logit and extract first non-const row OR all predictor rows
-    def _fit_row(X_df, variable_names):
+    def _fit_row(X_df, variable_names, return_model=False):
         X_enc = pd.get_dummies(X_df, drop_first=True).astype(float)
         # Build a combined frame to drop NaN from both predictors and outcome together
         combined = X_enc.copy()
@@ -470,6 +511,8 @@ def logistic_or_table(req: LogisticRequest):
             if not np.isfinite(ci_lo): ci_lo = 0.0
             if not np.isfinite(ci_hi): ci_hi = 9999.0
             rows[var] = {"or": or_val, "ci_low": ci_lo, "ci_high": ci_hi, "p": p_val}
+        if return_model:
+            return rows, m, X_const, y_clean
         return rows
 
     # ── Univariate: one model per predictor (post-scaling) ───────────────────
@@ -508,9 +551,65 @@ def logistic_or_table(req: LogisticRequest):
     # ── Multivariate: only selected predictors ────────────────────────────────
     multi_results: dict = {}
     multi_error = None
+    model_stats = None
     if multi_pred_list:
         try:
-            multi_results = _fit_row(df[multi_pred_list], multi_pred_list)
+            multi_results, multi_model, multi_X, multi_y = _fit_row(df[multi_pred_list], multi_pred_list, return_model=True)
+            # SPSS-style model-level stats from multivariate model
+            from scipy.stats import chi2 as chi2_dist
+            from sklearn.metrics import roc_auc_score, confusion_matrix as _cm
+
+            n_m = float(multi_model.nobs)
+            llf_m = float(multi_model.llf)
+            llnull_m = float(multi_model.llnull)
+            omnibus_chi2 = -2 * (llnull_m - llf_m)
+            omnibus_df = len(multi_model.params) - 1
+            omnibus_p = float(1 - chi2_dist.cdf(omnibus_chi2, omnibus_df)) if omnibus_df > 0 else 1.0
+            minus2ll = -2 * llf_m
+            cox_snell = 1 - np.exp((2 / n_m) * (llnull_m - llf_m))
+            max_r2 = 1 - np.exp((2 / n_m) * llnull_m)
+            nagelkerke = float(cox_snell / max_r2) if max_r2 != 0 else 0.0
+            pred_probs = multi_model.predict(multi_X)
+            # AUC
+            try: auc_val = float(roc_auc_score(multi_y, pred_probs))
+            except Exception: auc_val = None
+            # Hosmer-Lemeshow
+            try:
+                order = np.argsort(pred_probs)
+                groups = np.array_split(order, 10)
+                hl_chi2_val = 0.0
+                for grp in groups:
+                    o1 = multi_y[grp].sum(); o0 = len(grp) - o1
+                    e1 = pred_probs[grp].sum(); e0 = len(grp) - e1
+                    if e1 > 0: hl_chi2_val += (o1 - e1)**2 / e1
+                    if e0 > 0: hl_chi2_val += (o0 - e0)**2 / e0
+                hl_p = float(1 - chi2_dist.cdf(hl_chi2_val, 8))
+                hl = {"chi2": round(hl_chi2_val, 4), "df": 8, "p": round(hl_p, 6)}
+            except Exception: hl = None
+            # Classification
+            try:
+                y_pred = (pred_probs >= 0.5).astype(int)
+                tn, fp, fn, tp = _cm(multi_y, y_pred).ravel()
+                classification = {
+                    "accuracy": round(float((tp+tn)/(tp+tn+fp+fn)), 4),
+                    "sensitivity": round(float(tp/(tp+fn)), 4) if (tp+fn) > 0 else 0,
+                    "specificity": round(float(tn/(tn+fp)), 4) if (tn+fp) > 0 else 0,
+                    "ppv": round(float(tp/(tp+fp)), 4) if (tp+fp) > 0 else 0,
+                    "npv": round(float(tn/(tn+fn)), 4) if (tn+fn) > 0 else 0,
+                    "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn),
+                }
+            except Exception: classification = None
+
+            model_stats = {
+                "omnibus": {"chi2": round(omnibus_chi2, 4), "df": omnibus_df, "p": round(omnibus_p, 6)},
+                "minus2ll": round(minus2ll, 4),
+                "cox_snell_r2": round(float(cox_snell), 4),
+                "nagelkerke_r2": round(nagelkerke, 4),
+                "pseudo_r2": round(float(multi_model.prsquared), 4),
+                "auc": round(auc_val, 4) if auc_val else None,
+                "hosmer_lemeshow": hl,
+                "classification": classification,
+            }
         except HTTPException as he:
             multi_error = he.detail
         except Exception as exc:
@@ -544,8 +643,42 @@ def logistic_or_table(req: LogisticRequest):
         "n_multi": len(multi_pred_list),
         "n_total": len(pred_list),
         "table": table,
+        "model_stats": model_stats,
+        "result_text": _ortable_results_text(req.outcome, table, model_stats, selection_label),
         "warnings": (skipped if skipped else []) + ([f"Multivariate: {multi_error}"] if multi_error else []),
     }
+
+
+def _ortable_results_text(outcome, table, stats, selection):
+    """Auto-generate results paragraph for OR Table."""
+    parts = []
+    uni_sig = [r for r in table if r.get("uni_p") is not None and r["uni_p"] < 0.05]
+    multi_sig = [r for r in table if r.get("multi_p") is not None and r["multi_p"] < 0.05]
+
+    parts.append(f"Univariate logistic regression identified {len(uni_sig)} of {len(table)} variables "
+                 f"as significantly associated with {outcome} (p < 0.05).")
+
+    if stats:
+        om = stats.get("omnibus")
+        if om:
+            p_s = "<0.001" if om["p"] < 0.001 else f'{om["p"]:.3f}'
+            parts.append(f"The multivariate model ({selection}) was {'significant' if om['p'] < 0.05 else 'not significant'} "
+                         f"(χ²({om['df']}) = {om['chi2']:.3f}, p = {p_s}), "
+                         f"Nagelkerke R² = {stats.get('nagelkerke_r2', 0):.3f}.")
+        if stats.get("auc"):
+            parts.append(f"AUC = {stats['auc']:.3f}.")
+        cl = stats.get("classification")
+        if cl:
+            parts.append(f"Overall classification accuracy was {cl['accuracy']*100:.1f}%.")
+
+    if multi_sig:
+        pred_strs = []
+        for r in multi_sig:
+            p_s = "<0.001" if r["multi_p"] < 0.001 else f'{r["multi_p"]:.3f}'
+            pred_strs.append(f'{r["variable"]} (OR = {r["multi_or"]:.2f}, 95% CI: {r["multi_ci_low"]:.2f}–{r["multi_ci_high"]:.2f}, p = {p_s})')
+        parts.append("Independent predictors: " + "; ".join(pred_strs) + ".")
+
+    return " ".join(parts)
 
 
 # ── Kaplan-Meier Survival ─────────────────────────────────────────────────────

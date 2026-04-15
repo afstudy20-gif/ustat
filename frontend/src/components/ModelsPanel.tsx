@@ -1889,6 +1889,17 @@ export default function ModelsPanel() {
               </div>
             )}
 
+            {/* Results text for logistic (non-OR-table) */}
+            {result.result_text && model === "logistic" && (
+              <div className="panel">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
+                  <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">{result.result_text}</p>
+              </div>
+            )}
+
             {/* OR Table (Uni + Multi) */}
             {result.table && (
               <div className="panel">
@@ -1903,6 +1914,77 @@ export default function ModelsPanel() {
                   nMulti={result.n_multi}
                   nTotal={result.n_total}
                 />
+              </div>
+            )}
+
+            {/* SPSS-style model stats for OR Table multivariate model */}
+            {result.model_stats && (
+              <div className="panel space-y-3">
+                <h4 className="font-semibold text-gray-900 mb-1">Multivariate Model Summary</h4>
+                {/* Omnibus */}
+                {result.model_stats.omnibus && (
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><h5 className="text-xs font-semibold text-gray-600">Omnibus Tests of Model Coefficients</h5></div>
+                    <div className="grid grid-cols-3 text-center divide-x divide-gray-100 py-3">
+                      <div><p className="text-[10px] text-gray-400">Chi-square</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.omnibus.chi2?.toFixed(3)}</p></div>
+                      <div><p className="text-[10px] text-gray-400">df</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.omnibus.df}</p></div>
+                      <div><p className="text-[10px] text-gray-400">Sig.</p><p className={`text-sm font-semibold ${result.model_stats.omnibus.p < 0.05 ? "text-emerald-600" : "text-amber-600"}`}>{result.model_stats.omnibus.p < 0.001 ? "<0.001" : result.model_stats.omnibus.p?.toFixed(4)}</p></div>
+                    </div>
+                  </div>
+                )}
+                {/* Model Summary row */}
+                <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><h5 className="text-xs font-semibold text-gray-600">Model Summary</h5></div>
+                  <div className="grid grid-cols-4 text-center divide-x divide-gray-100 py-3">
+                    <div><p className="text-[10px] text-gray-400">-2 Log Likelihood</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.minus2ll?.toFixed(3)}</p></div>
+                    <div><p className="text-[10px] text-gray-400">Cox &amp; Snell R²</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.cox_snell_r2?.toFixed(4)}</p></div>
+                    <div><p className="text-[10px] text-gray-400">Nagelkerke R²</p><p className="text-sm font-bold text-indigo-700">{result.model_stats.nagelkerke_r2?.toFixed(4)}</p></div>
+                    <div><p className="text-[10px] text-gray-400">AUC</p><p className="text-sm font-bold text-indigo-700">{result.model_stats.auc?.toFixed(4) ?? "—"}</p></div>
+                  </div>
+                </div>
+                {/* Hosmer-Lemeshow */}
+                {result.model_stats.hosmer_lemeshow && (
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><h5 className="text-xs font-semibold text-gray-600">Hosmer and Lemeshow Test</h5></div>
+                    <div className="grid grid-cols-3 text-center divide-x divide-gray-100 py-3">
+                      <div><p className="text-[10px] text-gray-400">Chi-square</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.hosmer_lemeshow.chi2?.toFixed(3)}</p></div>
+                      <div><p className="text-[10px] text-gray-400">df</p><p className="text-sm font-semibold text-gray-800">{result.model_stats.hosmer_lemeshow.df}</p></div>
+                      <div><p className="text-[10px] text-gray-400">Sig.</p><p className={`text-sm font-semibold ${result.model_stats.hosmer_lemeshow.p >= 0.05 ? "text-emerald-600" : "text-amber-600"}`}>{result.model_stats.hosmer_lemeshow.p?.toFixed(4)}</p></div>
+                    </div>
+                    <div className="px-4 py-1.5 border-t border-gray-100 bg-gray-50"><p className="text-[10px] text-gray-400">{result.model_stats.hosmer_lemeshow.p >= 0.05 ? "✓ Good calibration (p ≥ 0.05)" : "⚠ Poor calibration (p < 0.05)"}</p></div>
+                  </div>
+                )}
+                {/* Classification Table */}
+                {result.model_stats.classification && (
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100"><h5 className="text-xs font-semibold text-gray-600">Classification Table (cutoff = 0.50)</h5></div>
+                    <div className="p-3">
+                      <table className="text-xs w-full border-collapse">
+                        <thead><tr className="text-gray-500"><th className="text-left py-1 px-2 border-b border-gray-100"></th><th className="text-center py-1 px-2 border-b border-gray-100">Pred 0</th><th className="text-center py-1 px-2 border-b border-gray-100">Pred 1</th><th className="text-center py-1 px-2 border-b border-gray-100">Correct %</th></tr></thead>
+                        <tbody>
+                          <tr><td className="py-1 px-2 font-medium text-gray-600 border-b border-gray-50">Obs 0</td><td className="py-1 px-2 text-center text-emerald-700 font-semibold border-b border-gray-50">{result.model_stats.classification.tn}</td><td className="py-1 px-2 text-center text-red-500 border-b border-gray-50">{result.model_stats.classification.fp}</td><td className="py-1 px-2 text-center font-semibold text-gray-700 border-b border-gray-50">{(result.model_stats.classification.specificity * 100).toFixed(1)}%</td></tr>
+                          <tr><td className="py-1 px-2 font-medium text-gray-600">Obs 1</td><td className="py-1 px-2 text-center text-red-500">{result.model_stats.classification.fn}</td><td className="py-1 px-2 text-center text-emerald-700 font-semibold">{result.model_stats.classification.tp}</td><td className="py-1 px-2 text-center font-semibold text-gray-700">{(result.model_stats.classification.sensitivity * 100).toFixed(1)}%</td></tr>
+                        </tbody>
+                      </table>
+                      <div className="flex gap-4 mt-2 text-[10px] text-gray-500">
+                        <span>Accuracy: <strong className="text-gray-800">{(result.model_stats.classification.accuracy * 100).toFixed(1)}%</strong></span>
+                        <span>Sensitivity: <strong>{(result.model_stats.classification.sensitivity * 100).toFixed(1)}%</strong></span>
+                        <span>Specificity: <strong>{(result.model_stats.classification.specificity * 100).toFixed(1)}%</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Auto-generated results text */}
+            {result.result_text && (
+              <div className="panel">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
+                  <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                </div>
+                <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">{result.result_text}</p>
               </div>
             )}
 
