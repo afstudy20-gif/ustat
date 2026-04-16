@@ -1,7 +1,7 @@
 import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runMICE, runFineGray, runEValue, runLandmark, runKM, runCox } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox } from "../api";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
 
@@ -140,15 +140,6 @@ export default function SurvivalAdvancedPanel() {
   const fgPlotRef = useRef<any>(null);
   const lmPlotRef = useRef<any>(null);
 
-  // MICE state
-  const [miceCols, setMiceCols] = useState<string[]>([]);
-  const [miceN, setMiceN] = useState(5);
-  const [miceIter, setMiceIter] = useState(10);
-  const [miceMechanism, setMiceMechanism] = useState<"unknown" | "MCAR" | "MAR" | "MNAR">("unknown");
-  const [miceResult, setMiceResult] = useState<any>(null);
-  const [miceLoading, setMiceLoading] = useState(false);
-  const [miceError, setMiceError] = useState<string | null>(null);
-
   // Fine-Gray state
   const [fgDuration, setFgDuration] = useState("");
   const [fgEvent, setFgEvent] = useState("");
@@ -203,21 +194,6 @@ export default function SurvivalAdvancedPanel() {
 
   if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
 
-  // ── MICE handler
-  const handleMICE = async () => {
-    if (miceCols.length === 0) { setMiceError("Select columns to impute"); return; }
-    setMiceLoading(true); setMiceError(null);
-    try {
-      const res = await runMICE({ session_id: sid, columns: miceCols, n_imputations: miceN, max_iter: miceIter, mechanism: miceMechanism });
-      setMiceResult(res.data);
-      // Refresh session after imputation
-      const { default: api } = await import("../api");
-      const refresh = await api.get(`/api/stats/${sid}/refresh`);
-      useStore.getState().setSession({ ...session, ...refresh.data });
-    } catch (e: any) { setMiceError(e?.response?.data?.detail ?? "MICE failed"); }
-    finally { setMiceLoading(false); }
-  };
-
   // ── Fine-Gray handler
   const handleFineGray = async () => {
     if (!fgDuration || !fgEvent) { setFgError("Select duration and event columns"); return; }
@@ -263,115 +239,6 @@ export default function SurvivalAdvancedPanel() {
 
   return (
     <div className="space-y-3 max-w-5xl mx-auto">
-      {/* ── Missing Data Info ── */}
-      <Section title="Missing Data" description="Specify variables with missing values and the mechanism — affects imputation strategy">
-        {/* Auto-detected missing stats */}
-        {(() => {
-          const numCols = columns.filter((c) => c.kind === "numeric");
-          const preview = session.preview ?? [];
-          const missingInfo = numCols
-            .map((c) => {
-              const nMiss = preview.filter((r) => r[c.name] === null || r[c.name] === undefined || r[c.name] === "").length;
-              return { name: c.name, nMiss, pct: preview.length > 0 ? ((nMiss / preview.length) * 100).toFixed(1) : "0" };
-            })
-            .filter((m) => m.nMiss > 0)
-            .sort((a, b) => b.nMiss - a.nMiss);
-
-          return missingInfo.length > 0 ? (
-            <div className="space-y-3">
-              <p className="text-xs text-gray-500 font-medium">Variables with missing data</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                {missingInfo.map((m) => {
-                  const selected = miceCols.includes(m.name);
-                  return (
-                    <button key={m.name} onClick={() => {
-                      setMiceCols((prev) => selected ? prev.filter((c) => c !== m.name) : [...prev, m.name]);
-                    }}
-                      className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs transition-colors ${
-                        selected
-                          ? "border-indigo-400 bg-indigo-50 text-indigo-700"
-                          : "border-gray-200 bg-white text-gray-600 hover:border-gray-300"
-                      }`}>
-                      <span className="font-medium truncate">{m.name}</span>
-                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                        parseFloat(m.pct) > 30 ? "bg-red-100 text-red-600" : parseFloat(m.pct) > 10 ? "bg-amber-100 text-amber-600" : "bg-gray-100 text-gray-500"
-                      }`}>{m.pct}%</span>
-                    </button>
-                  );
-                })}
-              </div>
-              {miceCols.length > 0 && (
-                <p className="text-[10px] text-indigo-500">{miceCols.length} variable(s) selected for imputation</p>
-              )}
-            </div>
-          ) : (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">
-              No missing values detected in numeric columns.
-            </div>
-          );
-        })()}
-
-        {/* Mechanism selector */}
-        <div className="space-y-2">
-          <p className="text-xs text-gray-500 font-medium">Missing data mechanism</p>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {([
-              { id: "unknown", icon: "?", label: "Unknown", desc: "Let AI assess" },
-              { id: "MCAR", icon: "~", label: "MCAR", desc: "Missing Completely At Random" },
-              { id: "MAR", icon: "#", label: "MAR", desc: "Missing At Random" },
-              { id: "MNAR", icon: "!", label: "MNAR", desc: "Missing Not At Random" },
-            ] as const).map(({ id, icon, label, desc }) => (
-              <button key={id} onClick={() => setMiceMechanism(id)}
-                className={`flex flex-col items-start gap-1 px-3 py-2.5 rounded-lg border text-left transition-colors ${
-                  miceMechanism === id
-                    ? "border-indigo-400 bg-indigo-50"
-                    : "border-gray-200 bg-white hover:border-gray-300"
-                }`}>
-                <div className="flex items-center gap-1.5">
-                  <span className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${
-                    miceMechanism === id ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-500"
-                  }`}>{icon}</span>
-                  <span className={`text-xs font-semibold ${miceMechanism === id ? "text-indigo-700" : "text-gray-700"}`}>{label}</span>
-                </div>
-                <span className="text-[10px] text-gray-400 leading-tight">{desc}</span>
-              </button>
-            ))}
-          </div>
-          {miceMechanism === "MNAR" && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">
-              MNAR requires specialized methods (pattern-mixture, selection models). MICE assumes MAR — results may be biased with MNAR data. Consider sensitivity analysis.
-            </div>
-          )}
-          {miceMechanism === "unknown" && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-700">
-              Run Little's MCAR test (Missing Data tab) to help assess the mechanism. If MCAR is rejected, MAR is commonly assumed.
-            </div>
-          )}
-        </div>
-      </Section>
-
-      {/* ── MICE ── */}
-      <Section title="MICE Multiple Imputation" description="Impute missing values using chained equations (Predictive Mean Matching)">
-        <div className="grid grid-cols-3 gap-3">
-          <MultiSelect label="Columns to impute" columns={columns} selected={miceCols} onChange={setMiceCols} kinds={["numeric"]} />
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500 font-medium">Imputations (m)</span>
-            <input type="number" value={miceN} onChange={(e) => setMiceN(Number(e.target.value))} min={1} max={50}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 w-24 focus:outline-none focus:border-indigo-400" />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500 font-medium">Max iterations</span>
-            <input type="number" value={miceIter} onChange={(e) => setMiceIter(Number(e.target.value))} min={1} max={100}
-              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 w-24 focus:outline-none focus:border-indigo-400" />
-          </label>
-        </div>
-        <div className="flex items-center gap-3">
-          <RunButton onClick={handleMICE} loading={miceLoading} label="Run MICE" />
-          {miceError && <p className="text-xs text-red-500">{miceError}</p>}
-        </div>
-        <ResultBlock result={miceResult} />
-      </Section>
-
       {/* ── Fine-Gray ── */}
       <Section title="Fine-Gray Competing Risks" description="Cumulative incidence function with competing events (Aalen-Johansen)">
         <div className="grid grid-cols-4 gap-3">

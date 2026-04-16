@@ -36,6 +36,7 @@ import ReliabilityPanel from "./components/ReliabilityPanel";
 import DataDictionaryPanel from "./components/DataDictionaryPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
+import MissingDataPanel from "./components/MissingDataPanel";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -49,6 +50,7 @@ const TABS = [
   { id: "power",       label: "Power",       icon: Zap },
   { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
+  { id: "missing",     label: "Missing",     icon: Filter },
 ];
 
 /** Download file via hidden iframe — most reliable cross-platform method */
@@ -346,6 +348,7 @@ export default function App() {
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
+          {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
         </ErrorBoundary>
       </main>
     </div>
