@@ -575,11 +575,42 @@ export default function SurvivalAdvancedPanel() {
 
       {/* ── Cox PH ── */}
       <Section title="Cox Proportional Hazards" description="Regression for time-to-event data — outputs Hazard Ratios (HR)">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <VarSelect label="Duration (time)" value={coxDuration} onChange={setCoxDuration} columns={columns} kinds={["numeric"]} />
           <VarSelect label="Event (0/1)" value={coxEvent} onChange={setCoxEvent} columns={columns} />
         </div>
-        <MultiSelect label="Predictors" columns={columns} selected={coxPreds} onChange={setCoxPreds} />
+
+        {/* Checkbox predictor list */}
+        <div>
+          <p className="text-xs text-gray-500 font-medium mb-1.5">
+            Predictors
+            {coxPreds.length > 0 && (
+              <span className="ml-2 text-indigo-600 font-semibold">{coxPreds.length} selected</span>
+            )}
+            {coxPreds.length > 0 && (
+              <button onClick={() => setCoxPreds([])} className="ml-2 text-[10px] text-gray-400 hover:text-red-500 underline">clear</button>
+            )}
+          </p>
+          <div className="border border-gray-200 rounded-lg overflow-y-auto max-h-36 divide-y divide-gray-100">
+            {columns.map((c) => (
+              <label key={c.name} className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors text-xs
+                ${coxPreds.includes(c.name) ? "bg-indigo-50 text-indigo-800" : "hover:bg-gray-50 text-gray-700"}`}>
+                <input
+                  type="checkbox"
+                  checked={coxPreds.includes(c.name)}
+                  onChange={(e) => {
+                    if (e.target.checked) setCoxPreds([...coxPreds, c.name]);
+                    else setCoxPreds(coxPreds.filter((p) => p !== c.name));
+                  }}
+                  className="accent-indigo-500"
+                />
+                <span className="font-medium">{c.name}</span>
+                <span className="text-[10px] text-gray-400 ml-auto">{c.kind}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
         <div className="flex items-center gap-3">
           <RunButton onClick={async () => {
             if (!coxDuration || !coxEvent || coxPreds.length === 0) { setCoxError("Select duration, event, and at least one predictor"); return; }
@@ -592,51 +623,48 @@ export default function SurvivalAdvancedPanel() {
           }} loading={coxLoading} label="Run Cox Regression" />
           {coxError && <p className="text-xs text-red-500">{coxError}</p>}
         </div>
+
         {coxResult?.coefficients && (
-          <>
-            {/* Model summary */}
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-gray-400">N (events)</p>
-                <p className="text-sm font-semibold text-gray-800">{coxResult.n}</p>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-gray-400">C-index</p>
-                <p className="text-sm font-bold text-indigo-700">{coxResult.concordance?.toFixed(4)}</p>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
-                <p className="text-[10px] text-gray-400">Log-Likelihood</p>
-                <p className="text-sm font-semibold text-gray-800">{coxResult.log_likelihood?.toFixed(2)}</p>
-              </div>
-            </div>
-            {/* Coefficients table */}
-            <div className="overflow-auto rounded-lg border border-gray-200">
-              <table className="text-xs w-full">
-                <thead><tr className="bg-gray-50">
+          <div className="overflow-auto rounded-lg border border-gray-200">
+            <table className="text-xs w-full">
+              <thead>
+                {/* Model summary row */}
+                <tr className="bg-indigo-50 border-b border-indigo-100">
+                  <td colSpan={2} className="px-3 py-1.5 text-indigo-700 font-medium">
+                    N (events): <span className="font-bold">{coxResult.n}</span>
+                  </td>
+                  <td colSpan={2} className="px-3 py-1.5 text-indigo-700 font-medium">
+                    C-index: <span className="font-bold">{coxResult.concordance?.toFixed(4)}</span>
+                  </td>
+                  <td colSpan={2} className="px-3 py-1.5 text-indigo-700 font-medium">
+                    Log-Likelihood: <span className="font-bold">{coxResult.log_likelihood?.toFixed(2)}</span>
+                  </td>
+                </tr>
+                <tr className="bg-gray-50">
                   <th className="px-3 py-1.5 text-left text-gray-500">Variable</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">B</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">SE</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">HR</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">95% CI</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">p</th>
-                </tr></thead>
-                <tbody>
-                  {coxResult.coefficients.map((c: any, i: number) => (
-                    <tr key={i} className="border-t border-gray-100">
-                      <td className="px-3 py-1 font-medium text-gray-700">{c.variable}</td>
-                      <td className="px-3 py-1 text-gray-600">{c.log_hr?.toFixed(4)}</td>
-                      <td className="px-3 py-1 text-gray-600">{c.se?.toFixed(4)}</td>
-                      <td className="px-3 py-1 font-semibold text-gray-800">{c.hr?.toFixed(4)}</td>
-                      <td className="px-3 py-1 text-gray-500">{c.hr_ci_low?.toFixed(3)} – {c.hr_ci_high?.toFixed(3)}</td>
-                      <td className={`px-3 py-1 ${c.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
-                        {c.p < 0.001 ? "<0.001" : c.p?.toFixed(4)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+                </tr>
+              </thead>
+              <tbody>
+                {coxResult.coefficients.map((c: any, i: number) => (
+                  <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
+                    <td className="px-3 py-1 font-medium text-gray-700">{c.variable}</td>
+                    <td className="px-3 py-1 text-gray-600">{c.log_hr?.toFixed(4)}</td>
+                    <td className="px-3 py-1 text-gray-600">{c.se?.toFixed(4)}</td>
+                    <td className="px-3 py-1 font-semibold text-gray-800">{c.hr?.toFixed(4)}</td>
+                    <td className="px-3 py-1 text-gray-500">{c.hr_ci_low?.toFixed(3)} – {c.hr_ci_high?.toFixed(3)}</td>
+                    <td className={`px-3 py-1 ${c.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
+                      {c.p < 0.001 ? "<0.001" : c.p?.toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Section>
     </div>
