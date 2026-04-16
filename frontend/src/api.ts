@@ -141,6 +141,7 @@ export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${ses
 export const loadSession   = (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post("/api/sessions/load_session", fd); };
 export const getAuditTrail = (sessionId: string) => api.get(`/api/sessions/${sessionId}/audit`);
 export const saveMetadata  = (sessionId: string, columns: Record<string, any>) => api.post(`/api/sessions/${sessionId}/metadata`, { columns });
+export const deleteRow     = (sessionId: string, rowIndex: number) => api.delete(`/api/sessions/${sessionId}/row/${rowIndex}`);
 
 // Publication export
 export const exportTableDocx = (data: object) => api.post("/api/pub_export/table_docx", data, { responseType: "blob" });

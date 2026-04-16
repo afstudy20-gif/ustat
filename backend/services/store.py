@@ -69,6 +69,27 @@ def save(session_id: str, df: pd.DataFrame, track_undo: bool = True) -> None:
     log_action(session_id, "data_updated")
 
 
+def delete_row(session_id: str, row_index: int) -> bool:
+    """Delete a specific row by its pandas index and save to trigger undo tracking."""
+    with _lock:
+        entry = _store.get(session_id)
+        if entry is None:
+            return False
+        df = entry["df"]
+        
+        # Verify the index exists to avoid KeyError
+        if row_index not in df.index:
+            return False
+            
+    # Drop outside the lock just in case then save through the standard pipeline
+    # to handle undo tracking
+    new_df = df.drop(index=row_index)
+    save(session_id, new_df)
+    log_action(session_id, "row_deleted", {"row_index": row_index})
+    return True
+
+
+
 def get(session_id: str) -> Optional[pd.DataFrame]:
     """Get dataframe and update access timestamp."""
     with _lock:

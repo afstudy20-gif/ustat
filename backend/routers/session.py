@@ -91,6 +91,27 @@ async def clear_cells(session_id: str, body: ClearCellsRequest):
     return {"cleared": cleared}
 
 
+@router.delete("/{session_id}/row/{row_index}")
+async def delete_row(session_id: str, row_index: int):
+    """Delete a specific row containing an outlier."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+        
+    # row_index from frontend is 1-based, we need 0-based for pandas index
+    # (or simply exactly matching the internal pd.Index we logged)
+    target_idx = row_index - 1
+    
+    if target_idx < 0:
+        raise HTTPException(status_code=400, detail="Invalid row index")
+
+    success = store.delete_row(session_id, target_idx)
+    if not success:
+        raise HTTPException(status_code=400, detail="Row could not be deleted")
+        
+    return _session_preview(store.get(session_id))
+
+
 class ReorderColumnsRequest(BaseModel):
     columns: list  # ordered list of column names
 

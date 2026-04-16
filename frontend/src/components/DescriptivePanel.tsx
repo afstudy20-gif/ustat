@@ -72,7 +72,8 @@ const CHART_TABS = [
 type ChartTab = typeof CHART_TABS[number]["id"];
 
 function NumericView({ summary }: { summary: any }) {
-  const [chartTab, setChartTab] = useState<ChartTab>("histogram");
+  const chartTab = useStore((s) => s.descriptiveTab);
+  const setChartTab = useStore((s) => s.setDescriptiveTab);
   const showGrid = useStore((s) => s.showGrid);
   const pal = usePalette();
   const plotRef = useRef<any>(null);
@@ -93,12 +94,12 @@ function NumericView({ summary }: { summary: any }) {
   const rawVals: number[] = summary.raw_values ?? [];
 
   const summaryHover =
-    `<b>Dağılım özeti</b><br>` +
-    `Medyan: ${summary.median?.toFixed(2)}<br>` +
+    `<b>Distribution Summary</b><br>` +
+    `Median: ${summary.median?.toFixed(2)}<br>` +
     `Q1: ${summary.q1?.toFixed(2)}  Q3: ${summary.q3?.toFixed(2)}<br>` +
-    `Bıyık: ${(summary.whisker_low ?? 0).toFixed(2)} – ${(summary.whisker_high ?? 0).toFixed(2)}<br>` +
+    `Whisker: ${(summary.whisker_low ?? 0).toFixed(2)} – ${(summary.whisker_high ?? 0).toFixed(2)}<br>` +
     `Min: ${summary.min?.toFixed(2)}  Max: ${summary.max?.toFixed(2)}<br>` +
-    `Ort ± SS: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`;
+    `Mean ± SD: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`;
 
   // ── Box trace ─────────────────────────────────────────────────────────────
   // Give the box an EXPLICIT x category so Plotly uses a category axis.
@@ -137,7 +138,7 @@ function NumericView({ summary }: { summary: any }) {
     x: outliers.map(() => "Distribution"),
     y: outliers.map((o) => o.value),
     customdata: outliers.map((o) => [o.row, o.value.toFixed(4)]),
-    hovertemplate: "<b>Outlier</b><br>Satır: %{customdata[0]}<br>Değer: %{customdata[1]}<extra></extra>",
+    hovertemplate: "<b>Outlier</b><br>Row: %{customdata[0]}<br>Value: %{customdata[1]}<extra></extra>",
     marker: { color: "#ef4444", size: 8, symbol: "circle-open", line: { width: 2, color: "#ef4444" } },
     name: "Outlier",
     showlegend: false,
@@ -158,7 +159,7 @@ function NumericView({ summary }: { summary: any }) {
       y: summary.qq.map((p: any) => p.y),
       marker: { color: P, size: 4 },
       name: "Observed",
-      hovertemplate: "Teorik: %{x:.3f}<br>Gözlem: %{y:.3f}<extra></extra>",
+      hovertemplate: "Theoretical: %{x:.3f}<br>Observed: %{y:.3f}<extra></extra>",
     },
     (() => {
       const xs = summary.qq.map((p: any) => p.x);
@@ -181,10 +182,10 @@ function NumericView({ summary }: { summary: any }) {
       y: normalityDeviants.map((e) => e.value),
       customdata: normalityDeviants.map((e) => [e.row, e.value.toFixed(4), e.z.toFixed(3)]),
       hovertemplate:
-        "<b>Normalliği bozuyor</b><br>" +
-        "Satır: %{customdata[0]}<br>" +
-        "Değer: %{customdata[1]}<br>" +
-        "z-skoru: %{customdata[2]}<extra></extra>",
+        "<b>Disrupts normality</b><br>" +
+        "Row: %{customdata[0]}<br>" +
+        "Value: %{customdata[1]}<br>" +
+        "Z-score: %{customdata[2]}<extra></extra>",
       marker: { 
         color: "#f97316", 
         size: 8, 
@@ -262,20 +263,27 @@ function NumericView({ summary }: { summary: any }) {
         {outliers.length > 0 && (
           <div className="mt-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-xs font-semibold text-red-600 mb-1">
-              ⚠️ {outliers.length} outlier (IQR × 1.5 kuralı)
+              ⚠️ {outliers.length} outlier (1.5 × IQR rule)
             </p>
             <div className="flex flex-wrap gap-1">
               {outliers.slice(0, 50).map((o) => (
                 <span
                   key={o.row}
-                  className="inline-block text-[10px] font-mono bg-red-100 text-red-700 border border-red-200 rounded px-1.5 py-0.5"
-                  title={`Satır ${o.row}: ${o.value}`}
+                  className="inline-block text-[10px] font-mono bg-red-100 text-red-700 border border-red-200 rounded px-1.5 py-0.5 cursor-pointer hover:bg-red-200"
+                  title={`Click to delete Row ${o.row}: ${o.value}`}
+                  onClick={async () => {
+                     try {
+                        await useStore.getState().deleteRow(o.row);
+                        import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
+                     } catch (err) {}
+                  }}
                 >
+                  <span className="opacity-50 hover:opacity-100 mr-1">🗑</span>
                   #{o.row} · {o.value.toFixed(2)}
                 </span>
               ))}
               {outliers.length > 50 && (
-                <span className="text-[10px] text-red-400 italic">…ve {outliers.length - 50} daha</span>
+                <span className="text-[10px] text-red-400 italic">…and {outliers.length - 50} more</span>
               )}
             </div>
           </div>
@@ -348,15 +356,24 @@ function NumericView({ summary }: { summary: any }) {
         {!summary.normal && normalityDeviants.length > 0 && (
           <div className="mt-2 px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg">
             <p className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
-              <span>🔶 Normalliği En Çok Bozan Değerler (Q-Q Sapması)</span>
-              <span className="font-normal text-[10px] text-orange-400">(Dağılımın neden normal olmadığını gösterir)</span>
+              <span>🔶 Top Normality Deviants (Q-Q Deviation)</span>
+              <span className="font-normal text-[10px] text-orange-400">(Shows why the distribution failed normality)</span>
             </p>
             <div className="flex flex-wrap gap-1.5">
               {normalityDeviants.map((e) => (
                 <div
                   key={e.row}
-                  className="group relative flex items-center gap-1 text-[10px] font-mono bg-white text-orange-800 border border-orange-200 rounded px-2 py-0.5 shadow-sm hover:border-orange-400 transition-all"
+                  title="Click to delete this row"
+                  className="group cursor-pointer relative flex items-center gap-1 text-[10px] font-mono bg-white text-orange-800 border border-orange-200 rounded px-2 py-0.5 shadow-sm hover:border-orange-400 hover:bg-orange-100 transition-all"
+                  onClick={async () => {
+                     try {
+                        await useStore.getState().deleteRow(e.row);
+                        // Using refreshSession here to force components relying on fresh stats to redraw
+                        import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
+                     } catch (err) {}
+                  }}
                 >
+                  <span className="opacity-0 w-0 overflow-hidden group-hover:w-auto group-hover:opacity-100 transition-all mr-0.5 text-orange-600">🗑</span>
                   <span className="text-orange-400 font-bold">#{e.row}</span>
                   <span className="w-px h-2.5 bg-orange-100 mx-0.5"></span>
                   <span className="font-semibold">{e.value.toFixed(2)}</span>
@@ -364,7 +381,7 @@ function NumericView({ summary }: { summary: any }) {
                   
                   {/* Tooltip on hover */}
                   <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-gray-800 text-white text-[9px] px-2 py-1 rounded whitespace-nowrap z-10">
-                    Satır {e.row} | Sapma: {e.abs_residual.toFixed(3)}
+                    Row {e.row} | Resid: {e.abs_residual.toFixed(3)}
                   </div>
                 </div>
               ))}

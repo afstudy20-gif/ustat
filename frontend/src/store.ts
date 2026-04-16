@@ -102,6 +102,11 @@ interface AppState {
   redoDepth: number;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+  deleteRow: (rowIdx: number) => Promise<void>;
+  
+  // Descriptive tab UI state
+  descriptiveTab: "histogram" | "boxplot" | "violin" | "qq";
+  setDescriptiveTab: (tab: "histogram" | "boxplot" | "violin" | "qq") => void;
 }
 
 const loadTheme = (): PlotTheme => {
@@ -112,6 +117,8 @@ const loadTheme = (): PlotTheme => {
 export const useStore = create<AppState>((set) => ({
   session: null,
   activeTab: "data",
+  descriptiveTab: "histogram",
+  setDescriptiveTab: (t) => set({ descriptiveTab: t }),
   showGrid: localStorage.getItem("showGrid") !== "false",
   plotTheme: loadTheme(),
   table1Result: null,
@@ -223,5 +230,24 @@ export const useStore = create<AppState>((set) => ({
       set({ session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
             undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0 });
     } catch { /* nothing to redo */ }
+  },
+  deleteRow: async (rowIdx: number) => {
+    const state = useStore.getState();
+    if (!state.session) return;
+    try {
+      const { deleteRow } = await import("./api");
+      const res = await deleteRow(state.session.session_id, rowIdx);
+      const d = res.data;
+      // Same refresh payload structure as undo/redo, triggers global re-renders
+      set({ 
+        session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
+        // Add 1 to undo depth because delete is a destructive action we pushed
+        undoDepth: state.undoDepth + 1,
+        redoDepth: 0 
+      });
+    } catch (e) {
+      console.error("Failed to delete row", e);
+      throw e;
+    }
   },
 }));
