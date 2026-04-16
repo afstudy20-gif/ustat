@@ -65,26 +65,48 @@ class FormulaRequest(BaseModel):
     new_col: str
 
 
+def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Series:
+    """
+    Evaluate formula with custom IF, ISNA, DAYS functions.
+    Converts formula to use numpy/pandas operations.
+    """
+    import re as regex
+
+    # Replace custom functions with their implementations
+    # Handle DAYS(date1, date2) -> (pd.to_datetime(date1) - pd.to_datetime(date2)).dt.days
+    formula_proc = formula
+    formula_proc = regex.sub(
+        r'DAYS\(([^,]+),\s*([^)]+)\)',
+        r'((pd.to_datetime(\1) - pd.to_datetime(\2)).dt.days)',
+        formula_proc
+    )
+    # Handle ISNA(x) -> pd.isna(x)
+    formula_proc = regex.sub(r'ISNA\(([^)]+)\)', r'pd.isna(\1)', formula_proc)
+    # Handle IF(cond, true, false) -> np.where(cond, true, false)
+    formula_proc = regex.sub(
+        r'IF\(([^,]+),\s*([^,]+),\s*([^)]+)\)',
+        r'np.where(\1, \2, \3)',
+        formula_proc
+    )
+
+    # Evaluate with numpy and pandas in scope
+    result = df.eval(formula_proc)
+    return result
+
+
 @router.post("/{session_id}/formula")
 def formula_compute(session_id: str, req: FormulaRequest):
     """
     Evaluate a pandas-safe formula expression and save as a new column.
     Uses df.eval() — safe, no arbitrary Python execution.
     NaN propagation is automatic: if any source cell is NaN, result is NaN.
-    Supports custom functions: IF, ISNA, DAYS
+    Supports custom functions: IF(cond, true_val, false_val), ISNA(x), DAYS(date1, date2)
     """
     df = _get_df(session_id)
     new_col = _validate_col_name(req.new_col)
 
     try:
-        # Define custom functions for formula evaluation
-        local_dict = {
-            'IF': lambda cond, true_val, false_val: np.where(cond, true_val, false_val),
-            'ISNA': lambda x: pd.isna(x),
-            'DAYS': lambda date1, date2: (pd.to_datetime(date1) - pd.to_datetime(date2)).dt.days,
-        }
-
-        result = df.eval(req.formula, local_dict=local_dict)
+        result = _eval_formula_with_custom_functions(df, req.formula)
         # eval() may return a scalar if formula has no column refs
         if not isinstance(result, pd.Series):
             raise HTTPException(status_code=422, detail="Formula did not produce a column result. Make sure to reference existing column names.")
