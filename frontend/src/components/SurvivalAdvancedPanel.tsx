@@ -172,7 +172,9 @@ export default function SurvivalAdvancedPanel() {
   const [kmScanLoading, setKmScanLoading] = useState(false);
   // Group rename state
   const [kmGroupLabels, setKmGroupLabels] = useState<Record<string, string>>({});
-  const [kmContextMenu, setKmContextMenu] = useState<{ group: string; x: number; y: number } | null>(null);
+  const [kmCustomGroupTitle, setKmCustomGroupTitle] = useState("");
+  const [kmCustomDurationTitle, setKmCustomDurationTitle] = useState("");
+  const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
 
   // Cox state
@@ -474,14 +476,15 @@ export default function SurvivalAdvancedPanel() {
                   y: g.curve.map((p: any) => p.survival),
                   type: "scatter", mode: "lines",
                   name: kmGroup
-                    ? `${kmGroup} = ${kmGroupLabels[String(g.group)] ?? g.group}`
+                    ? `${kmCustomGroupTitle || kmGroup} = ${kmGroupLabels[String(g.group)] ?? g.group}`
                     : (kmGroupLabels[String(g.group)] ?? String(g.group)),
                   line: { width: 2, color: ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6"][i % 5] },
                 }))}
                 layout={{
                   title: { text: "Kaplan-Meier Survival Curves", font: { color: "#374151", size: 13 } },
                   xaxis: {
-                    title: { text: `Time (${kmDuration})`, font: { color: "#6b7280", size: 11 } },
+                     // Using custom duration title if available
+                    title: { text: `Time (${kmCustomDurationTitle || kmDuration})`, font: { color: "#6b7280", size: 11 } },
                     gridcolor: "#e5e7eb",
                   },
                   yaxis: {
@@ -492,64 +495,92 @@ export default function SurvivalAdvancedPanel() {
                   paper_bgcolor: "transparent", plot_bgcolor: "#ffffff",
                   font: { color: "#374151", size: 12 },
                   margin: { t: 44, r: 20, b: 56, l: 68 }, showlegend: true,
-                  legend: { title: { text: kmGroup || "Group" } },
+                  legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                 }}
                 config={{ responsive: true }} style={{ width: "100%", height: 400 }}
               />
               <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
             </div>
 
-            {/* Group summary table with right-click rename */}
-            <div className="overflow-auto rounded-lg border border-gray-200 relative">
-              <table className="text-xs w-full">
-                <thead><tr className="bg-gray-50">
-                  <th className="px-3 py-1.5 text-left text-gray-500">
-                    {kmGroup ? `${kmGroup} (Group)` : "Group"}
-                    <span className="ml-1 text-[10px] font-normal text-gray-400">— right-click to rename</span>
+            {/* Compact Group summary table & Log-rank test */}
+            <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm mt-2">
+              <table className="text-xs w-full bg-white">
+                <thead><tr className="bg-gray-50 border-b border-gray-200 bg-opacity-70">
+                  <th className="px-3 py-1.5 text-left text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-context-menu"
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setKmContextMenu({ type: "groupTitle", x: e.clientX, y: e.clientY });
+                      setKmRenameValue(kmCustomGroupTitle || kmGroup || "Group");
+                    }}
+                  >
+                    {kmCustomGroupTitle || kmGroup || "Group"}
+                    <span className="ml-1 font-normal text-gray-400 normal-case tracking-normal">(right-click to rename)</span>
                   </th>
-                  <th className="px-3 py-1.5 text-left text-gray-500">N</th>
-                  <th className="px-3 py-1.5 text-left text-gray-500">Events</th>
-                  <th className="px-3 py-1.5 text-left text-gray-500">Median Survival ({kmDuration})</th>
+                  <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider">N</th>
+                  <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider">Events</th>
+                  <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-context-menu"
+                    onContextMenu={(e) => {
+                       e.preventDefault();
+                       setKmContextMenu({ type: "durationTitle", x: e.clientX, y: e.clientY });
+                       setKmRenameValue(kmCustomDurationTitle || kmDuration);
+                    }}
+                  >
+                    Median ({kmCustomDurationTitle || kmDuration})
+                    <span className="ml-1 font-normal text-gray-400 normal-case tracking-normal">(right-click to rename)</span>
+                  </th>
                 </tr></thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {kmResult.groups.map((g: any, i: number) => {
                     const label = kmGroupLabels[String(g.group)] ?? String(g.group);
                     return (
-                      <tr key={i} className="border-t border-gray-100 hover:bg-gray-50"
+                      <tr key={i} className="hover:bg-indigo-50/30 transition-colors"
                         onContextMenu={(e) => {
                           e.preventDefault();
-                          setKmContextMenu({ group: String(g.group), x: e.clientX, y: e.clientY });
+                          setKmContextMenu({ type: "item", group: String(g.group), x: e.clientX, y: e.clientY });
                           setKmRenameValue(label);
                         }}
                       >
-                        <td className="px-3 py-1 font-medium text-gray-700 cursor-context-menu select-none">
+                        <td className="px-3 py-1 cursor-context-menu select-none">
                           <span className="inline-flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full inline-block flex-shrink-0"
+                            <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
                               style={{ background: ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6"][i % 5] }} />
-                            {label}
+                            <span className="text-[11px] font-medium text-gray-700">{label}</span>
                             {kmGroupLabels[String(g.group)] && (
-                              <span className="text-[10px] text-gray-400">({g.group})</span>
+                              <span className="text-[9px] text-gray-400">({g.group})</span>
                             )}
                           </span>
                         </td>
-                        <td className="px-3 py-1 text-gray-600">{g.n}</td>
-                        <td className="px-3 py-1 text-gray-600">{g.events}</td>
-                        <td className="px-3 py-1 text-gray-600">{g.median_survival ?? "NR"}</td>
+                        <td className="px-3 py-1 text-[11px] font-medium text-gray-600 text-right">{g.n}</td>
+                        <td className="px-3 py-1 text-[11px] font-medium text-gray-600 text-right">{g.events}</td>
+                        <td className="px-3 py-1 text-[11px] font-medium text-gray-600 text-right">{g.median_survival ?? "NR"}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
 
-              {/* Right-click context menu */}
+              {/* Log-rank test embedded as a cohesive footer inside the same block */}
+              {kmResult.logrank && (
+                <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
+                  <span>Log-rank test</span>
+                  <span>
+                    p = {kmResult.logrank.p < 0.001 ? "<0.001" : kmResult.logrank.p?.toFixed(4)}
+                    {kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
+                  </span>
+                </div>
+              )}
+
+              {/* Right-click context menu (absolute body mount replacement) */}
               {kmContextMenu && (
                 <div
-                  className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-50 p-3 min-w-[200px]"
+                  className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-3 min-w-[200px]"
                   style={{ top: kmContextMenu.y, left: kmContextMenu.x }}
                   onMouseLeave={() => setKmContextMenu(null)}
                 >
                   <p className="text-[10px] text-gray-400 mb-1.5 font-medium uppercase tracking-wide">
-                    Rename group "{kmContextMenu.group}"
+                    {kmContextMenu.type === "item" && `Rename group "${kmContextMenu.group}"`}
+                    {kmContextMenu.type === "groupTitle" && `Rename Legend Title`}
+                    {kmContextMenu.type === "durationTitle" && `Rename Time Axis Title`}
                   </p>
                   <input
                     autoFocus
@@ -558,7 +589,13 @@ export default function SurvivalAdvancedPanel() {
                     onChange={(e) => setKmRenameValue(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") {
-                        setKmGroupLabels((prev) => ({ ...prev, [kmContextMenu.group]: kmRenameValue }));
+                        if (kmContextMenu.type === "item" && kmContextMenu.group) {
+                          setKmGroupLabels((prev) => ({ ...prev, [kmContextMenu.group!]: kmRenameValue }));
+                        } else if (kmContextMenu.type === "groupTitle") {
+                          setKmCustomGroupTitle(kmRenameValue);
+                        } else if (kmContextMenu.type === "durationTitle") {
+                          setKmCustomDurationTitle(kmRenameValue);
+                        }
                         setKmContextMenu(null);
                       }
                       if (e.key === "Escape") setKmContextMenu(null);
@@ -567,16 +604,28 @@ export default function SurvivalAdvancedPanel() {
                   <div className="flex gap-2">
                     <button
                       onClick={() => {
-                        setKmGroupLabels((prev) => ({ ...prev, [kmContextMenu.group]: kmRenameValue }));
+                        if (kmContextMenu.type === "item" && kmContextMenu.group) {
+                          setKmGroupLabels((prev) => ({ ...prev, [kmContextMenu.group!]: kmRenameValue }));
+                        } else if (kmContextMenu.type === "groupTitle") {
+                          setKmCustomGroupTitle(kmRenameValue);
+                        } else if (kmContextMenu.type === "durationTitle") {
+                          setKmCustomDurationTitle(kmRenameValue);
+                        }
                         setKmContextMenu(null);
                       }}
                       className="flex-1 text-xs bg-indigo-600 text-white rounded px-2 py-1 hover:bg-indigo-700"
                     >Save</button>
                     <button
                       onClick={() => {
-                        const next = { ...kmGroupLabels };
-                        delete next[kmContextMenu.group];
-                        setKmGroupLabels(next);
+                        if (kmContextMenu.type === "item" && kmContextMenu.group) {
+                          const next = { ...kmGroupLabels };
+                          delete next[kmContextMenu.group];
+                          setKmGroupLabels(next);
+                        } else if (kmContextMenu.type === "groupTitle") {
+                          setKmCustomGroupTitle("");
+                        } else if (kmContextMenu.type === "durationTitle") {
+                          setKmCustomDurationTitle("");
+                        }
                         setKmContextMenu(null);
                       }}
                       className="text-xs text-gray-400 hover:text-red-500 px-2 py-1"
@@ -585,13 +634,6 @@ export default function SurvivalAdvancedPanel() {
                 </div>
               )}
             </div>
-
-            {kmResult.logrank && (
-              <div className={`text-sm px-4 py-2 rounded-lg border ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-gray-50 border-gray-200 text-gray-600"}`}>
-                Log-rank test: p = {kmResult.logrank.p < 0.001 ? "<0.001" : kmResult.logrank.p?.toFixed(4)}
-                {kmResult.logrank.p < 0.05 ? " — Significant difference between groups" : " — No significant difference"}
-              </div>
-            )}
           </>
         )}
       </Section>
