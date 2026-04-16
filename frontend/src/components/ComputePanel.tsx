@@ -476,6 +476,9 @@ function RecodeTab({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<ComputeResult | null>(null);
 
+  // Value labels for the new recode column
+  const [valueLabels, setValueLabels] = useState<Record<string, string>>({});
+
   // Cache of unique values per column (fetched on demand)
   const [colValues, setColValues] = useState<Record<string, string[]>>({});
   const fetchingRef = useRef<Set<string>>(new Set());
@@ -544,6 +547,23 @@ function RecodeTab({
       const res = await computeRecode(sessionId, payload);
       setSuccess(res.data);
       onResult(res.data);
+      // Save value labels to metadata if any were defined
+      const filledLabels = Object.fromEntries(
+        Object.entries(valueLabels).filter(([, v]) => v.trim())
+      );
+      if (Object.keys(filledLabels).length > 0) {
+        import("../api").then(({ saveMetadata }) => {
+          saveMetadata(sessionId, { [newCol.trim()]: { value_labels: filledLabels } });
+        });
+        // Also update local store
+        const session = useStore.getState().session;
+        if (session) {
+          const updatedCols = session.columns.map((c) =>
+            c.name === newCol.trim() ? { ...c, value_labels: filledLabels } : c
+          );
+          useStore.getState().setSession({ ...session, columns: updatedCols });
+        }
+      }
     } catch (e: any) {
       setError(e?.response?.data?.detail ?? "Recode failed");
     } finally { setLoading(false); }
@@ -659,6 +679,43 @@ function RecodeTab({
             onChange={(e) => setElseVal(e.target.value)}
           />
         </div>
+
+        {/* Value Labels (auto-populated from assigned values) */}
+        {(() => {
+          const assignedVals = [
+            ...rules.map((r) => r.result).filter((v) => v.trim()),
+            ...(elseVal.trim() ? [elseVal.trim()] : []),
+          ];
+          const uniqueVals = [...new Set(assignedVals)].sort((a, b) => {
+            const na = Number(a), nb = Number(b);
+            return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b);
+          });
+          if (uniqueVals.length === 0) return null;
+          return (
+            <div className="border-t border-gray-200 pt-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-600 flex items-center gap-1">
+                🔤 Value Labels
+                <span className="font-normal text-gray-400">(optional — will appear in charts)</span>
+              </p>
+              <div className="space-y-1.5">
+                {uniqueVals.map((val) => (
+                  <div key={val} className="flex items-center gap-2">
+                    <span className="w-12 text-xs font-mono text-gray-500 bg-gray-100 px-2 py-1 rounded text-center flex-shrink-0">
+                      {val}
+                    </span>
+                    <span className="text-gray-400 text-xs">=</span>
+                    <input
+                      className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400"
+                      placeholder={`Label for ${val}`}
+                      value={valueLabels[val] ?? ""}
+                      onChange={(e) => setValueLabels((prev) => ({ ...prev, [val]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         <button className="btn-primary w-full" onClick={run} disabled={loading || !newCol.trim()}>
           {loading ? "Applying…" : "Apply Recode"}
