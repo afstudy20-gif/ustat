@@ -68,7 +68,7 @@ class FormulaRequest(BaseModel):
 def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Series:
     """
     Evaluate formula with custom IF, ISNA, DAYS functions.
-    Converts formula to use numpy/pandas operations.
+    Converts formula to use numpy/pandas operations and evaluates with proper namespace.
     """
     import re as regex
 
@@ -89,8 +89,22 @@ def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Se
         formula_proc
     )
 
-    # Evaluate with numpy and pandas in scope
-    result = df.eval(formula_proc)
+    # Build namespace with numpy, pandas, and all columns
+    namespace = {
+        'np': np,
+        'pd': pd,
+        **{col: df[col] for col in df.columns}
+    }
+
+    # Evaluate with proper namespace
+    result = eval(formula_proc, {"__builtins__": {}}, namespace)
+
+    if not isinstance(result, (pd.Series, np.ndarray)):
+        raise ValueError("Formula did not produce a series result")
+
+    if isinstance(result, np.ndarray):
+        result = pd.Series(result, index=df.index)
+
     return result
 
 
