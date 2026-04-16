@@ -105,11 +105,24 @@ function NumericView({ summary }: { summary: any }) {
       marker: { color: P, size: 5 },
       line: { color: P },
       fillcolor: "rgba(99,102,241,0.15)",
+      // hoverinfo:"none" kills the ugly default Plotly stat labels
+      hoverinfo: "none" as const,
+    },
+    // Transparent scatter on median — provides clean custom hover tooltip
+    {
+      type: "scatter" as const,
+      mode: "markers" as const,
+      x: ["Distribution"],
+      y: [summary.median],
+      marker: { opacity: 0, size: 40 },
       hovertemplate:
-        `Median: ${summary.median?.toFixed(2)}<br>` +
+        `<b>Dağılım özeti</b><br>` +
+        `Medyan: ${summary.median?.toFixed(2)}<br>` +
         `Q1: ${summary.q1?.toFixed(2)}  Q3: ${summary.q3?.toFixed(2)}<br>` +
+        `Bıyık: ${(summary.whisker_low ?? 0).toFixed(2)} – ${(summary.whisker_high ?? 0).toFixed(2)}<br>` +
         `Min: ${summary.min?.toFixed(2)}  Max: ${summary.max?.toFixed(2)}<br>` +
-        `Mean ± SD: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`,
+        `Ort ± SS: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`,
+      showlegend: false,
     },
     // Outlier scatter — drawn on top so row numbers are visible in hover
     ...(outliers.length > 0 ? [{
