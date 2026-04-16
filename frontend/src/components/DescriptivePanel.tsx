@@ -51,6 +51,102 @@ function Sparkline({ spark }: { spark: SparkData }) {
   );
 }
 
+// ── Normality Deviants component with right-click context menu ────────────────
+
+interface NormalityDeviant { row: number; value: number; z: number; abs_residual: number; }
+
+function NormalityDeviants({ deviants }: { deviants: NormalityDeviant[] }) {
+  const [contextMenu, setContextMenu] = useState<{ row: number; x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleContextMenu = (e: React.MouseEvent, row: number) => {
+    e.preventDefault();
+    setContextMenu({ row, x: e.clientX, y: e.clientY });
+  };
+
+  const handleDeleteRow = async (row: number) => {
+    try {
+      await useStore.getState().deleteRow(row);
+      import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
+    } catch (err) {
+      console.error("Error deleting row:", err);
+    }
+    setContextMenu(null);
+  };
+
+  // Close context menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    if (contextMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [contextMenu]);
+
+  return (
+    <div className="mt-2 px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg">
+      <p className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
+        <span>🔶 Top Normality Deviants (Q-Q Deviation)</span>
+        <span className="font-normal text-[10px] text-orange-400">(Shows why the distribution failed normality)</span>
+      </p>
+      <div className="flex flex-wrap gap-1.5 relative">
+        {deviants.map((e) => (
+          <div
+            key={e.row}
+            className="group cursor-pointer relative flex items-center gap-1 text-[10px] font-mono bg-white text-orange-800 border border-orange-200 rounded px-2 py-0.5 shadow-sm hover:border-orange-400 hover:bg-orange-100 transition-all"
+            onClick={async () => {
+              try {
+                await useStore.getState().deleteRow(e.row);
+                import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
+              } catch (err) {}
+            }}
+            onContextMenu={(ev) => handleContextMenu(ev, e.row)}
+            title="Click to delete or right-click for menu"
+          >
+            <span className="opacity-0 w-0 overflow-hidden group-hover:w-auto group-hover:opacity-100 transition-all mr-0.5 text-orange-600">🗑</span>
+            <span className="text-orange-400 font-bold">#{e.row}</span>
+            <span className="w-px h-2.5 bg-orange-100 mx-0.5"></span>
+            <span className="font-semibold">{e.value.toFixed(2)}</span>
+            <span className="text-[9px] text-orange-400 ml-0.5">z={e.z > 0 ? "+" : ""}{e.z.toFixed(2)}</span>
+
+            {/* Tooltip on hover */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-gray-800 text-white text-[9px] px-2 py-1 rounded whitespace-nowrap z-10">
+              Row {e.row} | Resid: {e.abs_residual.toFixed(3)}
+            </div>
+          </div>
+        ))}
+
+        {/* Context Menu */}
+        {contextMenu && (
+          <div
+            ref={menuRef}
+            className="fixed bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1 min-w-max"
+            style={{ top: `${contextMenu.y}px`, left: `${contextMenu.x}px` }}
+          >
+            <button
+              onClick={() => handleDeleteRow(contextMenu.row)}
+              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 transition-colors"
+            >
+              <span>🗑</span> Delete Row {contextMenu.row}
+            </button>
+            <div className="border-t border-gray-100 my-1"></div>
+            <button
+              onClick={() => setContextMenu(null)}
+              className="w-full text-left px-4 py-2 text-sm text-gray-500 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // BASE_LAYOUT kept as fallback — most charts now use usePlotLayout() instead
 const BASE_LAYOUT = {
   paper_bgcolor: "transparent",
@@ -354,39 +450,7 @@ function NumericView({ summary }: { summary: any }) {
         />
         {/* List of most deviating values (The ones responsible for Non-normal label) */}
         {!summary.normal && normalityDeviants.length > 0 && (
-          <div className="mt-2 px-3 py-2 bg-orange-50 border border-orange-100 rounded-lg">
-            <p className="text-xs font-semibold text-orange-700 mb-2 flex items-center gap-1">
-              <span>🔶 Top Normality Deviants (Q-Q Deviation)</span>
-              <span className="font-normal text-[10px] text-orange-400">(Shows why the distribution failed normality)</span>
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {normalityDeviants.map((e) => (
-                <div
-                  key={e.row}
-                  title="Click to delete this row"
-                  className="group cursor-pointer relative flex items-center gap-1 text-[10px] font-mono bg-white text-orange-800 border border-orange-200 rounded px-2 py-0.5 shadow-sm hover:border-orange-400 hover:bg-orange-100 transition-all"
-                  onClick={async () => {
-                     try {
-                        await useStore.getState().deleteRow(e.row);
-                        // Using refreshSession here to force components relying on fresh stats to redraw
-                        import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
-                     } catch (err) {}
-                  }}
-                >
-                  <span className="opacity-0 w-0 overflow-hidden group-hover:w-auto group-hover:opacity-100 transition-all mr-0.5 text-orange-600">🗑</span>
-                  <span className="text-orange-400 font-bold">#{e.row}</span>
-                  <span className="w-px h-2.5 bg-orange-100 mx-0.5"></span>
-                  <span className="font-semibold">{e.value.toFixed(2)}</span>
-                  <span className="text-[9px] text-orange-400 ml-0.5">z={e.z > 0 ? "+" : ""}{e.z.toFixed(2)}</span>
-                  
-                  {/* Tooltip on hover */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-gray-800 text-white text-[9px] px-2 py-1 rounded whitespace-nowrap z-10">
-                    Row {e.row} | Resid: {e.abs_residual.toFixed(3)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <NormalityDeviants deviants={normalityDeviants} />
         )}
         </div>
       )}
