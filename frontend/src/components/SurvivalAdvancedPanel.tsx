@@ -2,6 +2,7 @@ import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runFineGray, runEValue, runLandmark, runKM, runCox } from "../api";
+import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
 
@@ -137,6 +138,10 @@ export default function SurvivalAdvancedPanel() {
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
 
+  const baseLayout = usePlotLayout();
+  const pal = usePalette();
+  const traceDefaults = useTraceDefaults();
+
   const fgPlotRef = useRef<any>(null);
   const lmPlotRef = useRef<any>(null);
 
@@ -263,7 +268,7 @@ export default function SurvivalAdvancedPanel() {
         </div>
         {fgResult?.plot && (
           <div className="relative" ref={fgPlotRef}>
-            <Plot data={fgResult.plot.data} layout={fgResult.plot.layout} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
+            <Plot data={fgResult.plot.data} layout={{ ...fgResult.plot.layout, ...baseLayout, title: fgResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
             <PlotExporter plotRef={fgPlotRef} title="CIF" />
           </div>
         )}
@@ -346,7 +351,7 @@ export default function SurvivalAdvancedPanel() {
         </div>
         {lmResult?.plot && (
           <div className="relative" ref={lmPlotRef}>
-            <Plot data={lmResult.plot.data} layout={lmResult.plot.layout} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
+            <Plot data={lmResult.plot.data} layout={{ ...lmResult.plot.layout, ...baseLayout, title: lmResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
             <PlotExporter plotRef={lmPlotRef} title="Landmark_KM" />
           </div>
         )}
@@ -478,22 +483,22 @@ export default function SurvivalAdvancedPanel() {
                   name: kmGroup
                     ? `${kmCustomGroupTitle || kmGroup} = ${kmGroupLabels[String(g.group)] ?? g.group}`
                     : (kmGroupLabels[String(g.group)] ?? String(g.group)),
-                  line: { width: 2, color: ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6"][i % 5] },
+                  line: { width: traceDefaults.lineWidth, color: pal[i % pal.length] },
                 }))}
                 layout={{
+                  ...baseLayout,
                   title: { text: "Kaplan-Meier Survival Curves", font: { color: "#374151", size: 13 } },
                   xaxis: {
+                    ...(baseLayout.xaxis as any),
                      // Using custom duration title if available
-                    title: { text: `Time (${kmCustomDurationTitle || kmDuration})`, font: { color: "#6b7280", size: 11 } },
-                    gridcolor: "#e5e7eb",
+                    title: { text: `Time (${kmCustomDurationTitle || kmDuration})` },
                   },
                   yaxis: {
-                    title: { text: "Survival Probability", font: { color: "#6b7280", size: 11 } },
-                    range: [0, 1.05], gridcolor: "#e5e7eb",
+                    ...(baseLayout.yaxis as any),
+                    title: { text: "Survival Probability" },
+                    range: [0, 1.05],
                     tickformat: ".0%",
                   },
-                  paper_bgcolor: "transparent", plot_bgcolor: "#ffffff",
-                  font: { color: "#374151", size: 12 },
                   margin: { t: 44, r: 20, b: 56, l: 68 }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                 }}
@@ -543,7 +548,7 @@ export default function SurvivalAdvancedPanel() {
                         <td className="px-3 py-1 cursor-context-menu select-none">
                           <span className="inline-flex items-center gap-1.5">
                             <span className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                              style={{ background: ["#6366f1","#f59e0b","#10b981","#ef4444","#8b5cf6"][i % 5] }} />
+                              style={{ background: pal[i % pal.length] }} />
                             <span className="text-[11px] font-medium text-gray-700">{label}</span>
                             {kmGroupLabels[String(g.group)] && (
                               <span className="text-[9px] text-gray-400">({g.group})</span>
@@ -572,11 +577,16 @@ export default function SurvivalAdvancedPanel() {
 
               {/* Right-click context menu (absolute body mount replacement) */}
               {kmContextMenu && (
-                <div
-                  className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-3 min-w-[200px]"
-                  style={{ top: kmContextMenu.y, left: kmContextMenu.x }}
-                  onMouseLeave={() => setKmContextMenu(null)}
-                >
+                <>
+                  <div 
+                    className="fixed inset-0 z-40" 
+                    onClick={() => setKmContextMenu(null)} 
+                    onContextMenu={(e) => { e.preventDefault(); setKmContextMenu(null); }} 
+                  />
+                  <div
+                    className="fixed bg-white border border-gray-200 rounded-lg shadow-xl z-50 p-3 min-w-[200px]"
+                    style={{ top: kmContextMenu.y, left: kmContextMenu.x }}
+                  >
                   <p className="text-[10px] text-gray-400 mb-1.5 font-medium uppercase tracking-wide">
                     {kmContextMenu.type === "item" && `Rename group "${kmContextMenu.group}"`}
                     {kmContextMenu.type === "groupTitle" && `Rename Legend Title`}
@@ -632,6 +642,7 @@ export default function SurvivalAdvancedPanel() {
                     >Reset</button>
                   </div>
                 </div>
+                </>
               )}
             </div>
           </>
