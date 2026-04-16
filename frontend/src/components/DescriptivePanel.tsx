@@ -90,54 +90,45 @@ function NumericView({ summary }: { summary: any }) {
   }];
 
   const outliers: { row: number; value: number }[] = summary.outliers ?? [];
-  const boxData: any[] = [
-    {
-      type: "box" as const,
-      q1: [summary.q1],
-      median: [summary.median],
-      mean: [summary.mean],
-      q3: [summary.q3],
-      lowerfence: [summary.whisker_low ?? (summary.q1 - 1.5 * summary.iqr)],
-      upperfence: [summary.whisker_high ?? (summary.q3 + 1.5 * summary.iqr)],
-      sd: [summary.std],
-      name: "Distribution",
-      boxmean: true,
-      marker: { color: P, size: 5 },
-      line: { color: P },
-      fillcolor: "rgba(99,102,241,0.15)",
-      // hoverinfo:"none" kills the ugly default Plotly stat labels
-      hoverinfo: "none" as const,
-    },
-    // Nearly-transparent scatter AT the box — provides clean hover tooltip
-    // x="Distribution" matches the box's category (box has name="Distribution", no explicit x)
-    {
-      type: "scatter" as const,
-      mode: "markers" as const,
-      x: ["Distribution"],
-      y: [summary.median],
-      marker: { opacity: 0.001, size: 60, color: "transparent" },
-      hovertemplate:
-        `<b>Dağılım özeti</b><br>` +
-        `Medyan: ${summary.median?.toFixed(2)}<br>` +
-        `Q1: ${summary.q1?.toFixed(2)}  Q3: ${summary.q3?.toFixed(2)}<br>` +
-        `Bıyık: ${(summary.whisker_low ?? 0).toFixed(2)} – ${(summary.whisker_high ?? 0).toFixed(2)}<br>` +
-        `Min: ${summary.min?.toFixed(2)}  Max: ${summary.max?.toFixed(2)}<br>` +
-        `Ort ± SS: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`,
-      showlegend: false,
-    },
-    // Outlier scatter — x="Distribution" to overlay on box, not appear to the right
-    ...(outliers.length > 0 ? [{
-      type: "scatter" as const,
-      mode: "markers" as const,
-      x: outliers.map(() => "Distribution"),
-      y: outliers.map((o) => o.value),
-      customdata: outliers.map((o) => [o.row, o.value.toFixed(4)]),
-      hovertemplate: "<b>Outlier</b><br>Satır: %{customdata[0]}<br>Değer: %{customdata[1]}<extra></extra>",
-      marker: { color: "#ef4444", size: 7, symbol: "circle-open", line: { width: 2, color: "#ef4444" } },
-      name: "Outlier",
-      showlegend: false,
-    }] : []),
-  ];
+  const rawVals: number[] = summary.raw_values ?? [];
+
+  const summaryHover =
+    `<b>Dağılım özeti</b><br>` +
+    `Medyan: ${summary.median?.toFixed(2)}<br>` +
+    `Q1: ${summary.q1?.toFixed(2)}  Q3: ${summary.q3?.toFixed(2)}<br>` +
+    `Bıyık: ${(summary.whisker_low ?? 0).toFixed(2)} – ${(summary.whisker_high ?? 0).toFixed(2)}<br>` +
+    `Min: ${summary.min?.toFixed(2)}  Max: ${summary.max?.toFixed(2)}<br>` +
+    `Ort ± SS: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`;
+
+  // Box from raw values — Plotly assigns x="Distribution" automatically.
+  // boxpoints:false → we draw outliers ourselves to show row numbers.
+  const boxTrace: any = {
+    type: "box" as const,
+    y: rawVals,
+    name: "Distribution",
+    boxmean: true,
+    boxpoints: false as any,
+    marker: { color: P, size: 5 },
+    line: { color: P },
+    fillcolor: "rgba(99,102,241,0.15)",
+    hovertemplate: summaryHover,
+  };
+
+  // Outlier scatter — Plotly places the box at x="Distribution" (its name),
+  // so we use the same string to co-locate outlier points on the box.
+  const outlierTrace: any[] = outliers.length > 0 ? [{
+    type: "scatter" as const,
+    mode: "markers" as const,
+    x: outliers.map(() => "Distribution"),
+    y: outliers.map((o) => o.value),
+    customdata: outliers.map((o) => [o.row, o.value.toFixed(4)]),
+    hovertemplate: "<b>Outlier</b><br>Satır: %{customdata[0]}<br>Değer: %{customdata[1]}<extra></extra>",
+    marker: { color: "#ef4444", size: 8, symbol: "circle-open", line: { width: 2, color: "#ef4444" } },
+    name: "Outlier",
+    showlegend: false,
+  }] : [];
+
+  const boxData: any[] = [boxTrace, ...outlierTrace];
 
   const qqData = [
     {
