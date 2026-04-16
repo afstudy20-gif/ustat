@@ -170,9 +170,23 @@ async def export_dataset(
         return Response(content=content, media_type="text/tab-separated-values", headers=_cd("tsv"))
 
     if fmt == "xlsx":
+        col_metadata = store.get_metadata(session_id)
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="Data")
+
+            # Build Value Labels sheet if any column has user-defined labels
+            vl_rows = []
+            for col in df.columns:
+                user_labels = (col_metadata.get(col, {}) or {}).get("value_labels", {})
+                if user_labels:
+                    for val, label in sorted(user_labels.items(), key=lambda x: str(x[0])):
+                        if label:  # skip empty labels
+                            vl_rows.append({"Column": col, "Value": val, "Label": label})
+            if vl_rows:
+                vl_df = pd.DataFrame(vl_rows)
+                vl_df.to_excel(writer, index=False, sheet_name="Value Labels")
+
         buf.seek(0)
         return Response(
             content=buf.read(),
@@ -188,6 +202,9 @@ async def export_dataset(
         except Exception:
             kinds = {}
 
+        # Load user-defined value labels from session metadata
+        col_metadata = store.get_metadata(session_id)
+
         # Build a clean copy of the dataframe suitable for pyreadstat
         df_sav = df.copy()
 
@@ -197,18 +214,25 @@ async def export_dataset(
         for col in df_sav.columns:
             kind = kinds.get(col, "numeric")
 
+            # Check for user-defined value labels (from Data Dictionary / Value Labels modal)
+            user_labels = (col_metadata.get(col, {}) or {}).get("value_labels", {})
+
             if kind == "date":
                 variable_measure[col] = "scale"
-                # Keep as string for SPSS — dates stored as text labels
             elif kind in ("categorical", "text"):
                 variable_measure[col] = "nominal"
-                # Numeric columns marked as categorical → add value labels so
-                # SPSS knows the numbers map to categories
                 if pd.api.types.is_numeric_dtype(df_sav[col]):
-                    unique_vals = sorted(df_sav[col].dropna().unique())
-                    variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
+                    if user_labels:
+                        # Use custom value labels: convert keys to float for SPSS
+                        variable_value_labels[col] = {float(k): str(v) for k, v in user_labels.items() if v}
+                    else:
+                        unique_vals = sorted(df_sav[col].dropna().unique())
+                        variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
             else:
                 variable_measure[col] = "scale"
+                # Even numeric/scale columns can have value labels
+                if user_labels and pd.api.types.is_numeric_dtype(df_sav[col]):
+                    variable_value_labels[col] = {float(k): str(v) for k, v in user_labels.items() if v}
                 # Ensure object columns declared numeric are cast to float
                 if df_sav[col].dtype == object:
                     df_sav[col] = pd.to_numeric(df_sav[col], errors="coerce")

@@ -1005,8 +1005,8 @@ export default function DataTable() {
                 </p>
                 {[
                   { fmt: "csv",  label: "CSV",          desc: "Comma-separated",  icon: "📄" },
-                  { fmt: "xlsx", label: "Excel (.xlsx)", desc: "Microsoft Excel",  icon: "📊" },
-                  { fmt: "sav",  label: "SPSS (.sav)",   desc: "Keeps col types",  icon: "🔬" },
+                  { fmt: "xlsx", label: "Excel (.xlsx)", desc: "With value labels sheet",  icon: "📊" },
+                  { fmt: "sav",  label: "SPSS (.sav)",   desc: "Native value labels",  icon: "🔬" },
                   { fmt: "tsv",  label: "TSV",           desc: "Tab-separated",    icon: "📋" },
                 ].map(({ fmt, label, desc, icon }) => (
                   <button
@@ -1021,6 +1021,23 @@ export default function DataTable() {
                     </div>
                   </button>
                 ))}
+                <div className="border-t border-gray-100" />
+                <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                  Session
+                </p>
+                <button
+                  onClick={() => {
+                    window.location.assign(`/api/sessions/${session.session_id}/save_session`);
+                    setShowSaveMenu(false);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-base">💾</span>
+                  <div>
+                    <p className="text-xs text-gray-700 font-medium">Session (.json)</p>
+                    <p className="text-[10px] text-gray-400">Data + labels + filters + audit</p>
+                  </div>
+                </button>
                 <div className="border-t border-gray-100 px-3 py-2">
                   <p className="text-[10px] text-gray-400 leading-tight">
                     Exports the full dataset including all edits

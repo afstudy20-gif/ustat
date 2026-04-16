@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { Upload, Info, Zap, BarChart2 } from "lucide-react";
 import { uploadFile } from "../api";
+import api from "../api";
 import { useStore } from "../store";
 import AboutModal from "./AboutModal";
 import PowerPanel from "./PowerPanel";
@@ -17,8 +18,16 @@ export default function UploadZone() {
     setLoading(true);
     setError(null);
     try {
-      const res = await uploadFile(file);
-      setSession(res.data);
+      // Session JSON files → load_session endpoint
+      if (file.name.endsWith(".json")) {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await api.post("/api/sessions/load_session", form);
+        setSession(res.data);
+      } else {
+        const res = await uploadFile(file);
+        setSession(res.data);
+      }
     } catch (e: any) {
       const detail = e.response?.data?.detail;
       const status = e.response?.status;
@@ -109,13 +118,13 @@ export default function UploadZone() {
         <div className="text-center">
           <p className="text-gray-700 font-medium">Drop your data file here</p>
           <p className="text-gray-400 text-sm mt-1">or click to browse</p>
-          <p className="text-gray-300 text-xs mt-3">CSV · Excel · SAS · SPSS · Stata</p>
+          <p className="text-gray-300 text-xs mt-3">CSV · Excel · SAS · SPSS · Stata · Session JSON</p>
         </div>
         <input
           id="file-input"
           type="file"
           className="hidden"
-          accept=".csv,.xlsx,.xls,.sas7bdat,.sav,.dta"
+          accept=".csv,.xlsx,.xls,.sas7bdat,.sav,.dta,.json"
           onChange={(e) => e.target.files?.[0] && handle(e.target.files[0])}
         />
       </div>
