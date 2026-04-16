@@ -108,13 +108,14 @@ function NumericView({ summary }: { summary: any }) {
       // hoverinfo:"none" kills the ugly default Plotly stat labels
       hoverinfo: "none" as const,
     },
-    // Transparent scatter on median — provides clean custom hover tooltip
+    // Nearly-transparent scatter at median — provides clean hover tooltip
+    // x=0 because the box sits on numeric axis at position 0
     {
       type: "scatter" as const,
       mode: "markers" as const,
-      x: ["Distribution"],
+      x: [0],
       y: [summary.median],
-      marker: { opacity: 0, size: 40 },
+      marker: { opacity: 0.001, size: 60, color: "transparent" },
       hovertemplate:
         `<b>Dağılım özeti</b><br>` +
         `Medyan: ${summary.median?.toFixed(2)}<br>` +
@@ -124,12 +125,11 @@ function NumericView({ summary }: { summary: any }) {
         `Ort ± SS: ${summary.mean?.toFixed(2)} ± ${summary.std?.toFixed(2)}<extra></extra>`,
       showlegend: false,
     },
-    // Outlier scatter — drawn on top so row numbers are visible in hover
+    // Outlier scatter — x=0 to align with box position
     ...(outliers.length > 0 ? [{
       type: "scatter" as const,
       mode: "markers" as const,
-      // x must match the box plot category string
-      x: outliers.map(() => "Distribution"),
+      x: outliers.map(() => 0),
       y: outliers.map((o) => o.value),
       customdata: outliers.map((o) => [o.row, o.value.toFixed(4)]),
       hovertemplate: "<b>Outlier</b><br>Satır: %{customdata[0]}<br>Değer: %{customdata[1]}<extra></extra>",
