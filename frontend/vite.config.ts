@@ -1,5 +1,6 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 
 function nodePolyfills(): Plugin {
   const V_BUFFER = '\0node-polyfill:buffer'
@@ -58,7 +59,37 @@ export default assert;export {assert};`
 }
 
 export default defineConfig({
-  plugins: [react(), nodePolyfills()],
+  plugins: [
+    react(),
+    nodePolyfills(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['logo.png'],
+      manifest: {
+        name: 'uSTAT - Statistical Analysis',
+        short_name: 'uSTAT',
+        description: 'SPSS-like statistical analysis in your browser',
+        theme_color: '#6366f1',
+        background_color: '#ffffff',
+        display: 'standalone',
+        orientation: 'any',
+        icons: [
+          { src: '/logo.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+          { src: '/logo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+        runtimeCaching: [
+          {
+            urlPattern: /^https?:\/\/.*\/api\//,
+            handler: 'NetworkFirst',
+            options: { cacheName: 'api-cache', expiration: { maxEntries: 50, maxAgeSeconds: 300 } },
+          },
+        ],
+      },
+    }),
+  ],
 
   define: { global: 'globalThis' },
 
