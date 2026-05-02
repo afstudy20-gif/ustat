@@ -90,43 +90,47 @@ export default function UploadZone() {
         </div>
       </div>
 
-      {/* Mode selector */}
-      <div className="flex gap-3 w-full max-w-lg">
-        <button onClick={() => setMode("home")}
-          className="flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-xl border-2 border-indigo-500 bg-indigo-50 text-indigo-700 transition-colors">
-          <BarChart2 size={24} />
-          <span className="text-sm font-semibold">Statistical Analysis</span>
-          <span className="text-[10px] text-indigo-400">Upload data → full analysis</span>
-        </button>
-        <button onClick={() => setMode("power")}
-          className="flex-1 flex flex-col items-center gap-2 px-4 py-4 rounded-xl border-2 border-gray-200 bg-white text-gray-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700 transition-colors">
+      {/* Mode selector — Statistical Analysis is also the drop zone */}
+      <div className="flex gap-3 w-full max-w-2xl items-stretch">
+        {/* Statistical Analysis = drop zone */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          onClick={() => document.getElementById("file-input")?.click()}
+          className={`flex-[2] flex flex-col items-center justify-center gap-3 px-6 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors
+            ${dragging
+              ? "border-indigo-500 bg-indigo-100"
+              : "border-indigo-400 bg-indigo-50 hover:border-indigo-500 hover:bg-indigo-100"}`}
+        >
+          <div className="flex items-center gap-2 text-indigo-700">
+            <BarChart2 size={24} />
+            <span className="text-base font-semibold">Statistical Analysis</span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <Upload size={20} className="text-indigo-400" />
+            <p className="text-sm text-indigo-700 font-medium">Drop your data file here</p>
+            <p className="text-xs text-indigo-400">or click to browse</p>
+            <p className="text-[10px] text-indigo-300 mt-1">CSV · Excel · SAS · SPSS · Stata · Session JSON</p>
+          </div>
+          <input
+            id="file-input"
+            type="file"
+            className="hidden"
+            accept=".csv,.xlsx,.xls,.sas7bdat,.sav,.dta,.json"
+            onChange={(e) => e.target.files?.[0] && handle(e.target.files[0])}
+          />
+        </div>
+
+        {/* Power Analysis — separate */}
+        <button
+          onClick={() => setMode("power")}
+          className="flex-1 flex flex-col items-center justify-center gap-2 px-4 py-6 rounded-xl border-2 border-gray-200 bg-white text-gray-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700 transition-colors"
+        >
           <Zap size={24} />
           <span className="text-sm font-semibold">Power Analysis</span>
           <span className="text-[10px] text-gray-400">No data needed</span>
         </button>
-      </div>
-
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={onDrop}
-        className={`w-full max-w-lg border-2 border-dashed rounded-2xl px-8 py-8 flex flex-col items-center gap-2 transition-colors cursor-pointer
-          ${dragging ? "border-indigo-500 bg-indigo-50" : "border-gray-300 hover:border-gray-400 bg-white"}`}
-        onClick={() => document.getElementById("file-input")?.click()}
-      >
-        <Upload size={28} className="text-gray-400" />
-        <div className="text-center">
-          <p className="text-gray-700 font-medium">Drop your data file here</p>
-          <p className="text-gray-400 text-sm mt-1">or click to browse</p>
-          <p className="text-gray-300 text-xs mt-3">CSV · Excel · SAS · SPSS · Stata · Session JSON</p>
-        </div>
-        <input
-          id="file-input"
-          type="file"
-          className="hidden"
-          accept=".csv,.xlsx,.xls,.sas7bdat,.sav,.dta,.json"
-          onChange={(e) => e.target.files?.[0] && handle(e.target.files[0])}
-        />
       </div>
 
       {loading && <p className="text-indigo-600 animate-pulse">Uploading and parsing…</p>}
