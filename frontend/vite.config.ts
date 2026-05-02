@@ -64,7 +64,7 @@ export default defineConfig({
     nodePolyfills(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['logo.png'],
+      includeAssets: ['logo.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: 'uSTAT - Statistical Analysis',
         short_name: 'uSTAT',
@@ -73,9 +73,12 @@ export default defineConfig({
         background_color: '#ffffff',
         display: 'standalone',
         orientation: 'any',
+        start_url: '/',
+        scope: '/',
         icons: [
-          { src: '/logo.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: '/logo.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
       workbox: {
