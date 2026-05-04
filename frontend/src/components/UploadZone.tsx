@@ -160,7 +160,7 @@ export default function UploadZone() {
         </div>
       </div>
 
-      {loading && <p className="text-indigo-600 animate-pulse">Uploading and parsing…</p>}
+      {loading && <p className="text-indigo-600 animate-pulse">Opening and parsing your data…</p>}
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
       <button
