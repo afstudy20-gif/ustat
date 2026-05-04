@@ -141,7 +141,7 @@ export default function UploadZone() {
           <ShieldAlert size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
           <div>
             <p className="font-semibold text-gray-700">Privacy</p>
-            <p className="text-gray-500 leading-snug">Data uploaded to server for analysis. Avoid sensitive or confidential files.</p>
+            <p className="text-gray-500 leading-snug">Files held in memory only during your session. Auto-cleared after 30 min. Never written to disk.</p>
           </div>
         </div>
         <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-gray-200 bg-white">
