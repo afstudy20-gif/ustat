@@ -78,11 +78,61 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
             </ul>
           </div>
 
+          {/* Usage Guide */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-1">Usage Guide</h3>
+            <ol className="text-xs text-gray-700 space-y-1.5 list-decimal pl-5">
+              <li><strong>Upload your data</strong> — drop a CSV, Excel, SPSS (.sav), SAS (.sas7bdat), or Stata (.dta) file on the Statistical Analysis tile, or click to browse. Variables are auto-typed (numeric / categorical / date).</li>
+              <li><strong>Inspect &amp; clean</strong> — review the data grid, rename columns, recode levels, fill blanks (mean / median / MICE), filter cases, or compute new variables.</li>
+              <li><strong>Pick an analysis</strong> — choose from the left sidebar: descriptive statistics, hypothesis tests, correlation, regression, survival, ROC, PSM, Table 1, power analysis, and more.</li>
+              <li><strong>Configure</strong> — pick variables, groups, options. uSTAT auto-suggests the right test based on normality, sample size, and variable type.</li>
+              <li><strong>Read results</strong> — every output includes effect sizes, confidence intervals, assumption diagnostics, and a plain-English interpretation.</li>
+              <li><strong>Export</strong> — download charts at up to 600 DPI, copy tables to Word/Excel, or save the full session as a JSON file to resume later.</li>
+              <li><strong>Need power calc only?</strong> — click the Power Analysis tile. No data required.</li>
+            </ol>
+          </div>
+
+          {/* Packages & Methods */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-1">Packages &amp; Methods</h3>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              uSTAT runs on a Python scientific stack. All statistical computations use peer-reviewed, open-source libraries:
+            </p>
+            <ul className="text-xs text-gray-700 space-y-1 list-none pl-3">
+              <li><strong>SciPy</strong> 1.15 — t-tests, non-parametric tests, distributions, optimization</li>
+              <li><strong>statsmodels</strong> 0.14 — linear / logistic / Poisson / mixed-effects regression, ANOVA, ANCOVA, GLM</li>
+              <li><strong>lifelines</strong> 0.30 — Kaplan-Meier, Cox proportional hazards, Fine-Gray competing risks, AFT</li>
+              <li><strong>scikit-learn</strong> 1.6 — ROC / AUC, calibration, propensity score matching, MICE imputation</li>
+              <li><strong>pandas</strong> 2.2 / <strong>NumPy</strong> 2.2 — data wrangling, numerical core</li>
+              <li><strong>pyreadstat</strong> 1.2 — native I/O for SPSS (.sav), SAS (.sas7bdat), Stata (.dta)</li>
+              <li><strong>patsy</strong> 0.5 — R-style formula parsing for model specification</li>
+              <li><strong>openpyxl</strong> 3.1 / <strong>xlrd</strong> 2.0 — Excel I/O</li>
+              <li><strong>Plotly.js</strong> 3.4 (frontend) — interactive publication-quality charts</li>
+              <li><strong>FastAPI</strong> 0.115 + <strong>Uvicorn</strong> 0.34 — backend API</li>
+            </ul>
+            <p className="text-[10px] text-gray-500 mt-2">
+              Methods follow standard references (e.g. Hosmer-Lemeshow for logistic calibration, Schoenfeld residuals for Cox PH, Benjamini-Hochberg for FDR). Source code on request.
+            </p>
+          </div>
+
           {/* Privacy */}
           <div className="space-y-2">
-            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-1">Privacy</h3>
+            <h3 className="text-xs font-bold text-gray-900 uppercase tracking-wider border-b border-gray-100 pb-1">Privacy &amp; Data Handling</h3>
             <p className="text-xs text-gray-700 leading-relaxed">
-              Your file is sent to our server only to be parsed and held in memory for the duration of your session. It is <strong>never written to disk</strong> and is automatically cleared from memory 30 minutes after you stop using the app. No account, no logs of your data, no permanent storage. Avoid uploading data subject to strict regulatory requirements (e.g. identifiable PHI) until a self-host or local-only build is available.
+              Your file is sent to our server only to be parsed and held in memory for the duration of your session. It is <strong>never written to disk</strong> and is automatically cleared from memory 30 minutes after you stop using the app. No account, no logs of your data, no permanent storage.
+            </p>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2 space-y-1.5">
+              <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
+                <span aria-hidden="true">⚠️</span> Important — uSTAT does not yet publish a formal privacy policy or data retention statement. Please:
+              </p>
+              <ul className="text-xs text-amber-800 space-y-1 list-disc pl-5">
+                <li>Avoid uploading confidential or personally identifiable information (PII / PHI).</li>
+                <li>Anonymize datasets before upload — strip names, MRNs, dates of birth, and free-text identifiers.</li>
+                <li>For regulated workflows (HIPAA, GDPR clinical research), contact the developer directly for clarification on data handling and to request a self-hosted or local-only build.</li>
+              </ul>
+            </div>
+            <p className="text-[10px] text-gray-500 mt-2">
+              Contact: <a href="mailto:adycovs@gmail.com" className="text-indigo-600 hover:underline">adycovs@gmail.com</a> · A formal privacy policy and self-host option are on the roadmap.
             </p>
           </div>
 
