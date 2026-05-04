@@ -98,7 +98,7 @@ export default defineConfig({
   define: { global: 'globalThis' },
 
   optimizeDeps: {
-    include: ['plotly.js', 'react-plotly.js'],
+    include: ['plotly.js', 'react-plotly.js', 'xlsx'],
   },
 
   server: {

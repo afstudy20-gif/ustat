@@ -37,7 +37,13 @@ function downloadCSV(filename: string, headers: string[], rows: (string | number
 }
 
 async function downloadXLSX(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
-  const XLSX = await import("xlsx");
+  // xlsx package ships both ESM (named exports) and CJS (default export) builds.
+  // Resolve whichever shape Vite delivers in this environment.
+  const mod: any = await import("xlsx");
+  const XLSX: any = mod?.utils ? mod : mod?.default;
+  if (!XLSX?.utils?.aoa_to_sheet) {
+    throw new Error("xlsx module loaded but utils.aoa_to_sheet not available");
+  }
   const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Results");
@@ -67,6 +73,7 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
 
 export default function ResultExporter({ title, headers, rows, plotRef, className = "" }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 50) || "export";
   const hasTable = headers && rows;
@@ -75,12 +82,15 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
   const handle = async (format: "csv" | "xlsx" | "png") => {
     if (busy) return;
     setBusy(format);
+    setErr(null);
     try {
       if (format === "csv" && hasTable) downloadCSV(safeTitle, headers, rows);
       if (format === "xlsx" && hasTable) await downloadXLSX(safeTitle, headers, rows);
       if (format === "png" && hasPlot) await downloadPNG(plotRef, safeTitle);
     } catch (e) {
       console.error("Export error:", e);
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(`${format.toUpperCase()} export failed: ${msg}`);
     } finally {
       setBusy(null);
     }
@@ -119,6 +129,14 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
         >
           {busy === "png" ? "…" : "PNG 300dpi"}
         </button>
+      )}
+      {err && (
+        <span
+          title={err}
+          className="text-[10px] text-red-600 ml-1 max-w-[280px] truncate"
+        >
+          {err}
+        </span>
       )}
     </div>
   );

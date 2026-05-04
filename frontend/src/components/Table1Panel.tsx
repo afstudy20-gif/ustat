@@ -652,7 +652,11 @@ function JournalFormatSection({ result }: { result: any }) {
       a.download = `Table_1_AMA.${fmt}`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail ?? e?.message ?? "Unknown error";
+      setError(`${fmt.toUpperCase()} export failed: ${detail}`);
+      console.error("Journal export failed:", e);
+    }
   };
 
   return (
