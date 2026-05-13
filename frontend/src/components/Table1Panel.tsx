@@ -39,6 +39,13 @@ const STAT_GROUPS = [
 
 interface StatRow { label: string; overall: string; group_stats: Record<string, string> }
 
+interface PerGroupNormality {
+  p: number | null;
+  test: string;
+  normal: boolean;
+  n: number;
+}
+
 interface T1Row {
   variable: string;
   type: "numeric" | "categorical";
@@ -52,6 +59,8 @@ interface T1Row {
   normal?: boolean;
   normality_test?: string;
   normality_p?: number;
+  normality_mode?: "overall" | "within_group";
+  per_group_normality?: Record<string, PerGroupNormality>;
   smd?: number | null;
   group_stats: Record<string, string>;
   sub_rows?: { category: string; overall: string; group_stats: Record<string, string> }[];
@@ -159,6 +168,7 @@ export default function Table1Panel() {
   const [selectedStats, setSelectedStats] = useState<Set<string>>(new Set(["auto"]));
   const [showStats, setShowStats] = useState(false);
   const [showSMD, setShowSMD] = useState(false);
+  const [withinGroupNormality, setWithinGroupNormality] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -214,6 +224,7 @@ export default function Table1Panel() {
         variables: Array.from(selected),
         variable_kinds,
         selected_stats: Array.from(selectedStats),
+        normality_mode: (groupCol && withinGroupNormality) ? "within_group" : "overall",
       });
       setResult(res.data);
     } catch (e: any) {
@@ -320,9 +331,9 @@ export default function Table1Panel() {
           )}
         </div>
 
-        {/* SMD toggle — only visible when a group column is selected */}
+        {/* Group-dependent options — SMD + within-group normality */}
         {groupCol && (
-          <div className="px-3 py-2 border-b border-gray-200 flex-shrink-0">
+          <div className="px-3 py-2 border-b border-gray-200 flex-shrink-0 space-y-1.5">
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -332,6 +343,21 @@ export default function Table1Panel() {
               />
               <span className="text-xs text-gray-600 font-medium">Show SMD</span>
               <span className="text-[9px] text-gray-400">(Standardized Mean Difference)</span>
+            </label>
+            <label
+              className="flex items-start gap-2 cursor-pointer"
+              title="Run Shapiro-Wilk / Lilliefors on each group separately. Parametric test (t-test / ANOVA) is used only when every group passes normality (p > 0.05). Matches the actual assumption of parametric tests and is more conservative than the overall normality check."
+            >
+              <input
+                type="checkbox"
+                className="accent-indigo-500 mt-0.5"
+                checked={withinGroupNormality}
+                onChange={(e) => setWithinGroupNormality(e.target.checked)}
+              />
+              <div className="leading-tight">
+                <span className="text-xs text-gray-600 font-medium">Test normality within each group</span>
+                <span className="block text-[9px] text-gray-400">Stricter parametric criterion · every group must be normal</span>
+              </div>
             </label>
           </div>
         )}
@@ -511,16 +537,47 @@ export default function Table1Panel() {
                           )}
                           <td className="px-2 py-1.5 text-center">
                             {si === 0 && row.normality_test ? (
-                              <div className={`text-[9px] px-1 py-0.5 rounded font-medium inline-block
-                                ${row.normal
-                                  ? "bg-green-100 text-green-700 border border-green-300"
-                                  : "bg-orange-100 text-orange-700 border border-orange-300"}`}>
-                                {row.normal ? "Normal" : "Non-normal"}
-                                <br />
-                                <span className="text-gray-400 font-normal">
-                                  {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} p={row.normality_p?.toFixed(3)}
-                                </span>
-                              </div>
+                              row.normality_mode === "within_group" && row.per_group_normality
+                                && Object.keys(row.per_group_normality).length > 0 ? (
+                                <div
+                                  className={`text-[9px] px-1 py-0.5 rounded font-medium inline-block
+                                    ${row.normal
+                                      ? "bg-green-100 text-green-700 border border-green-300"
+                                      : "bg-orange-100 text-orange-700 border border-orange-300"}`}
+                                  title={Object.entries(row.per_group_normality).map(
+                                    ([g, n]) => `${g}: ${n.normal ? "Normal" : "Non-normal"} (${n.test}, p=${n.p ?? "n/a"}, n=${n.n})`
+                                  ).join("\n")}
+                                >
+                                  {row.normal ? "All groups normal" : "≥1 group non-normal"}
+                                  <br />
+                                  <span className="text-gray-400 font-normal">
+                                    per-group · hover for detail
+                                  </span>
+                                  <div className="mt-0.5 flex flex-wrap gap-0.5 justify-center">
+                                    {Object.entries(row.per_group_normality).map(([g, n]) => (
+                                      <span
+                                        key={g}
+                                        className={`px-1 rounded text-[8px] font-mono
+                                          ${n.normal ? "bg-green-200 text-green-800" : "bg-orange-200 text-orange-800"}`}
+                                        title={`${g}: ${n.test}, p=${n.p ?? "n/a"}, n=${n.n}`}
+                                      >
+                                        {g}:{n.p == null ? "n/a" : n.p.toFixed(2)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className={`text-[9px] px-1 py-0.5 rounded font-medium inline-block
+                                  ${row.normal
+                                    ? "bg-green-100 text-green-700 border border-green-300"
+                                    : "bg-orange-100 text-orange-700 border border-orange-300"}`}>
+                                  {row.normal ? "Normal" : "Non-normal"}
+                                  <br />
+                                  <span className="text-gray-400 font-normal">
+                                    {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} p={row.normality_p?.toFixed(3)}
+                                  </span>
+                                </div>
+                              )
                             ) : null}
                           </td>
                         </tr>

@@ -978,6 +978,11 @@ class Table1Request(BaseModel):
     variables: list[str]
     variable_kinds: Optional[dict] = None   # {col: "numeric"|"categorical"}
     selected_stats: Optional[list[str]] = None  # ["auto","mean_sd","median_iqr","se","ci95","variance","min_max","n","missing","p10","p25","p75","p90","p95"]
+    normality_mode: Optional[str] = "overall"  # "overall" or "within_group"
+    # within_group: run normality on each group separately; parametric path
+    #   used only if EVERY group passes (p > 0.05). More conservative — matches
+    #   the actual assumption of t-test/ANOVA. Falls back to overall when
+    #   group_column is null or only one group has data.
 
 
 def _fmt_p(p: float) -> str:
@@ -1133,7 +1138,7 @@ def table1(req: Table1Request):
         if is_num:
             s_all = s.dropna().astype(float)
             p_norm, norm_test_name = _normality_test(s_all)
-            normal = p_norm > 0.05
+            normal_overall = p_norm > 0.05
 
             # Build per-group series map  {label → raw series}
             group_series: dict[str, pd.Series] = {}
@@ -1143,6 +1148,36 @@ def table1(req: Table1Request):
                     gs = df[df[req.group_column] == g][var]
                     group_series[gl] = gs
                     group_arrs.append(gs.dropna().astype(float))
+
+            # Per-group normality (optional, opt-in via normality_mode).
+            # Parametric assumption is "normal within each group" — stricter
+            # than overall normality.
+            per_group_norm: dict[str, dict] = {}
+            if (req.normality_mode == "within_group" and groups is not None
+                    and len(group_arrs) >= 2):
+                for gl, arr in zip(group_labels, group_arrs):
+                    if len(arr) >= 3:
+                        pg, pg_name = _normality_test(arr)
+                        per_group_norm[gl] = {
+                            "p": round(float(pg), 4),
+                            "test": pg_name,
+                            "normal": bool(pg > 0.05),
+                            "n": int(len(arr)),
+                        }
+                    else:
+                        # Too few obs to test — treat as non-normal (forces
+                        # non-parametric path, safer default).
+                        per_group_norm[gl] = {
+                            "p": None,
+                            "test": "n<3",
+                            "normal": False,
+                            "n": int(len(arr)),
+                        }
+                # Parametric path only if EVERY group is normal
+                normal = (len(per_group_norm) > 0
+                          and all(v["normal"] for v in per_group_norm.values()))
+            else:
+                normal = normal_overall
 
             stat_rows = _build_stat_rows(s, group_series, sel_stats, normal)
 
@@ -1190,6 +1225,8 @@ def table1(req: Table1Request):
                 "normal": normal,
                 "normality_test": norm_test_name,
                 "normality_p": round(p_norm, 4),
+                "normality_mode": req.normality_mode or "overall",
+                "per_group_normality": per_group_norm,  # {} when overall mode
                 "stat_rows": stat_rows,
                 "p_value": p_value_str,
                 "test": test_name_str,
