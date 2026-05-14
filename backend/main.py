@@ -56,7 +56,7 @@ def security_txt() -> str:
     See: https://www.rfc-editor.org/rfc/rfc9116
     """
     expires = (datetime.now(timezone.utc) + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    contact = os.environ.get("SECURITY_CONTACT_EMAIL", "adycovs@gmail.com")
+    contact = os.environ.get("SECURITY_CONTACT_EMAIL", "security@drtr.uk")
     return (
         f"Contact: mailto:{contact}\n"
         f"Expires: {expires}\n"

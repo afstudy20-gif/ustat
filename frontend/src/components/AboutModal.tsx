@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.1";
-const BUILD = 92;
+const VERSION = "1.9.2";
+const BUILD = 93;
 
 const CHANGELOG = [
+  { ver: "1.9.2", date: "2026-05-14", notes: "Independent-verifiability pass. Security page now ships a 'Verify our claims yourself' section with curl one-liners for headers, links to Mozilla Observatory + SecurityHeaders.com + Qualys SSL Labs + HSTS-Preload + VirusTotal, and a strace recipe for proving 'never writes the dataset to disk' against a local clone. Source-side line pointers added (store.py / upload.py / middleware / CI workflow). Domain-based contact emails: security@drtr.uk for disclosure and contact@drtr.uk for general — used in privacy.html, terms.html, security.html, About modal, and /.well-known/security.txt (env-overridable via SECURITY_CONTACT_EMAIL). Privacy clarification: MapMyVisitors widget explicitly NOT advertising — uSTAT never asks users to disable an ad-blocker." },
   { ver: "1.9.1", date: "2026-05-14", notes: "Hotfix: SecurityHeadersMiddleware crashed every request on production (MutableHeaders has no .pop). Clean URLs added: /privacy, /terms, /security 308-redirect to the static pages so the security.txt Policy: link and any external citation works without the .html suffix. About modal now opens with a prominent indigo Legal & Security quick-link row (Privacy · Terms · Security Overview · security.txt · Source). Splash footer carries the same links. Power tab removed from main tab strip (still reachable from the splash tile). Code tab no longer hidden when ENABLE_CODE_RUNNER is off — CodePanel shows an in-page disabled banner instead. MapMyVisitors widget now mounts only on the splash screen via useEffect and is torn down when the user opens a dataset." },
   { ver: "1.9.0", date: "2026-05-14", notes: "Security & transparency pass. Public Privacy Policy / Terms of Use / Security Overview pages (/privacy.html, /terms.html, /security.html). RFC 9116 /.well-known/security.txt for vulnerability disclosure. Browser-hardening middleware: HSTS one-year preload, CSP (report-only until tuned), X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin, Permissions-Policy denying camera/mic/geo/etc., COOP same-origin. Continuous security scan workflow on every push (bandit, pip-audit, npm audit, semgrep OWASP, gitleaks). About modal clarifies server-side architecture, surfaces GitHub source link, adds Privacy/Terms/Security/security.txt deep-links and a browser-hygiene checklist." },
   { ver: "1.8.0", date: "2026-05-14", notes: "PSM panel — full feature parity with R MatchIt / twang. Alternative propensity-score models (logistic / probit / GBM). Optimal Hungarian matching (1:1) in addition to greedy NN — falls back to greedy when ratio > 1. Exact-match strata (treated and control must agree on selected categorical columns before NN). Survival outcome path: stratified Cox PH with strata = matched-set ID, returns HR + concordance. Rosenbaum bounds sensitivity analysis for 1:1 binary outcomes — reports discordant pair counts, critical Γ at α=0.05, and the full Γ-vs-p curve up to a configurable Γmax." },
@@ -281,7 +282,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
               <a href="https://github.com/afstudy20-gif/wiz3" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Source (GitHub) →</a>
             </div>
             <p className="text-[10px] text-gray-500 mt-2">
-              Vulnerability disclosure: <a href="mailto:adycovs@gmail.com?subject=%5BuSTAT-security%5D" className="text-indigo-600 hover:underline">adycovs@gmail.com</a> (use the <code>[uSTAT-security]</code> subject prefix). We acknowledge within 5 business days.
+              Vulnerability disclosure: <a href="mailto:security@drtr.uk?subject=%5BuSTAT-security%5D" className="text-indigo-600 hover:underline">security@drtr.uk</a> (use the <code>[uSTAT-security]</code> subject prefix). We acknowledge within 5 business days. General contact: <a href="mailto:contact@drtr.uk" className="text-indigo-600 hover:underline">contact@drtr.uk</a>.
             </p>
           </Section>
 

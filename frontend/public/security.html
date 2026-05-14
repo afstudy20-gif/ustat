@@ -84,7 +84,41 @@
     <li>uSTAT has <b>not yet been independently audited</b> by a third party.</li>
   </ul>
 
-  <h2>6. Automated security checks</h2>
+  <h2>6. Verify our claims yourself</h2>
+  <p>You don't have to trust us. Every claim on this page is verifiable from a terminal or a third-party scanner. Below are the exact commands and links.</p>
+
+  <h3 style="font-size:14px;margin-top:14px;">Security headers</h3>
+  <pre>curl -I https://ustat.drtr.uk/api/health</pre>
+  <p>You should see <code>strict-transport-security</code> (1-year preload), <code>x-frame-options: DENY</code>, <code>x-content-type-options: nosniff</code>, <code>content-security-policy-report-only</code>, <code>referrer-policy: strict-origin-when-cross-origin</code>, <code>permissions-policy</code> with the powerful APIs denied, and <code>cross-origin-opener-policy: same-origin</code>. The <code>server:</code> header is stripped.</p>
+
+  <h3 style="font-size:14px;margin-top:14px;">Third-party scanners (one click, public)</h3>
+  <ul>
+    <li><a href="https://observatory.mozilla.org/analyze/ustat.drtr.uk" target="_blank" rel="noreferrer">Mozilla Observatory — full report</a></li>
+    <li><a href="https://securityheaders.com/?q=https%3A%2F%2Fustat.drtr.uk&followRedirects=on" target="_blank" rel="noreferrer">SecurityHeaders.com grade</a></li>
+    <li><a href="https://www.ssllabs.com/ssltest/analyze.html?d=ustat.drtr.uk" target="_blank" rel="noreferrer">Qualys SSL Labs — TLS configuration</a></li>
+    <li><a href="https://hstspreload.org/?domain=ustat.drtr.uk" target="_blank" rel="noreferrer">HSTS Preload — status</a></li>
+    <li><a href="https://www.virustotal.com/gui/domain/ustat.drtr.uk" target="_blank" rel="noreferrer">VirusTotal — domain reputation</a></li>
+  </ul>
+
+  <h3 style="font-size:14px;margin-top:14px;">"Files never touch disk" — verify on a self-hosted run</h3>
+  <p>Clone the repo, start the backend with <code>strace</code> or <code>fs.watcher</code> attached, and upload a file. No <code>open(..., O_WRONLY)</code> call hits a path under <code>/app</code>. Quick demo on Linux:</p>
+  <pre>git clone https://github.com/afstudy20-gif/wiz3 &amp;&amp; cd wiz3/backend
+python -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -r requirements.txt
+strace -e trace=openat -f -- uvicorn main:app --port 8000 \
+    2&gt;&amp;1 | grep -E 'O_WRONLY|O_CREAT' | grep -v site-packages</pre>
+  <p>The only writes you should see are framework / static-file caching outside the <code>uploads/</code> path — there is no <code>uploads/</code> path. <code>services/store.py</code> keeps everything in process RAM and evicts after <code>SESSION_TTL_SECONDS = 1800</code> of inactivity.</p>
+
+  <h3 style="font-size:14px;margin-top:14px;">Source-side verification</h3>
+  <p>The relevant lines:</p>
+  <ul>
+    <li><a href="https://github.com/afstudy20-gif/wiz3/blob/main/backend/services/store.py" target="_blank" rel="noreferrer"><code>services/store.py</code></a> — the in-RAM dict, the TTL cleaner, and the eviction policy.</li>
+    <li><a href="https://github.com/afstudy20-gif/wiz3/blob/main/backend/routers/upload.py" target="_blank" rel="noreferrer"><code>routers/upload.py</code></a> — the upload handler. No <code>open(..., "w")</code>, no <code>to_csv()</code>, no <code>shutil.copy</code>.</li>
+    <li><a href="https://github.com/afstudy20-gif/wiz3/blob/main/backend/middleware/security_headers.py" target="_blank" rel="noreferrer"><code>middleware/security_headers.py</code></a> — every header value above is set by this file.</li>
+    <li><a href="https://github.com/afstudy20-gif/wiz3/blob/main/.github/workflows/security-scan.yml" target="_blank" rel="noreferrer"><code>.github/workflows/security-scan.yml</code></a> — the CI scan workflow.</li>
+  </ul>
+
+  <h2>7. Automated security checks</h2>
   <p>Every push to <code>main</code> runs the following in CI (GitHub Actions <code>.github/workflows/security-scan.yml</code>):</p>
   <ul>
     <li><code>bandit -r backend/</code> — Python static security analysis</li>
@@ -94,13 +128,13 @@
   </ul>
 
   <h2>7. Vulnerability disclosure</h2>
-  <p>If you discover a security issue, please email <a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a> with the prefix <code>[uSTAT-security]</code>. We commit to acknowledging within 5 business days. A machine-readable contact lives at <a href="/.well-known/security.txt">/.well-known/security.txt</a> (<a href="https://www.rfc-editor.org/rfc/rfc9116">RFC 9116</a>).</p>
+  <p>If you discover a security issue, please email <a href="mailto:security@drtr.uk">security@drtr.uk</a> with the prefix <code>[uSTAT-security]</code>. We commit to acknowledging within 5 business days. A machine-readable contact lives at <a href="/.well-known/security.txt">/.well-known/security.txt</a> (<a href="https://www.rfc-editor.org/rfc/rfc9116">RFC 9116</a>).</p>
   <p>Please do not test for vulnerabilities against the production instance with anything other than read-only requests. Use a local fork for invasive testing.</p>
 
   <h2>8. Source code</h2>
   <p>The full source is published at <a href="https://github.com/afstudy20-gif/wiz3">github.com/afstudy20-gif/wiz3</a>. Pull requests welcome.</p>
 
   <h2>9. Contact</h2>
-  <p><a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a></p>
+  <p><a href="mailto:security@drtr.uk">security@drtr.uk</a></p>
 </body>
 </html>
