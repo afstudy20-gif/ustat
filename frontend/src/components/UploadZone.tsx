@@ -191,7 +191,7 @@ export default function UploadZone() {
             { url: "https://not.drtr.uk",    Icon: NotebookPen, name: "Notepad",    desc: "Local-only text editor" },
             { url: "https://pdf.drtr.uk/",   Icon: FileText,    name: "PDF",        desc: "Annotate &amp; sign in browser" },
             { url: "https://ecgcal.drtr.uk/",Icon: HeartPulse,  name: "ECG Caliper",desc: "Digital ECG wave analyzer" },
-            { url: "https://noedw.drtr.uk",  Icon: Layers,      name: "noedw",      desc: "Clinical utility (coming soon)" },
+            { url: "https://neodw.drtr.uk/", Icon: Layers,      name: "NeoDW",      desc: "DICOM workstation (any modality)" },
             { url: "https://flow.drtr.uk",   Icon: Workflow,    name: "AcademicFlow", desc: "Journal flowchart designer" },
           ].map(({ url, Icon, name, desc }) => (
             <a
