@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.8.0";
-const BUILD = 90;
+const VERSION = "1.9.0";
+const BUILD = 91;
 
 const CHANGELOG = [
+  { ver: "1.9.0", date: "2026-05-14", notes: "Security & transparency pass. Public Privacy Policy / Terms of Use / Security Overview pages (/privacy.html, /terms.html, /security.html). RFC 9116 /.well-known/security.txt for vulnerability disclosure. Browser-hardening middleware: HSTS one-year preload, CSP (report-only until tuned), X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin, Permissions-Policy denying camera/mic/geo/etc., COOP same-origin. Continuous security scan workflow on every push (bandit, pip-audit, npm audit, semgrep OWASP, gitleaks). About modal clarifies server-side architecture, surfaces GitHub source link, adds Privacy/Terms/Security/security.txt deep-links and a browser-hygiene checklist." },
   { ver: "1.8.0", date: "2026-05-14", notes: "PSM panel — full feature parity with R MatchIt / twang. Alternative propensity-score models (logistic / probit / GBM). Optimal Hungarian matching (1:1) in addition to greedy NN — falls back to greedy when ratio > 1. Exact-match strata (treated and control must agree on selected categorical columns before NN). Survival outcome path: stratified Cox PH with strata = matched-set ID, returns HR + concordance. Rosenbaum bounds sensitivity analysis for 1:1 binary outcomes — reports discordant pair counts, critical Γ at α=0.05, and the full Γ-vs-p curve up to a configurable Γmax." },
   { ver: "1.7.1", date: "2026-05-14", notes: "PSM panel hardened (Austin 2011 compliance): caliper now applied on logit-PS scale by default (raw still selectable); SMD denominator fixed to pooled SD of the unmatched sample so before/after deltas reflect only the numerator shift; added Rubin variance ratio and KS-test p-value per covariate; added Crump 2009 common-support trimming option; matching ratio 1:1–1:5 selector; random seed input for reproducible LR fits; balance flag now requires both SMD<0.10 and variance ratio in [0.5, 2.0]; treated units now processed by decreasing PS (greedy NN, hardest-first)." },
   { ver: "1.7.0", date: "2026-05-14", notes: "RCS Cox time-to-event outcome with custom knot positions (e.g. clinical 70/100/130/160 mg/dL as a sensitivity analysis to Harrell percentiles). New Cox-RCS multivariable model: 1 or 2 RCS terms + additive linear covariates + optional RCS × RCS interaction with LR test and 2D HR contour plot — supports the full Surv(time,event) ~ rcs(LDL,4) * rcs(AGE,4) + ... workflow. New Code tab: server-side Python sandbox (gated by ENABLE_CODE_RUNNER) with import allowlist, rlimits, optional network unshare, audit log, and per-session rate limit. df is auto-injected; matplotlib figures captured. Templates for the three canonical Cox-RCS analysis steps." },
@@ -244,20 +245,28 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
           {/* ── Privacy & Data Handling ────────────────────────────────────── */}
           <Section title="Privacy & data handling">
             <p className="text-xs text-gray-700 leading-relaxed">
-              Your file is sent to our server only to be parsed and held in memory for the duration of your session. It is <strong>never written to disk</strong> and is automatically cleared from memory 30 minutes after you stop using the app. No account, no logs of your data, no permanent storage.
+              uSTAT is a <strong>server-side</strong> application: your file is sent to our backend, parsed in RAM, and bound to a session ID. It is <strong>never written to disk</strong> and is automatically discarded 30 minutes after your last activity (<code>SESSION_TTL_SECONDS = 1800</code> in <code>backend/services/store.py</code>). No account, no persistent identifiers, no logs of your data. Stack and code are <a href="https://github.com/afstudy20-gif/wiz3" className="text-indigo-600 hover:underline" target="_blank" rel="noreferrer">public on GitHub</a> for independent review.
             </p>
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-2 space-y-1.5">
               <p className="text-xs font-semibold text-amber-900 flex items-center gap-1.5">
-                <span aria-hidden="true">⚠️</span> Important — uSTAT does not yet publish a formal privacy policy. Please:
+                <span aria-hidden="true">⚠️</span> Browser hygiene — your responsibility:
               </p>
               <ul className="text-xs text-amber-800 space-y-1 list-disc pl-5">
-                <li>Avoid uploading confidential or personally identifiable information (PII / PHI).</li>
-                <li>Anonymize datasets — strip names, MRNs, dates of birth, free-text identifiers.</li>
-                <li>For HIPAA / GDPR-regulated workflows, contact the developer for a self-hosted or local-only build.</li>
+                <li>Do not upload confidential or personally identifiable information (PII / PHI). Anonymise first — strip names, MRNs, dates of birth, free-text identifiers.</li>
+                <li>Process tab memory holds the dataframe while uSTAT is open. Close the tab when you're done; on shared machines, use a private / incognito window.</li>
+                <li>Disable third-party browser extensions on this domain when working with sensitive data — extensions with broad permissions can read page state.</li>
+                <li>For HIPAA / GDPR-regulated workflows, request a self-hosted or local-only build via email.</li>
               </ul>
             </div>
+            <div className="flex flex-wrap gap-3 text-[11px] mt-2">
+              <a href="/privacy.html" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Privacy Policy →</a>
+              <a href="/terms.html" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Terms of Use →</a>
+              <a href="/security.html" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Security Overview →</a>
+              <a href="/.well-known/security.txt" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">security.txt →</a>
+              <a href="https://github.com/afstudy20-gif/wiz3" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Source (GitHub) →</a>
+            </div>
             <p className="text-[10px] text-gray-500 mt-2">
-              Contact: <a href="mailto:adycovs@gmail.com" className="text-indigo-600 hover:underline">adycovs@gmail.com</a> · Formal privacy policy and self-host option are on the roadmap.
+              Vulnerability disclosure: <a href="mailto:adycovs@gmail.com?subject=%5BuSTAT-security%5D" className="text-indigo-600 hover:underline">adycovs@gmail.com</a> (use the <code>[uSTAT-security]</code> subject prefix). We acknowledge within 5 business days.
             </p>
           </Section>
 

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>uSTAT — Privacy Policy</title>
+  <meta name="description" content="uSTAT Privacy Policy: how your data is processed, stored, and discarded." />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <style>
+    body { max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2937; line-height: 1.6; }
+    h1 { color: #312e81; font-size: 28px; margin-bottom: 4px; }
+    h2 { color: #1e1b4b; font-size: 18px; margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    p, li { color: #374151; font-size: 14px; }
+    code, kbd { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    a { color: #4338ca; }
+    .lead { color: #6b7280; font-size: 13px; }
+    nav a { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <nav style="margin-bottom: 18px;">
+    <a href="/">← uSTAT</a>
+    <a href="/privacy.html"><b>Privacy</b></a>
+    <a href="/terms.html">Terms</a>
+    <a href="/security.html">Security</a>
+  </nav>
+
+  <h1>Privacy Policy</h1>
+  <p class="lead">Last updated: 2026-05-14 · Version 1.0</p>
+
+  <h2>1. Who we are</h2>
+  <p>
+    uSTAT is a free, browser-based statistical analysis platform created and operated by <b>Dr. Yusuf Hoşoğlu</b>. Contact: <a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a>.
+  </p>
+
+  <h2>2. What data we receive</h2>
+  <ul>
+    <li>The file you choose to upload (CSV, Excel, SPSS, SAS, Stata, or JSON session).</li>
+    <li>The HTTP request metadata your browser sends: IP address, user agent, referrer, timestamp, requested URL.</li>
+    <li>The analysis parameters you submit through the UI (e.g. selected variables, knot counts, group columns).</li>
+  </ul>
+
+  <h2>3. How your data is processed</h2>
+  <p>
+    All statistical computation happens on the uSTAT <b>server</b>, not in your browser. When you upload a file:
+  </p>
+  <ul>
+    <li>It is parsed in RAM by the backend and bound to a session identifier (<code>session_id</code>).</li>
+    <li>It is <b>never written to disk</b>. The dataframe lives only in process memory.</li>
+    <li>It is automatically cleared from memory <b>30 minutes after your last activity</b> (configurable: <code>SESSION_TTL_SECONDS = 1800</code> in <code>backend/services/store.py</code>).</li>
+    <li>If the server is restarted, all in-memory data is lost — there is no persistent storage.</li>
+  </ul>
+  <p>
+    The browser-side React app uses <code>zustand</code> for local UI state. Closing the tab clears that state. Nothing is saved to <code>localStorage</code> or cookies for your data.
+  </p>
+
+  <h2>4. What we log</h2>
+  <ul>
+    <li><b>Web server access log</b>: standard HTTP metadata (IP, path, status, timestamp). Retained by Render for up to 30 days.</li>
+    <li><b>Code runner audit log</b> (only when <code>ENABLE_CODE_RUNNER=1</code>): timestamp, IP, <code>session_id</code>, SHA-256 prefix of the submitted code, first 200 characters, duration, exit code. Your dataset is <b>never</b> logged.</li>
+    <li><b>MapMyVisitors widget</b>: aggregated visitor map shown on the splash screen. See their privacy notice at <a href="https://www.mapmyvisitors.com">mapmyvisitors.com</a>. Disable by blocking third-party scripts.</li>
+  </ul>
+
+  <h2>5. What we do NOT do</h2>
+  <ul>
+    <li>We do not sell or share your data.</li>
+    <li>We do not have user accounts, profiles, or persistent identifiers.</li>
+    <li>We do not use advertising trackers or analytics beyond the visitor map.</li>
+    <li>We do not run automated decision-making or profiling.</li>
+  </ul>
+
+  <h2>6. Data subject to regulation</h2>
+  <p>
+    uSTAT is <b>not</b> HIPAA, GDPR, or ISO 27001 certified. Do <b>not</b> upload Protected Health Information (PHI), personally identifiable information (PII), or any data whose handling is restricted by law or by your institution. Anonymise datasets before upload: strip names, MRNs, dates of birth, and free-text identifiers. For regulated workflows, request a self-hosted or local-only build via <a href="mailto:adycovs@gmail.com">email</a>.
+  </p>
+
+  <h2>7. Your rights</h2>
+  <p>
+    Because we hold no persistent user data, the standard GDPR access / portability / erasure rights have nothing to act on once your session expires. If you wish to delete a session immediately, close the tab — the backend will discard it within 30 minutes of inactivity.
+  </p>
+
+  <h2>8. Security</h2>
+  <p>
+    See the <a href="/security.html">Security page</a> and the public <a href="https://github.com/afstudy20-gif/wiz3/blob/main/backend/SECURITY.md">SECURITY.md</a> in the source repository for the threat model, sandbox hardening, and the responsible-disclosure contact.
+  </p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>
+    Material changes will be announced in the in-app Changelog (About → Changelog) and through the Last updated date above.
+  </p>
+
+  <h2>10. Contact</h2>
+  <p>
+    Questions or requests: <a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a>.
+  </p>
+</body>
+</html>

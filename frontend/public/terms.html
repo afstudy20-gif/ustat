@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>uSTAT — Terms of Use</title>
+  <meta name="description" content="uSTAT Terms of Use: no warranty, no medical-device use, attribution requirements." />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <style>
+    body { max-width: 760px; margin: 40px auto; padding: 0 20px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2937; line-height: 1.6; }
+    h1 { color: #312e81; font-size: 28px; margin-bottom: 4px; }
+    h2 { color: #1e1b4b; font-size: 18px; margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    p, li { color: #374151; font-size: 14px; }
+    .lead { color: #6b7280; font-size: 13px; }
+    .danger { background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 14px; border-radius: 6px; margin: 18px 0; }
+    a { color: #4338ca; }
+    nav a { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <nav style="margin-bottom: 18px;">
+    <a href="/">← uSTAT</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html"><b>Terms</b></a>
+    <a href="/security.html">Security</a>
+  </nav>
+
+  <h1>Terms of Use</h1>
+  <p class="lead">Last updated: 2026-05-14 · Version 1.0</p>
+
+  <h2>1. Acceptance</h2>
+  <p>
+    By using uSTAT (the "Service") you accept these Terms. If you do not accept them, do not use the Service.
+  </p>
+
+  <h2>2. Eligibility</h2>
+  <p>
+    The Service is intended for use by clinicians, researchers, and biostatisticians who have authorisation to analyse the data they upload. You are responsible for ensuring that your use complies with the laws and institutional policies that apply to you.
+  </p>
+
+  <h2>3. Not a medical device</h2>
+  <div class="danger">
+    <b>uSTAT is NOT a medical device.</b> Outputs from uSTAT are NOT intended to diagnose, treat, cure, or prevent any disease, and must NOT be used as the sole basis for any clinical decision. Validate any clinically or scientifically important result against an established statistics package (SPSS, R, Stata, SAS) before reporting or acting on it.
+  </div>
+
+  <h2>4. No warranty</h2>
+  <p>
+    The Service is provided "AS IS" and "AS AVAILABLE" without warranty of any kind, express or implied — including but not limited to fitness for a particular purpose, accuracy, non-infringement, or uninterrupted operation. uSTAT has not yet been validated through peer-reviewed publications; validation against reference software is ongoing (see the in-app "Validation status" banner).
+  </p>
+
+  <h2>5. Limitation of liability</h2>
+  <p>
+    To the maximum extent permitted by law, in no event will Dr. Yusuf Hoşoğlu or any contributor be liable for any indirect, incidental, special, consequential, or punitive damages, or for any loss of profits, revenue, data, or use, arising out of or related to your use of uSTAT, even if advised of the possibility of such damages.
+  </p>
+
+  <h2>6. Acceptable use</h2>
+  <ul>
+    <li>You will not upload data you are not authorised to use.</li>
+    <li>You will not upload PHI, PII, or other data subject to legal restriction (see <a href="/privacy.html">Privacy Policy §6</a>).</li>
+    <li>You will not attempt to break the rate limits, the sandbox, or the import allowlist.</li>
+    <li>You will not use the Service to attack other systems or to host malicious code.</li>
+  </ul>
+
+  <h2>7. Code-execution sandbox</h2>
+  <p>
+    When enabled (production env <code>ENABLE_CODE_RUNNER=1</code>), the Service exposes a sandboxed Python runner. Submitted code is run inside a restricted subprocess with rlimits, an import allowlist, and rate limits. Attempting to escape the sandbox is prohibited and may be reported. See <a href="/security.html">Security</a> for details.
+  </p>
+
+  <h2>8. Attribution</h2>
+  <p>
+    If you publish results obtained with uSTAT, please cite the tool:
+  </p>
+  <p style="margin-left: 16px; font-style: italic;">
+    Hoşoğlu Y. uSTAT — browser-based statistical analysis platform. <a href="https://ustat.drtr.uk">https://ustat.drtr.uk</a> (accessed YYYY-MM-DD).
+  </p>
+
+  <h2>9. Changes</h2>
+  <p>
+    These Terms may change. Material changes are announced in the in-app Changelog. Continued use after a change constitutes acceptance.
+  </p>
+
+  <h2>10. Governing law</h2>
+  <p>
+    These Terms are governed by the laws of the Republic of Türkiye. Disputes are subject to the exclusive jurisdiction of the courts of Diyarbakır.
+  </p>
+
+  <h2>11. Contact</h2>
+  <p>
+    Questions: <a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a>.
+  </p>
+</body>
+</html>

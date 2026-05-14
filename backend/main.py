@@ -1,7 +1,11 @@
 import os
+from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+
+from middleware.security_headers import SecurityHeadersMiddleware
 
 try:
     import psutil
@@ -13,6 +17,7 @@ from services import store
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],   # allow all localhost ports
@@ -42,6 +47,23 @@ app.include_router(nomogram.router, prefix="/api/nomogram", tags=["nomogram"])
 app.include_router(survival_advanced.router, prefix="/api/survival_advanced", tags=["survival_advanced"])
 app.include_router(article_parser.router, prefix="/api/article_parser", tags=["article_parser"])
 app.include_router(code_runner.router, prefix="/api/code", tags=["code_runner"])
+
+
+@app.get("/.well-known/security.txt", response_class=PlainTextResponse)
+def security_txt() -> str:
+    """RFC 9116 security.txt — vulnerability disclosure contact.
+
+    See: https://www.rfc-editor.org/rfc/rfc9116
+    """
+    expires = (datetime.now(timezone.utc) + timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    contact = os.environ.get("SECURITY_CONTACT_EMAIL", "adycovs@gmail.com")
+    return (
+        f"Contact: mailto:{contact}\n"
+        f"Expires: {expires}\n"
+        "Preferred-Languages: en, tr\n"
+        "Canonical: https://ustat.drtr.uk/.well-known/security.txt\n"
+        "Policy: https://ustat.drtr.uk/security\n"
+    )
 
 
 @app.get("/api/health")

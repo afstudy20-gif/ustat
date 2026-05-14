@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>uSTAT — Security</title>
+  <meta name="description" content="uSTAT security overview: hardening, sandbox, and vulnerability disclosure." />
+  <link rel="icon" type="image/png" href="/logo.png" />
+  <style>
+    body { max-width: 820px; margin: 40px auto; padding: 0 20px; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2937; line-height: 1.6; }
+    h1 { color: #312e81; font-size: 28px; margin-bottom: 4px; }
+    h2 { color: #1e1b4b; font-size: 18px; margin-top: 32px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+    p, li, td, th { color: #374151; font-size: 14px; }
+    code { background: #f3f4f6; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+    pre  { background: #0f172a; color: #e2e8f0; padding: 12px 14px; border-radius: 6px; overflow-x: auto; font-size: 12px; }
+    .lead { color: #6b7280; font-size: 13px; }
+    .ok { color: #047857; }
+    .warn { color: #b45309; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+    th, td { border: 1px solid #e5e7eb; padding: 6px 8px; text-align: left; font-size: 13px; }
+    th { background: #f9fafb; }
+    a { color: #4338ca; }
+    nav a { margin-right: 12px; }
+  </style>
+</head>
+<body>
+  <nav style="margin-bottom: 18px;">
+    <a href="/">← uSTAT</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+    <a href="/security.html"><b>Security</b></a>
+  </nav>
+
+  <h1>Security</h1>
+  <p class="lead">Last updated: 2026-05-14 · Source repo: <a href="https://github.com/afstudy20-gif/wiz3">github.com/afstudy20-gif/wiz3</a></p>
+
+  <h2>1. Architecture</h2>
+  <ul>
+    <li>All statistical computation runs on the <b>backend</b> (FastAPI + Python on Render).</li>
+    <li>The frontend is a static React build — it does NOT process the dataset.</li>
+    <li>TLS is terminated by Render at the edge. HSTS is set to one year with subdomain include.</li>
+  </ul>
+
+  <h2>2. Data handling</h2>
+  <ul>
+    <li>Uploaded files are parsed in RAM. They are <b>never written to disk</b>.</li>
+    <li>Backend session TTL is <b>30 minutes of inactivity</b> (<code>SESSION_TTL_SECONDS = 1800</code> in <code>backend/services/store.py</code>). Expired sessions are evicted by an in-process cleaner.</li>
+    <li>Maximum concurrent sessions is capped (<code>MAX_SESSIONS = 20</code>); oldest are evicted on overflow.</li>
+    <li>No long-term storage. No backup. No replication.</li>
+  </ul>
+
+  <h2>3. Browser-hardening headers</h2>
+  <p>Every response carries:</p>
+  <table>
+    <tr><th>Header</th><th>Value</th></tr>
+    <tr><td>Strict-Transport-Security</td><td><code>max-age=31536000; includeSubDomains; preload</code></td></tr>
+    <tr><td>Content-Security-Policy</td><td>self + Plotly + inline tailwind; report-only until tuned</td></tr>
+    <tr><td>X-Frame-Options</td><td><code>DENY</code> — anti-clickjacking</td></tr>
+    <tr><td>X-Content-Type-Options</td><td><code>nosniff</code></td></tr>
+    <tr><td>Referrer-Policy</td><td><code>strict-origin-when-cross-origin</code></td></tr>
+    <tr><td>Permissions-Policy</td><td>camera / mic / geo / payment / usb / sensors denied</td></tr>
+    <tr><td>Cross-Origin-Opener-Policy</td><td><code>same-origin</code></td></tr>
+  </table>
+
+  <h2>4. Code-execution sandbox</h2>
+  <p>Off by default. When enabled (<code>ENABLE_CODE_RUNNER=1</code>), submitted Python runs in an isolated subprocess with:</p>
+  <ul>
+    <li><code>RLIMIT_CPU</code> = run-timeout (max 60 s)</li>
+    <li><code>RLIMIT_AS</code> = 512 MB</li>
+    <li><code>RLIMIT_FSIZE</code> = 10 MB</li>
+    <li><code>RLIMIT_NOFILE</code> = 64</li>
+    <li><code>RLIMIT_NPROC</code> = 32</li>
+    <li><code>sys.meta_path</code> import allowlist (numpy / pandas / scipy / statsmodels / lifelines / sklearn / matplotlib / seaborn + safe stdlib) — explicit deny-list for socket, http, subprocess, ctypes, os, shutil, pickle, ...</li>
+    <li>Linux: <code>unshare --user --net</code> when available — strips the network namespace</li>
+    <li>Matplotlib forced to <code>Agg</code> backend</li>
+    <li>Rate limits: per-session, per-IP, global, concurrency semaphore — all env-configurable (see <a href="https://github.com/afstudy20-gif/wiz3/blob/main/backend/SECURITY.md">SECURITY.md</a>)</li>
+    <li>Audit log (<code>backend/logs/code_runner.jsonl</code>): timestamp, IP, session, SHA-256 of code, first 200 chars, duration, exit code — dataset never logged</li>
+  </ul>
+
+  <h2>5. Known limitations</h2>
+  <ul>
+    <li>The sandbox shares the host kernel — no Docker-level isolation (yet).</li>
+    <li>No defence against kernel-level exploits or speculative-execution side channels.</li>
+    <li>uSTAT has <b>not yet been independently audited</b> by a third party.</li>
+  </ul>
+
+  <h2>6. Automated security checks</h2>
+  <p>Every push to <code>main</code> runs the following in CI (GitHub Actions <code>.github/workflows/security-scan.yml</code>):</p>
+  <ul>
+    <li><code>bandit -r backend/</code> — Python static security analysis</li>
+    <li><code>pip-audit</code> — Python dependency CVE check</li>
+    <li><code>npm audit --audit-level=high</code> — npm dependency CVE check (frontend)</li>
+    <li><code>semgrep --config p/python --config p/typescript --config p/owasp-top-ten</code></li>
+  </ul>
+
+  <h2>7. Vulnerability disclosure</h2>
+  <p>If you discover a security issue, please email <a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a> with the prefix <code>[uSTAT-security]</code>. We commit to acknowledging within 5 business days. A machine-readable contact lives at <a href="/.well-known/security.txt">/.well-known/security.txt</a> (<a href="https://www.rfc-editor.org/rfc/rfc9116">RFC 9116</a>).</p>
+  <p>Please do not test for vulnerabilities against the production instance with anything other than read-only requests. Use a local fork for invasive testing.</p>
+
+  <h2>8. Source code</h2>
+  <p>The full source is published at <a href="https://github.com/afstudy20-gif/wiz3">github.com/afstudy20-gif/wiz3</a>. Pull requests welcome.</p>
+
+  <h2>9. Contact</h2>
+  <p><a href="mailto:adycovs@gmail.com">adycovs@gmail.com</a></p>
+</body>
+</html>
