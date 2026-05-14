@@ -1,7 +1,7 @@
 import "./index.css";
-import { Component, useEffect, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Zap, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal } from "lucide-react";
-import { clearCases, codeRunnerStatus, saveSession as saveSessionApi } from "./api";
+import { Component, useState, type ReactNode } from "react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal } from "lucide-react";
+import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -47,7 +47,6 @@ const TABS = [
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
   { id: "visual",      label: "Visual",      icon: Shapes },
-  { id: "power",       label: "Power",       icon: Zap },
   { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "missing",     label: "Missing",     icon: Filter },
@@ -228,17 +227,9 @@ export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
-  const [codeRunnerEnabled, setCodeRunnerEnabled] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    codeRunnerStatus()
-      .then((r) => { if (!cancelled) setCodeRunnerEnabled(!!r.data.enabled); })
-      .catch(() => { if (!cancelled) setCodeRunnerEnabled(false); });
-    return () => { cancelled = true; };
-  }, []);
-
-  const visibleTabs = TABS.filter((t) => t.id !== "code" || codeRunnerEnabled === true);
+  // Code tab is always visible; the panel itself handles the
+  // "ENABLE_CODE_RUNNER not set" case with an in-page disabled banner.
+  const visibleTabs = TABS;
 
   const handleOpenNew = () => setShowSaveModal(true);
 
