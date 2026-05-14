@@ -2009,6 +2009,19 @@ class PSMRequest(BaseModel):
     imputation: Optional[str] = "listwise"
     trim_common_support: Optional[bool] = False  # Crump 2009 trimming
     random_state: Optional[int] = 42     # reproducibility for LR solver tie-breaking
+    # Score-model alternatives
+    score_method: Optional[str] = "logistic"   # 'logistic' | 'probit' | 'gbm'
+    # Matching method
+    matching_method: Optional[str] = "greedy"  # 'greedy' (NN+caliper) | 'optimal' (Hungarian, 1:1 only)
+    # Exact-match strata (categorical columns that must agree before NN)
+    exact_match: Optional[List[str]] = None
+    # Outcome handling
+    outcome_type: Optional[str] = "binary"     # 'binary' (default) | 'survival'
+    survival_duration_col: Optional[str] = None
+    survival_event_col:    Optional[str] = None
+    # Sensitivity analysis
+    compute_rosenbaum: Optional[bool] = False  # Rosenbaum bounds (1:1 binary only)
+    rosenbaum_gamma_max: Optional[float] = 3.0
 
 
 def _smd_columns(s_treated: pd.Series, s_control: pd.Series) -> tuple[pd.Series, pd.Series, bool]:
@@ -2093,6 +2106,227 @@ def _ks_p(s_treated: pd.Series, s_control: pd.Series) -> Optional[float]:
         return None
 
 
+def _fit_propensity_scores(X_scaled: np.ndarray, y: np.ndarray,
+                            method: str, random_state: Optional[int]) -> np.ndarray:
+    """Fit propensity scores using one of several models.
+
+    Args:
+        X_scaled: standardized design matrix.
+        y: binary treatment vector.
+        method: 'logistic' | 'probit' | 'gbm'.
+        random_state: seed for reproducibility.
+
+    Returns:
+        1D array of PS = P(treatment = 1 | covariates) for each row.
+    """
+    method = (method or "logistic").lower()
+    if method == "logistic":
+        from sklearn.linear_model import LogisticRegression
+        m = LogisticRegression(max_iter=1000, solver="lbfgs", C=1.0,
+                               random_state=random_state)
+        m.fit(X_scaled, y)
+        return m.predict_proba(X_scaled)[:, 1]
+    if method == "probit":
+        import statsmodels.api as _sm
+        X_const = _sm.add_constant(X_scaled, has_constant="add")
+        m = _sm.Probit(y, X_const).fit(disp=False, maxiter=200)
+        return np.asarray(m.predict(X_const))
+    if method == "gbm":
+        from sklearn.ensemble import GradientBoostingClassifier
+        m = GradientBoostingClassifier(
+            n_estimators=300, max_depth=3, learning_rate=0.05,
+            subsample=0.8, random_state=random_state,
+        )
+        m.fit(X_scaled, y)
+        return m.predict_proba(X_scaled)[:, 1]
+    raise HTTPException(status_code=422, detail=f"Unknown score_method: {method}")
+
+
+def _match_greedy(
+    treated_idx: np.ndarray,
+    control_idx: np.ndarray,
+    distance_vec: np.ndarray,
+    caliper_dist: float,
+    ratio: int,
+) -> tuple[list[int], list[int]]:
+    """Greedy nearest-neighbour matching with caliper. Hardest-first order.
+
+    Returns:
+        (matched_treated, matched_controls) — flat lists of row indices.
+        matched_controls has length ratio * len(matched_treated); each
+        consecutive block of `ratio` controls belongs to one treated unit.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    matched_t: list[int] = []
+    matched_c: list[int] = []
+    if len(treated_idx) == 0 or len(control_idx) == 0:
+        return matched_t, matched_c
+
+    ctrl_dist = distance_vec[control_idx].reshape(-1, 1)
+    knn = NearestNeighbors(n_neighbors=min(ratio * 5, len(control_idx)), metric="euclidean")
+    knn.fit(ctrl_dist)
+
+    used: set[int] = set()
+    ordered = treated_idx[np.argsort(-distance_vec[treated_idx])]
+    for ti in ordered:
+        q = np.array([[distance_vec[ti]]])
+        distances, neighbours = knn.kneighbors(q)
+        chosen: list[int] = []
+        for dist, nb in zip(distances[0], neighbours[0]):
+            c_real = int(control_idx[nb])
+            if dist <= caliper_dist and c_real not in used:
+                chosen.append(c_real)
+                used.add(c_real)
+                if len(chosen) == ratio:
+                    break
+        if len(chosen) == ratio:
+            matched_t.append(int(ti))
+            matched_c.extend(chosen)
+    return matched_t, matched_c
+
+
+def _match_optimal(
+    treated_idx: np.ndarray,
+    control_idx: np.ndarray,
+    distance_vec: np.ndarray,
+    caliper_dist: float,
+) -> tuple[list[int], list[int]]:
+    """Optimal 1:1 matching via Hungarian algorithm (minimises total distance).
+
+    Distances above the caliper are set to +inf so they are never selected.
+    If a treated unit has no feasible control under the caliper, it is dropped
+    after the assignment (the assignment may have paired it nominally, but
+    we check the cost and discard).
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    if len(treated_idx) == 0 or len(control_idx) == 0:
+        return [], []
+
+    dt = distance_vec[treated_idx]
+    dc = distance_vec[control_idx]
+    cost = np.abs(dt[:, None] - dc[None, :])
+    # Caliper enforcement: anything beyond the caliper is unmatchable
+    cost = np.where(cost <= caliper_dist, cost, np.inf)
+
+    # Pad columns when controls < treated so the assignment is feasible.
+    if cost.shape[1] < cost.shape[0]:
+        pad = np.full((cost.shape[0], cost.shape[0] - cost.shape[1]), np.inf)
+        cost_padded = np.hstack([cost, pad])
+    else:
+        cost_padded = cost
+
+    # Replace remaining inf with a very large finite cost so the LSA solver
+    # converges; we filter infeasible pairs after the fact.
+    big = np.nanmax(cost_padded[np.isfinite(cost_padded)], initial=0.0) * 10.0 + 1.0
+    work = np.where(np.isinf(cost_padded), big, cost_padded)
+    row_ind, col_ind = linear_sum_assignment(work)
+
+    matched_t: list[int] = []
+    matched_c: list[int] = []
+    for r, c in zip(row_ind, col_ind):
+        if c >= cost.shape[1]:
+            continue  # treated paired to a padding column = unmatched
+        if not np.isfinite(cost[r, c]):
+            continue
+        matched_t.append(int(treated_idx[r]))
+        matched_c.append(int(control_idx[c]))
+    return matched_t, matched_c
+
+
+def _run_match_strata(
+    df: pd.DataFrame,
+    treated_idx: np.ndarray,
+    control_idx: np.ndarray,
+    distance_vec: np.ndarray,
+    caliper_dist: float,
+    ratio: int,
+    method: str,
+    exact_match_cols: Optional[List[str]],
+) -> tuple[list[int], list[int]]:
+    """Run matching, partitioning by exact-match strata when requested."""
+    match = _match_optimal if method == "optimal" else _match_greedy
+    if not exact_match_cols:
+        if method == "optimal" and ratio > 1:
+            # Hungarian here is 1:1 only. Fall back to greedy for higher ratios.
+            return _match_greedy(treated_idx, control_idx, distance_vec, caliper_dist, ratio)
+        if method == "optimal":
+            return match(treated_idx, control_idx, distance_vec, caliper_dist)
+        return match(treated_idx, control_idx, distance_vec, caliper_dist, ratio)
+
+    # Group by the exact-match key tuple
+    keys = df[exact_match_cols].astype(str).agg("||".join, axis=1).values
+    matched_t: list[int] = []
+    matched_c: list[int] = []
+    treated_keys = keys[treated_idx]
+    control_keys = keys[control_idx]
+    for key in pd.unique(treated_keys):
+        t_sub = treated_idx[treated_keys == key]
+        c_sub = control_idx[control_keys == key]
+        if len(c_sub) == 0:
+            continue
+        if method == "optimal" and ratio == 1:
+            mt, mc = match(t_sub, c_sub, distance_vec, caliper_dist)
+        else:
+            # Greedy (or optimal-with-ratio-fallback)
+            mt, mc = _match_greedy(t_sub, c_sub, distance_vec, caliper_dist, ratio)
+        matched_t.extend(mt)
+        matched_c.extend(mc)
+    return matched_t, matched_c
+
+
+def _rosenbaum_bounds(
+    pair_outcomes: list[tuple[int, int]],
+    gamma_max: float = 3.0,
+    n_gamma: int = 60,
+    alpha: float = 0.05,
+) -> dict:
+    """Rosenbaum bounds for 1:1 matched pairs with binary outcomes.
+
+    For each matched pair, take (treated_outcome, control_outcome) ∈ {0,1}².
+    Discordant pairs are those where the two outcomes differ — call b the count
+    of (treated=1, control=0) and c the count of (treated=0, control=1).
+
+    Under H0 (no treatment effect) and no hidden bias, b ~ Binomial(b+c, 0.5).
+    With hidden bias Γ ≥ 1, the worst-case upper bound on P(b ≥ b_obs) uses
+    p+ = Γ / (1 + Γ) (and the lower bound uses p- = 1 / (1 + Γ)).
+
+    Returns the largest Γ for which the upper-bound one-sided p-value remains
+    ≤ alpha; this is the standard Rosenbaum critical Γ.
+    """
+    from scipy.stats import binom
+
+    b = sum(1 for t, c in pair_outcomes if t == 1 and c == 0)
+    c = sum(1 for t, c in pair_outcomes if t == 0 and c == 1)
+    discordant = b + c
+    if discordant == 0:
+        return {"applicable": False, "reason": "No discordant pairs.", "b": b, "c": c}
+    b_obs = max(b, c)
+
+    p_at_no_bias = float(binom.sf(b_obs - 1, discordant, 0.5))
+    gammas = np.linspace(1.0, max(1.0, gamma_max), max(2, int(n_gamma)))
+    rows = []
+    crit_gamma: Optional[float] = None
+    for g in gammas:
+        p_plus = g / (1.0 + g)
+        p_upper = float(binom.sf(b_obs - 1, discordant, p_plus))
+        rows.append({"gamma": round(float(g), 3), "p_upper": round(p_upper, 6)})
+        if crit_gamma is None and p_upper > alpha:
+            crit_gamma = round(float(g), 3)
+    return {
+        "applicable": True,
+        "b": b,
+        "c": c,
+        "discordant_pairs": discordant,
+        "p_unbiased": round(p_at_no_bias, 6),
+        "critical_gamma": crit_gamma,
+        "alpha": alpha,
+        "gamma_max": gamma_max,
+        "curve": rows,
+    }
+
+
 @router.post("/psm")
 def propensity_score_matching(req: PSMRequest):
     import traceback
@@ -2114,7 +2348,22 @@ def _run_psm(req: PSMRequest):
     from sklearn.neighbors import NearestNeighbors
 
     df_full = _get_df(req.session_id)
-    needed = [req.treatment_col] + req.covariates + ([req.outcome_col] if req.outcome_col else [])
+    outcome_type = (req.outcome_type or "binary").lower()
+    if outcome_type not in ("binary", "survival"):
+        raise HTTPException(status_code=422, detail="outcome_type must be 'binary' or 'survival'.")
+
+    extra_outcome_cols: List[str] = []
+    if outcome_type == "binary" and req.outcome_col:
+        extra_outcome_cols.append(req.outcome_col)
+    if outcome_type == "survival":
+        if not req.survival_duration_col or not req.survival_event_col:
+            raise HTTPException(status_code=422, detail="Survival outcome requires survival_duration_col and survival_event_col.")
+        extra_outcome_cols.extend([req.survival_duration_col, req.survival_event_col])
+
+    exact_match_cols = list(req.exact_match or [])
+    needed = list(dict.fromkeys(
+        [req.treatment_col] + req.covariates + extra_outcome_cols + exact_match_cols
+    ))
     missing_cols = [c for c in needed if c not in df_full.columns]
     if missing_cols:
         raise HTTPException(status_code=422, detail=f"Columns not found: {missing_cols}")
@@ -2127,17 +2376,15 @@ def _run_psm(req: PSMRequest):
         raise HTTPException(status_code=422,
             detail=f"Treatment column '{req.treatment_col}' must be binary (0 = control, 1 = treated).")
 
-    # ── Step 1: Propensity scores via Logistic Regression ────────────────────
+    # ── Step 1: Propensity scores (logistic / probit / GBM) ──────────────────
     X = pd.get_dummies(df[req.covariates], drop_first=True).astype(float)
     y = treat_vals.astype(int).values
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    lr = LogisticRegression(max_iter=1000, solver="lbfgs", C=1.0,
-                            random_state=req.random_state)
-    lr.fit(X_scaled, y)
-    ps = lr.predict_proba(X_scaled)[:, 1]     # propensity score for each row
+    score_method = (req.score_method or "logistic").lower()
+    ps = _fit_propensity_scores(X_scaled, y, score_method, req.random_state)
     # Logit of PS — Austin 2011 recommends matching on this scale because the
     # raw PS is bounded [0,1] and gets compressed near the tails.
     ps_clip = np.clip(ps, 1e-6, 1 - 1e-6)
@@ -2168,7 +2415,7 @@ def _run_psm(req: PSMRequest):
     if len(treated_idx) == 0 or len(control_idx) == 0:
         raise HTTPException(status_code=422, detail="No units remain after common-support trim. Disable trimming or widen the support.")
 
-    # ── Step 3: Nearest-Neighbour matching with logit-PS caliper ─────────────
+    # ── Step 3: Matching (greedy NN or optimal Hungarian) with caliper ──────
     scale = (req.caliper_scale or "logit").lower()
     if scale not in ("logit", "raw"):
         raise HTTPException(status_code=422, detail="caliper_scale must be 'logit' or 'raw'.")
@@ -2177,31 +2424,30 @@ def _run_psm(req: PSMRequest):
     caliper_dist = (req.caliper or 0.2) * caliper_sd
     ratio = max(1, req.ratio or 1)
 
-    # KD-tree on control distance values (matching scale)
-    ctrl_dist = distance_vec[control_idx].reshape(-1, 1)
-    knn = NearestNeighbors(n_neighbors=min(ratio * 5, len(control_idx)), metric="euclidean")
-    knn.fit(ctrl_dist)
+    matching_method = (req.matching_method or "greedy").lower()
+    if matching_method not in ("greedy", "optimal"):
+        raise HTTPException(status_code=422, detail="matching_method must be 'greedy' or 'optimal'.")
+    matching_warning: Optional[str] = None
+    if matching_method == "optimal" and ratio != 1:
+        matching_warning = "Optimal (Hungarian) matching supports 1:1 only. Falling back to greedy for ratio > 1."
+        matching_method = "greedy"
 
-    matched_treated = []
-    matched_controls = []
-    used_controls = set()
+    # Validate exact_match columns exist
+    if exact_match_cols:
+        bad = [c for c in exact_match_cols if c not in df.columns]
+        if bad:
+            raise HTTPException(status_code=422, detail=f"exact_match columns not found: {bad}")
 
-    # Iterate treated units in order of decreasing PS — harder-to-match first
-    # gets first pick of controls (Austin: greedy NN with caliper).
-    ordered_treated = treated_idx[np.argsort(-distance_vec[treated_idx])]
-    for ti in ordered_treated:
-        q = np.array([[distance_vec[ti]]])
-        distances, neighbors = knn.kneighbors(q)
-        chosen = []
-        for dist, nb in zip(distances[0], neighbors[0]):
-            if dist <= caliper_dist and control_idx[nb] not in used_controls:
-                chosen.append(control_idx[nb])
-                used_controls.add(control_idx[nb])
-                if len(chosen) == ratio:
-                    break
-        if len(chosen) == ratio:   # only keep fully matched treated units
-            matched_treated.append(int(ti))
-            matched_controls.extend(int(c) for c in chosen)
+    matched_treated, matched_controls = _run_match_strata(
+        df=df,
+        treated_idx=treated_idx,
+        control_idx=control_idx,
+        distance_vec=distance_vec,
+        caliper_dist=caliper_dist,
+        ratio=ratio,
+        method=matching_method,
+        exact_match_cols=exact_match_cols if exact_match_cols else None,
+    )
 
     n_matched_treated = len(matched_treated)
     n_matched_controls = len(matched_controls)
@@ -2271,7 +2517,57 @@ def _run_psm(req: PSMRequest):
 
     # ── Outcome analysis on matched dataset ──────────────────────────────────
     outcome_result = None
-    if req.outcome_col and req.outcome_col in df_matched.columns:
+    rosenbaum_result = None
+
+    if outcome_type == "survival":
+        try:
+            from lifelines import CoxPHFitter
+            dur = pd.to_numeric(df_matched[req.survival_duration_col], errors="coerce")
+            evt = pd.to_numeric(df_matched[req.survival_event_col], errors="coerce")
+            if np.any(dur.dropna() < 0):
+                outcome_result = {"error": f"survival_duration_col '{req.survival_duration_col}' must be ≥ 0."}
+            elif set(evt.dropna().unique().tolist()) - {0.0, 1.0}:
+                outcome_result = {"error": f"survival_event_col '{req.survival_event_col}' must be binary 0/1."}
+            else:
+                cox_df = pd.DataFrame({
+                    "_dur_":  dur.values.astype(float),
+                    "_evt_":  evt.values.astype(int),
+                    req.treatment_col: pd.to_numeric(df_matched[req.treatment_col], errors="coerce").astype(float).values,
+                    "_match_id_": df_matched["_match_id_"].values.astype(int),
+                }).dropna()
+                cph = CoxPHFitter()
+                # Stratify on match set so each matched pair has its own baseline hazard
+                cph.fit(cox_df, duration_col="_dur_", event_col="_evt_", strata=["_match_id_"])
+                coef = float(cph.params_.iloc[0])
+                se   = float(cph.standard_errors_.iloc[0])
+                ci   = cph.confidence_intervals_.iloc[0]
+                try:
+                    p_val = float(cph.summary["p"].iloc[0])
+                except Exception:
+                    p_val = None
+                outcome_result = {
+                    "type":   "stratified_cox",
+                    "model":  "Cox PH stratified by matched set",
+                    "n":      int(len(cox_df)),
+                    "n_events": int(cox_df["_evt_"].sum()),
+                    "concordance": round(float(cph.concordance_index_), 4),
+                    "coefficients": [{
+                        "variable": req.treatment_col,
+                        "estimate": round(coef, 6),
+                        "hr":       round(float(np.exp(coef)), 4),
+                        "se":       round(se, 6),
+                        "z":        round(coef / se, 4) if se > 0 else None,
+                        "p":        round(p_val, 6) if p_val is not None else None,
+                        "ci_low":   round(float(ci.iloc[0]), 4),
+                        "ci_high":  round(float(ci.iloc[1]), 4),
+                        "hr_low":   round(float(np.exp(ci.iloc[0])), 4),
+                        "hr_high":  round(float(np.exp(ci.iloc[1])), 4),
+                    }],
+                }
+        except Exception as ex:
+            outcome_result = {"error": f"Stratified Cox failed: {ex}"}
+
+    elif req.outcome_col and req.outcome_col in df_matched.columns:
         try:
             y_out = pd.to_numeric(df_matched[req.outcome_col], errors="coerce")
             out_vals = set(y_out.dropna().unique().tolist())
@@ -2349,8 +2645,37 @@ def _run_psm(req: PSMRequest):
         except Exception as ex:
             outcome_result = {"error": str(ex)}
 
+    # ── Rosenbaum bounds (1:1 binary only) ───────────────────────────────────
+    if (req.compute_rosenbaum and outcome_type == "binary" and ratio == 1
+            and req.outcome_col and req.outcome_col in df_matched.columns):
+        try:
+            y_out = pd.to_numeric(df_matched[req.outcome_col], errors="coerce")
+            out_vals = set(y_out.dropna().unique().tolist())
+            if not out_vals <= {0, 1, 0.0, 1.0}:
+                rosenbaum_result = {"applicable": False, "reason": "Rosenbaum bounds require binary 0/1 outcome."}
+            else:
+                pair_pairs: list[tuple[int, int]] = []
+                df_rb = df_matched.copy()
+                df_rb[req.outcome_col] = y_out.astype(int)
+                df_rb[req.treatment_col] = pd.to_numeric(df_rb[req.treatment_col], errors="coerce").astype(int)
+                for mid, grp in df_rb.groupby("_match_id_"):
+                    t_rows = grp[grp[req.treatment_col] == 1]
+                    c_rows = grp[grp[req.treatment_col] == 0]
+                    if len(t_rows) == 1 and len(c_rows) == 1:
+                        pair_pairs.append((int(t_rows[req.outcome_col].iloc[0]),
+                                            int(c_rows[req.outcome_col].iloc[0])))
+                if not pair_pairs:
+                    rosenbaum_result = {"applicable": False, "reason": "No clean 1:1 matched pairs available."}
+                else:
+                    rosenbaum_result = _rosenbaum_bounds(
+                        pair_pairs,
+                        gamma_max=float(req.rosenbaum_gamma_max or 3.0),
+                    )
+        except Exception as ex:
+            rosenbaum_result = {"applicable": False, "reason": f"Rosenbaum bounds failed: {ex}"}
+
     # Persist matched dataset for downstream analysis (keep match_id for paired tests)
-    df_export = df_matched.drop(columns=["_ps_", "_treat_"], errors="ignore")
+    df_export = df_matched.drop(columns=["_ps_", "_logit_ps_", "_treat_"], errors="ignore")
     df_export = df_export.rename(columns={"_match_id_": "match_set_id"})
     store.save(req.session_id + "_psm", df_export)
 
@@ -2362,6 +2687,11 @@ def _run_psm(req: PSMRequest):
         "n_matched_controls": n_matched_controls,
         "n_unmatched":        n_unmatched,
         "n_trimmed_common_support": n_trimmed,
+        "score_method":       score_method,
+        "matching_method":    matching_method,
+        "matching_warning":   matching_warning,
+        "exact_match":        exact_match_cols,
+        "outcome_type":       outcome_type,
         "caliper_scale":      scale,
         "caliper_used":       round(float(caliper_dist), 6),
         "caliper_sd":         round(caliper_sd, 6),
@@ -2378,5 +2708,6 @@ def _run_psm(req: PSMRequest):
         "ks_p_after":         ks_after,
         "ps_distribution":    ps_dist,
         "outcome_result":     outcome_result,
+        "rosenbaum":          rosenbaum_result,
         "matched_session_id": req.session_id + "_psm",
     }

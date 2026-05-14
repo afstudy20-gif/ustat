@@ -232,6 +232,15 @@ export default function PSMPanel() {
   const [trimCommonSupport, setTrimCommonSupport] = useState(false);
   const [ratio,        setRatio]        = useState(1);
   const [randomState,  setRandomState]  = useState<number>(42);
+  const [scoreMethod,  setScoreMethod]  = useState<"logistic" | "probit" | "gbm">("logistic");
+  const [matchingMethod, setMatchingMethod] = useState<"greedy" | "optimal">("greedy");
+  const [exactMatch,   setExactMatch]   = useState<string[]>([]);
+  const [outcomeType,  setOutcomeType]  = useState<"binary" | "survival">("binary");
+  const [survDuration, setSurvDuration] = useState("");
+  const [survEvent,    setSurvEvent]    = useState("");
+  const [computeRosenbaum, setComputeRosenbaum] = useState(false);
+  const [rosenbaumGammaMax, setRosenbaumGammaMax] = useState<number>(3.0);
+  void setRosenbaumGammaMax;
   const [covFilter,  setCovFilter]  = useState("");
 
   // Result & UI
@@ -252,12 +261,20 @@ export default function PSMPanel() {
         session_id:    session.session_id,
         treatment_col: treatCol,
         covariates,
-        outcome_col:   outcomeCol || undefined,
+        outcome_col:   outcomeType === "binary" ? (outcomeCol || undefined) : undefined,
         caliper,
         caliper_scale: caliperScale,
         trim_common_support: trimCommonSupport,
         ratio,
         random_state: Number.isFinite(randomState) ? randomState : undefined,
+        score_method:    scoreMethod,
+        matching_method: matchingMethod,
+        exact_match:     exactMatch.length > 0 ? exactMatch : undefined,
+        outcome_type:    outcomeType,
+        survival_duration_col: outcomeType === "survival" ? (survDuration || undefined) : undefined,
+        survival_event_col:    outcomeType === "survival" ? (survEvent || undefined) : undefined,
+        compute_rosenbaum: outcomeType === "binary" && ratio === 1 && computeRosenbaum,
+        rosenbaum_gamma_max: rosenbaumGammaMax,
       });
       setResult(res.data);
     } catch (e: any) {
@@ -421,7 +438,94 @@ export default function PSMPanel() {
               <input type="number" className="select text-[10px] py-0.5 flex-1"
                 value={randomState} onChange={(e) => setRandomState(parseInt(e.target.value, 10))} />
             </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                Score model
+                <Tip wide text="Model used to estimate the propensity score. Logistic = standard parametric. Probit = same shape, different link. GBM = gradient-boosted trees, captures non-linear / interaction effects without manual specification but may overfit on small samples." />
+              </span>
+              <select className="select text-[10px] py-0.5" value={scoreMethod}
+                onChange={(e) => setScoreMethod(e.target.value as any)}>
+                <option value="logistic">Logistic ★</option>
+                <option value="probit">Probit</option>
+                <option value="gbm">GBM</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                Matching
+                <Tip wide text="Greedy: nearest neighbour with caliper, hardest-first. Standard practice. Optimal: Hungarian algorithm minimises total within-pair distance (1:1 only). Slower but yields globally best matches. Higher ratios fall back to greedy automatically." />
+              </span>
+              <div className="flex gap-1">
+                {(["greedy", "optimal"] as const).map((m) => (
+                  <button key={m} onClick={() => setMatchingMethod(m)}
+                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${matchingMethod === m ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+                    {m === "greedy" ? "Greedy ★" : "Optimal"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="space-y-1">
+              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                Exact match strata
+                <Tip wide text="Categorical columns where treated and control units MUST agree before nearest-neighbour matching runs. Common choices: sex, study site, year of enrolment. Leave empty to match across all strata." />
+              </span>
+              <div className="max-h-20 overflow-y-auto border border-gray-200 rounded p-1 space-y-0.5">
+                {allCols.filter((c) => c !== treatCol).slice(0, 100).map((c) => (
+                  <label key={c} className="flex items-center gap-1 text-[10px] px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                    <input type="checkbox" className="accent-indigo-500"
+                      checked={exactMatch.includes(c)}
+                      onChange={() => setExactMatch((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c])} />
+                    <span className="text-gray-700 truncate">{c}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
+        </div>
+
+        {/* Outcome type */}
+        <div className="panel space-y-2">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            Outcome type
+            <Tip wide text="Binary: GEE logistic on the matched cohort (matched-pair clustering). Survival: stratified Cox PH with strata = match set ID — preserves the matched-pair structure for time-to-event endpoints." />
+          </label>
+          <div className="flex gap-1">
+            {(["binary", "survival"] as const).map((t) => (
+              <button key={t} onClick={() => { setOutcomeType(t); setResult(null); }}
+                className={`flex-1 px-2 py-1 text-[11px] rounded border transition-colors ${outcomeType === t ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+                {t === "binary" ? "Binary" : "Survival (Cox)"}
+              </button>
+            ))}
+          </div>
+          {outcomeType === "survival" && (
+            <div className="space-y-1.5">
+              <div>
+                <span className="text-[10px] text-gray-500 font-medium">Duration column</span>
+                <select className="select w-full text-xs py-1" value={survDuration} onChange={(e) => setSurvDuration(e.target.value)}>
+                  <option value="">— select —</option>
+                  {allCols.filter((c) => c !== treatCol).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-500 font-medium">Event column (0/1)</span>
+                <select className="select w-full text-xs py-1" value={survEvent} onChange={(e) => setSurvEvent(e.target.value)}>
+                  <option value="">— select —</option>
+                  {allCols.filter((c) => c !== treatCol).map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+          {outcomeType === "binary" && ratio === 1 && outcomeCol && (
+            <label className="flex items-start gap-2 cursor-pointer pt-1 border-t border-gray-100">
+              <input type="checkbox" className="accent-indigo-500 mt-0.5"
+                checked={computeRosenbaum} onChange={(e) => setComputeRosenbaum(e.target.checked)} />
+              <span className="text-[10px] text-gray-600 leading-tight">
+                <span className="font-medium">Rosenbaum bounds</span>
+                <Tip wide text="Sensitivity analysis to unmeasured confounding (Rosenbaum 2002). For 1:1 matched discordant pairs with a binary outcome, computes the critical Γ — the size of hidden bias that would just nullify the treatment effect's p < 0.05." />
+                <span className="block text-gray-400">1:1 binary only · Γ up to {rosenbaumGammaMax.toFixed(1)}</span>
+              </span>
+            </label>
+          )}
         </div>
 
         {/* Run */}
@@ -654,47 +758,71 @@ export default function PSMPanel() {
                   </span>
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
-                  {[
-                    ["n (matched)", result.outcome_result.n],
-                    ["AIC",         result.outcome_result.aic?.toFixed(2)],
-                    ["BIC",         result.outcome_result.bic?.toFixed(2)],
-                  ].map(([k, v]: any) => (
-                    <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
-                      <p className="text-[10px] text-gray-400">{k}</p>
-                      <p className="font-semibold text-gray-800 text-sm">{v}</p>
-                    </div>
-                  ))}
+                  {result.outcome_result.type === "stratified_cox" ? (
+                    [
+                      ["n (matched)",     result.outcome_result.n],
+                      ["Events",          result.outcome_result.n_events],
+                      ["C-index",         result.outcome_result.concordance?.toFixed(3)],
+                    ].map(([k, v]: any) => (
+                      <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">{k}</p>
+                        <p className="font-semibold text-gray-800 text-sm">{v}</p>
+                      </div>
+                    ))
+                  ) : (
+                    [
+                      ["n (matched)", result.outcome_result.n],
+                      ["AIC",         result.outcome_result.aic?.toFixed(2)],
+                      ["BIC",         result.outcome_result.bic?.toFixed(2)],
+                    ].map(([k, v]: any) => (
+                      <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">{k}</p>
+                        <p className="font-semibold text-gray-800 text-sm">{v}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <div className="overflow-auto rounded-lg border border-gray-200">
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
-                        {["Variable","OR","95% CI","β","SE","z","p"].map((h) => (
+                        {(result.outcome_result.type === "stratified_cox"
+                          ? ["Variable", "HR", "95% CI", "β", "SE", "z", "p"]
+                          : ["Variable", "OR", "95% CI", "β", "SE", "z", "p"]
+                        ).map((h: string) => (
                           <th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {result.outcome_result.coefficients.map((c: any) => (
-                        <tr key={c.variable} className={`border-b border-gray-100 ${c.p < 0.05 ? "hover:bg-indigo-50/30" : "hover:bg-gray-50"}`}>
-                          <td className="px-2 py-1.5 font-mono text-gray-800">{c.variable}</td>
-                          <td className={`px-2 py-1.5 font-mono font-semibold ${c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.or?.toFixed(3)}</td>
-                          <td className="px-2 py-1.5 font-mono text-gray-500">[{c.or_low?.toFixed(3)}, {c.or_high?.toFixed(3)}]</td>
-                          <td className="px-2 py-1.5 font-mono text-gray-600">{c.estimate?.toFixed(4)}</td>
-                          <td className="px-2 py-1.5 font-mono text-gray-500">{c.se?.toFixed(4)}</td>
-                          <td className="px-2 py-1.5 font-mono text-gray-500">{c.z?.toFixed(3)}</td>
-                          <td className="px-2 py-1.5">
-                            <span className={`inline-block font-mono px-1.5 py-0.5 rounded text-[10px] ${
-                              c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
-                            }`}>{fmtP(c.p)}</span>
-                          </td>
-                        </tr>
-                      ))}
+                      {result.outcome_result.coefficients.map((c: any) => {
+                        const isCox = result.outcome_result.type === "stratified_cox";
+                        const effect = isCox ? c.hr : c.or;
+                        const lo = isCox ? c.hr_low : c.or_low;
+                        const hi = isCox ? c.hr_high : c.or_high;
+                        return (
+                          <tr key={c.variable} className={`border-b border-gray-100 ${c.p < 0.05 ? "hover:bg-indigo-50/30" : "hover:bg-gray-50"}`}>
+                            <td className="px-2 py-1.5 font-mono text-gray-800">{c.variable}</td>
+                            <td className={`px-2 py-1.5 font-mono font-semibold ${c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{effect?.toFixed(3)}</td>
+                            <td className="px-2 py-1.5 font-mono text-gray-500">[{lo?.toFixed(3)}, {hi?.toFixed(3)}]</td>
+                            <td className="px-2 py-1.5 font-mono text-gray-600">{c.estimate?.toFixed(4)}</td>
+                            <td className="px-2 py-1.5 font-mono text-gray-500">{c.se?.toFixed(4)}</td>
+                            <td className="px-2 py-1.5 font-mono text-gray-500">{c.z?.toFixed(3)}</td>
+                            <td className="px-2 py-1.5">
+                              <span className={`inline-block font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                                c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
+                              }`}>{fmtP(c.p)}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
                 <p className="text-[10px] text-gray-400">
-                  OR = Odds Ratio (exp(β)). Results are from the matched cohort only. The treatment variable is included as a predictor.
+                  {result.outcome_result.type === "stratified_cox"
+                    ? "HR = Hazard Ratio (exp(β)). Stratified Cox preserves the matched-pair baseline hazard — each match set acts as its own stratum."
+                    : "OR = Odds Ratio (exp(β)). Results are from the matched cohort only. The treatment variable is included as a predictor."}
                 </p>
               </div>
             )}
@@ -702,6 +830,70 @@ export default function PSMPanel() {
             {result.outcome_result?.error && (
               <div className="panel bg-red-50 border border-red-200 text-xs text-red-600">
                 Outcome analysis failed: {result.outcome_result.error}
+              </div>
+            )}
+
+            {/* ── Rosenbaum bounds ── */}
+            {result.rosenbaum && (
+              <div className="panel space-y-2">
+                <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+                  Rosenbaum Bounds — Sensitivity to Hidden Bias
+                  <Tip wide text="Critical Γ is the magnitude of unmeasured confounding that would just be enough to render the observed treatment-effect p-value non-significant. Γ = 1 means no hidden bias. Γ = 2 means a hidden confounder doubling the odds of treatment. Larger critical Γ ⇒ more robust finding." />
+                </h3>
+                {result.rosenbaum.applicable === false ? (
+                  <p className="text-xs text-gray-500">{result.rosenbaum.reason}</p>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">Discordant pairs</p>
+                        <p className="font-semibold text-gray-800 text-sm">{result.rosenbaum.discordant_pairs} ({result.rosenbaum.b} / {result.rosenbaum.c})</p>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">p (Γ = 1)</p>
+                        <p className="font-semibold text-gray-800 text-sm">{fmtP(result.rosenbaum.p_unbiased)}</p>
+                      </div>
+                      <div className={`rounded-lg p-2 text-center border ${result.rosenbaum.critical_gamma != null && result.rosenbaum.critical_gamma > 1.5 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+                        <p className="text-[10px] text-gray-500">Critical Γ</p>
+                        <p className={`font-semibold text-sm ${result.rosenbaum.critical_gamma != null && result.rosenbaum.critical_gamma > 1.5 ? "text-emerald-700" : "text-amber-700"}`}>
+                          {result.rosenbaum.critical_gamma != null ? result.rosenbaum.critical_gamma.toFixed(2) : `> ${result.rosenbaum.gamma_max}`}
+                        </p>
+                      </div>
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">α</p>
+                        <p className="font-semibold text-gray-800 text-sm">{result.rosenbaum.alpha}</p>
+                      </div>
+                    </div>
+                    <div className="overflow-auto rounded-lg border border-gray-200 max-h-48">
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 text-gray-500">
+                          <tr>
+                            <th className="text-left px-2 py-1">Γ</th>
+                            <th className="text-right px-2 py-1">Upper-bound one-sided p</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {result.rosenbaum.curve?.map((r: any) => (
+                            <tr key={r.gamma} className={r.p_upper > result.rosenbaum.alpha ? "bg-amber-50" : ""}>
+                              <td className="px-2 py-0.5 font-mono">{r.gamma.toFixed(2)}</td>
+                              <td className="px-2 py-0.5 text-right font-mono">{r.p_upper.toFixed(4)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-[10px] text-gray-400">
+                      Reference: Rosenbaum PR (2002). <em>Observational Studies</em>. Cardiology rule of thumb: critical Γ &gt; 2 indicates a robust effect under plausible hidden bias.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Matching method warning */}
+            {result.matching_warning && (
+              <div className="panel bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                {result.matching_warning}
               </div>
             )}
           </>
