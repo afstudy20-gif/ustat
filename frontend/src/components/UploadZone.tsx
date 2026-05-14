@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles } from "lucide-react";
+import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Activity, Layers } from "lucide-react";
 import { uploadFile } from "../api";
 import api from "../api";
 import { useStore } from "../store";
@@ -178,6 +178,37 @@ export default function UploadZone() {
             <p className="font-semibold text-gray-700">Cost</p>
             <p className="text-gray-500 leading-snug">Free to use. No account, no paywall.</p>
           </div>
+        </div>
+      </div>
+
+      {/* ── Other drtr.uk apps ─────────────────────────────────────────── */}
+      <div className="w-full max-w-2xl">
+        <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider text-center mb-2">
+          More tools by Dr. Yusuf Ho&#x15F;o&#x11F;lu
+        </p>
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+          {[
+            { url: "https://not.drtr.uk",    Icon: NotebookPen, name: "Notepad",    desc: "Local-only text editor" },
+            { url: "https://pdf.drtr.uk/",   Icon: FileText,    name: "PDF",        desc: "Annotate &amp; sign in browser" },
+            { url: "https://ecgcal.drtr.uk/",Icon: HeartPulse,  name: "ECG Caliper",desc: "Digital ECG wave analyzer" },
+            { url: "https://noedw.drtr.uk",  Icon: Layers,      name: "noedw",      desc: "Clinical utility (coming soon)" },
+            { url: "https://low.drtr.uk",    Icon: Activity,    name: "low",        desc: "Clinical utility (coming soon)" },
+          ].map(({ url, Icon, name, desc }) => (
+            <a
+              key={url}
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="flex flex-col items-center gap-1 px-2 py-2 rounded-lg border border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50 transition-colors text-center group"
+            >
+              <Icon size={18} className="text-indigo-500 group-hover:text-indigo-600" />
+              <span className="text-xs font-semibold text-gray-700 group-hover:text-indigo-700">{name}</span>
+              <span
+                className="text-[9px] text-gray-400 leading-snug"
+                dangerouslySetInnerHTML={{ __html: desc }}
+              />
+            </a>
+          ))}
         </div>
       </div>
 
