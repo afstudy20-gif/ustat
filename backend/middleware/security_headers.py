@@ -74,6 +74,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Permissions-Policy", _DEFAULT_PERMISSIONS)
         response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
-        # Server header leaks framework name otherwise.
-        response.headers.pop("server", None)
+        # Server header leaks framework name otherwise. starlette's
+        # MutableHeaders does not implement .pop, so use del + membership.
+        if "server" in response.headers:
+            del response.headers["server"]
         return response
