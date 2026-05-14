@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from middleware.security_headers import SecurityHeadersMiddleware
@@ -64,6 +64,22 @@ def security_txt() -> str:
         "Canonical: https://ustat.drtr.uk/.well-known/security.txt\n"
         "Policy: https://ustat.drtr.uk/security\n"
     )
+
+
+@app.get("/security")
+def security_page_redirect() -> RedirectResponse:
+    """Clean URL → static security overview."""
+    return RedirectResponse(url="/security.html", status_code=308)
+
+
+@app.get("/privacy")
+def privacy_page_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/privacy.html", status_code=308)
+
+
+@app.get("/terms")
+def terms_page_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/terms.html", status_code=308)
 
 
 @app.get("/api/health")

@@ -193,6 +193,15 @@ export default function UploadZone() {
       </button>
 
       <p className="text-[11px] text-gray-300 mt-2">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
+      <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400 mt-1">
+        <a href="/privacy" target="_blank" rel="noreferrer" className="hover:text-indigo-500">Privacy</a>
+        <span className="text-gray-200">·</span>
+        <a href="/terms" target="_blank" rel="noreferrer" className="hover:text-indigo-500">Terms</a>
+        <span className="text-gray-200">·</span>
+        <a href="/security" target="_blank" rel="noreferrer" className="hover:text-indigo-500">Security</a>
+        <span className="text-gray-200">·</span>
+        <a href="https://github.com/afstudy20-gif/wiz3" target="_blank" rel="noreferrer" className="hover:text-indigo-500">Source</a>
+      </div>
 
       {/* MapMyVisitors widget — splash only. Scaled to 25% via transform. */}
       <div

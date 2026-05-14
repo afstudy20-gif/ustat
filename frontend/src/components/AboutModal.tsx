@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.0";
-const BUILD = 91;
+const VERSION = "1.9.1";
+const BUILD = 92;
 
 const CHANGELOG = [
+  { ver: "1.9.1", date: "2026-05-14", notes: "Hotfix: SecurityHeadersMiddleware crashed every request on production (MutableHeaders has no .pop). Clean URLs added: /privacy, /terms, /security 308-redirect to the static pages so the security.txt Policy: link and any external citation works without the .html suffix. About modal now opens with a prominent indigo Legal & Security quick-link row (Privacy · Terms · Security Overview · security.txt · Source). Splash footer carries the same links. Power tab removed from main tab strip (still reachable from the splash tile). Code tab no longer hidden when ENABLE_CODE_RUNNER is off — CodePanel shows an in-page disabled banner instead. MapMyVisitors widget now mounts only on the splash screen via useEffect and is torn down when the user opens a dataset." },
   { ver: "1.9.0", date: "2026-05-14", notes: "Security & transparency pass. Public Privacy Policy / Terms of Use / Security Overview pages (/privacy.html, /terms.html, /security.html). RFC 9116 /.well-known/security.txt for vulnerability disclosure. Browser-hardening middleware: HSTS one-year preload, CSP (report-only until tuned), X-Frame-Options DENY, X-Content-Type-Options nosniff, Referrer-Policy strict-origin, Permissions-Policy denying camera/mic/geo/etc., COOP same-origin. Continuous security scan workflow on every push (bandit, pip-audit, npm audit, semgrep OWASP, gitleaks). About modal clarifies server-side architecture, surfaces GitHub source link, adds Privacy/Terms/Security/security.txt deep-links and a browser-hygiene checklist." },
   { ver: "1.8.0", date: "2026-05-14", notes: "PSM panel — full feature parity with R MatchIt / twang. Alternative propensity-score models (logistic / probit / GBM). Optimal Hungarian matching (1:1) in addition to greedy NN — falls back to greedy when ratio > 1. Exact-match strata (treated and control must agree on selected categorical columns before NN). Survival outcome path: stratified Cox PH with strata = matched-set ID, returns HR + concordance. Rosenbaum bounds sensitivity analysis for 1:1 binary outcomes — reports discordant pair counts, critical Γ at α=0.05, and the full Γ-vs-p curve up to a configurable Γmax." },
   { ver: "1.7.1", date: "2026-05-14", notes: "PSM panel hardened (Austin 2011 compliance): caliper now applied on logit-PS scale by default (raw still selectable); SMD denominator fixed to pooled SD of the unmatched sample so before/after deltas reflect only the numerator shift; added Rubin variance ratio and KS-test p-value per covariate; added Crump 2009 common-support trimming option; matching ratio 1:1–1:5 selector; random seed input for reproducible LR fits; balance flag now requires both SMD<0.10 and variance ratio in [0.5, 2.0]; treated units now processed by decreasing PS (greedy NN, hardest-first)." },
@@ -164,6 +165,20 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
+
+          {/* ── Legal & security quick-links (top of body) ───────────────── */}
+          <div className="flex flex-wrap items-center gap-2 text-[11px] bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2">
+            <span className="font-semibold text-indigo-900 uppercase tracking-wider text-[10px]">Legal &amp; security</span>
+            <a href="/privacy" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Privacy Policy</a>
+            <span className="text-indigo-300">·</span>
+            <a href="/terms" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Terms of Use</a>
+            <span className="text-indigo-300">·</span>
+            <a href="/security" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Security Overview</a>
+            <span className="text-indigo-300">·</span>
+            <a href="/.well-known/security.txt" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">security.txt</a>
+            <span className="text-indigo-300">·</span>
+            <a href="https://github.com/afstudy20-gif/wiz3" target="_blank" rel="noreferrer" className="text-indigo-600 hover:underline">Source (GitHub)</a>
+          </div>
 
           {/* ── Validation status (prominent) ──────────────────────────────── */}
           <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-lg p-3 space-y-1">
