@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.11";
-const BUILD = 102;
+const VERSION = "1.9.12";
+const BUILD = 103;
 
 const CHANGELOG = [
+  { ver: "1.9.12", date: "2026-05-15", notes: "Cox Proportional Hazards now supports pairwise interaction terms. Backend /api/models/survival/cox accepts an interactions: [[A,B], ...] list and builds A:B columns post-encoding — numeric × numeric is the element-wise product, numeric × categorical expands across every dummy of the categorical, categorical × categorical multiplies every dummy pair. Each interaction shows up as its own row ('LDL:AGE', 'SEX_M:AGE', ...) in the coefficient table with HR, 95% CI, p. Frontend Cox panel: new 'Interactions' section appears once ≥2 predictors are ticked — two dropdowns + Add → amber chip 'LDL × AGE' with × to remove. Tip explains element-wise product, expansion, and DOF cost." },
   { ver: "1.9.11", date: "2026-05-15", notes: "Cox Univariable scan UI: Turkish labels translated to English (Univariable Scan / Variable / Close / Add p<0.10 hint) and a tooltip on the button explains what the scan does — fits a separate Cox PH per predictor, ranks by p, points users at the p<0.10 cutoff with the SMOKER suppressor case as a worked example." },
   { ver: "1.9.10", date: "2026-05-15", notes: "Cox Proportional Hazards endpoint (/api/models/survival/cox) now dummy-encodes categorical predictors (drop_first=True) just like the RCS endpoint does. Previously a Surv(time, event) ~ LDL + AGE + SEX + DM + HT + SMOKER fit would crash with 'could not convert string to float' as soon as the user ticked a categorical predictor; now SEX/DM/HT/SMOKER expand into binary dummies automatically." },
   { ver: "1.9.9", date: "2026-05-15", notes: "RCS covariate picker now lists ALL columns (numeric AND categorical) with a small N/C badge. Categorical covariates are dummy-coded server-side (drop_first=True) so the user can adjust for SEX, DM, HT, etc. directly without recoding. Result card now surfaces an 'Adjusted for: …' chip row with the per-covariate effect ratio (HR/OR for cox/logistic, β for linear) so the user can verify the model actually used what they ticked. n_total / n_excluded reported when rows are dropped. Univariate RCS allows only one spline term — for an LDL spline AND an AGE spline use the Cox-RCS multivariable panel and toggle interaction." },

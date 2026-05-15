@@ -835,6 +835,11 @@ class CoxRequest(BaseModel):
     event_col: str
     predictors: List[str]
     imputation: Optional[str] = "listwise"
+    # Optional pairwise interactions — each entry is [col_A, col_B] (or
+    # written "A*B"/"A:B"). Both sides must already be in `predictors`
+    # (or be encoded into dummies of a predictor). Numeric × numeric =
+    # element-wise product; numeric × dummy and dummy × dummy work too.
+    interactions: Optional[List[List[str]]] = None
 
 
 @router.post("/survival/cox")
@@ -881,6 +886,34 @@ def cox_regression(req: CoxRequest):
     cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
     enc = pd.concat([num_part, cat_part], axis=1).astype(float)
 
+    # ── Interaction columns ──────────────────────────────────────────────
+    # Build A:B columns by multiplying encoded design slots. For numeric
+    # columns we use the numeric column directly; for categoricals we use
+    # every surviving dummy (the user's natural mental model "SEX × AGE"
+    # then becomes SEX_M:AGE — one row in the output per dummy).
+    interaction_cols: list[str] = []
+    if req.interactions:
+        def _members(name: str) -> list[str]:
+            """Return the encoded design columns that represent `name`.
+            Numeric → [name]; categorical → every dummy whose name starts
+            with `name_`."""
+            if name in enc.columns:
+                return [name]
+            prefix = f"{name}_"
+            return [c for c in enc.columns if c.startswith(prefix)]
+        for pair in req.interactions:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise HTTPException(status_code=422, detail=f"Each interaction must be a [colA, colB] pair. Got: {pair}")
+            a_members = _members(pair[0])
+            b_members = _members(pair[1])
+            if not a_members or not b_members:
+                raise HTTPException(status_code=422, detail=f"Interaction '{pair[0]} × {pair[1]}': one or both columns are not in the predictor list.")
+            for a in a_members:
+                for b in b_members:
+                    new_col = f"{a}:{b}"
+                    enc[new_col] = enc[a] * enc[b]
+                    interaction_cols.append(new_col)
+
     fit_df = pd.concat([df[[req.duration_col, req.event_col]], enc], axis=1).dropna()
     if len(fit_df) < 10:
         raise HTTPException(status_code=400, detail=f"Not enough complete rows after encoding (need ≥ 10, got {len(fit_df)}).")
@@ -914,6 +947,7 @@ def cox_regression(req: CoxRequest):
         "log_likelihood": _safe_float(cph.log_likelihood_),
         "concordance": _safe_float(cph.concordance_index_),
         "coefficients": coefs,
+        "interactions_used": interaction_cols,
     }
 
 

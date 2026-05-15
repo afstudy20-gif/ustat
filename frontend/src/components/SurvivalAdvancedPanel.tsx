@@ -187,6 +187,9 @@ export default function SurvivalAdvancedPanel() {
   const [coxDuration, setCoxDuration] = useState("");
   const [coxEvent, setCoxEvent] = useState("");
   const [coxPreds, setCoxPreds] = useState<string[]>([]);
+  const [coxInteractions, setCoxInteractions] = useState<Array<[string, string]>>([]);
+  const [coxIxA, setCoxIxA] = useState<string>("");
+  const [coxIxB, setCoxIxB] = useState<string>("");
   const [coxResult, setCoxResult] = useState<any>(null);
   const [coxLoading, setCoxLoading] = useState(false);
   const [coxError, setCoxError] = useState<string | null>(null);
@@ -697,12 +700,90 @@ export default function SurvivalAdvancedPanel() {
           </div>
         </div>
 
+        {/* Interactions — pair selector (only meaningful when ≥2 predictors ticked) */}
+        {coxPreds.length >= 2 && (
+          <div>
+            <p className="text-xs text-gray-500 font-medium mb-1.5 flex items-center gap-1">
+              Interactions
+              <Tip wide text="Add pairwise interaction terms to the linear Cox model — e.g. LDL × AGE. Numeric × numeric is the element-wise product, numeric × categorical expands across every dummy of the categorical, categorical × categorical multiplies every dummy pair. Use sparingly: each extra term costs degrees of freedom. The output table reports each interaction as 'A:B' with its own HR and p-value." />
+              {coxInteractions.length > 0 && (
+                <span className="ml-1 text-indigo-600 font-semibold">{coxInteractions.length} added</span>
+              )}
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <select
+                value={coxIxA}
+                onChange={(e) => setCoxIxA(e.target.value)}
+                className="select text-xs py-1"
+              >
+                <option value="">First term…</option>
+                {coxPreds.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <span className="text-gray-400 text-xs">×</span>
+              <select
+                value={coxIxB}
+                onChange={(e) => setCoxIxB(e.target.value)}
+                className="select text-xs py-1"
+              >
+                <option value="">Second term…</option>
+                {coxPreds.filter((p) => p !== coxIxA).map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <button
+                onClick={() => {
+                  if (!coxIxA || !coxIxB || coxIxA === coxIxB) return;
+                  const exists = coxInteractions.some(
+                    ([a, b]) => (a === coxIxA && b === coxIxB) || (a === coxIxB && b === coxIxA),
+                  );
+                  if (exists) return;
+                  setCoxInteractions([...coxInteractions, [coxIxA, coxIxB]]);
+                  setCoxIxA(""); setCoxIxB("");
+                }}
+                disabled={!coxIxA || !coxIxB || coxIxA === coxIxB}
+                className="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 transition-colors"
+              >
+                + Add
+              </button>
+            </div>
+            {coxInteractions.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {coxInteractions.map(([a, b], i) => (
+                  <span
+                    key={`${a}:${b}:${i}`}
+                    className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded px-2 py-0.5"
+                  >
+                    {a} × {b}
+                    <button
+                      onClick={() => setCoxInteractions(coxInteractions.filter((_, idx) => idx !== i))}
+                      className="text-amber-500 hover:text-red-500"
+                      title="Remove"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <button
+                  onClick={() => setCoxInteractions([])}
+                  className="text-[10px] text-gray-400 hover:text-red-500 underline"
+                >
+                  clear all
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 flex-wrap">
           <RunButton onClick={async () => {
             if (!coxDuration || !coxEvent || coxPreds.length === 0) { setCoxError("Select duration, event, and at least one predictor"); return; }
             setCoxLoading(true); setCoxError(null);
             try {
-              const res = await runCox({ session_id: sid, duration_col: coxDuration, event_col: coxEvent, predictors: coxPreds });
+              const res = await runCox({
+                session_id: sid,
+                duration_col: coxDuration,
+                event_col: coxEvent,
+                predictors: coxPreds,
+                interactions: coxInteractions.length > 0 ? coxInteractions : undefined,
+              });
               setCoxResult(res.data);
             } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Cox failed"); }
             finally { setCoxLoading(false); }
