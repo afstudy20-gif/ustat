@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.12";
-const BUILD = 103;
+const VERSION = "1.9.13";
+const BUILD = 104;
 
 const CHANGELOG = [
+  { ver: "1.9.13", date: "2026-05-15", notes: "Survival Advanced: 'Run' button looked like it did nothing when the user changed parameters after a first run. Every Run* handler (KM, Cox, Fine-Gray, E-value, Landmark) now wipes the previous result + error state at the very start so the panel visibly resets while the request is in flight. Also added useEffect param-watchers that auto-clear the stale result the moment a duration / event / predictor / interaction / group / landmark-time changes, so re-running with new parameters always reflects the new inputs. Other panels (Models, ROC, Hypothesis, PSM, Table 1) already had the reset-on-run pattern and were unaffected." },
   { ver: "1.9.12", date: "2026-05-15", notes: "Cox Proportional Hazards now supports pairwise interaction terms. Backend /api/models/survival/cox accepts an interactions: [[A,B], ...] list and builds A:B columns post-encoding — numeric × numeric is the element-wise product, numeric × categorical expands across every dummy of the categorical, categorical × categorical multiplies every dummy pair. Each interaction shows up as its own row ('LDL:AGE', 'SEX_M:AGE', ...) in the coefficient table with HR, 95% CI, p. Frontend Cox panel: new 'Interactions' section appears once ≥2 predictors are ticked — two dropdowns + Add → amber chip 'LDL × AGE' with × to remove. Tip explains element-wise product, expansion, and DOF cost." },
   { ver: "1.9.11", date: "2026-05-15", notes: "Cox Univariable scan UI: Turkish labels translated to English (Univariable Scan / Variable / Close / Add p<0.10 hint) and a tooltip on the button explains what the scan does — fits a separate Cox PH per predictor, ranks by p, points users at the p<0.10 cutoff with the SMOKER suppressor case as a worked example." },
   { ver: "1.9.10", date: "2026-05-15", notes: "Cox Proportional Hazards endpoint (/api/models/survival/cox) now dummy-encodes categorical predictors (drop_first=True) just like the RCS endpoint does. Previously a Surv(time, event) ~ LDL + AGE + SEX + DM + HT + SMOKER fit would crash with 'could not convert string to float' as soon as the user ticked a categorical predictor; now SEX/DM/HT/SMOKER expand into binary dummies automatically." },

@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runFineGray, runEValue, runLandmark, runKM, runCox } from "../api";
@@ -212,7 +212,7 @@ export default function SurvivalAdvancedPanel() {
   // ── Fine-Gray handler
   const handleFineGray = async () => {
     if (!fgDuration || !fgEvent) { setFgError("Select duration and event columns"); return; }
-    setFgLoading(true); setFgError(null);
+    setFgResult(null); setFgError(null); setFgLoading(true);
     try {
       const res = await runFineGray({
         session_id: sid, duration_col: fgDuration, event_col: fgEvent,
@@ -226,7 +226,7 @@ export default function SurvivalAdvancedPanel() {
   // ── E-value handler
   const handleEValue = async () => {
     if (!evEst || !evLo || !evHi) { setEvError("Enter estimate and confidence interval"); return; }
-    setEvLoading(true); setEvError(null);
+    setEvResult(null); setEvError(null); setEvLoading(true);
     try {
       const res = await runEValue({
         estimate: parseFloat(evEst), ci_low: parseFloat(evLo), ci_high: parseFloat(evHi),
@@ -240,7 +240,7 @@ export default function SurvivalAdvancedPanel() {
   // ── Landmark handler
   const handleLandmark = async () => {
     if (!lmDuration || !lmEvent || !lmTime) { setLmError("Select duration, event, and landmark time"); return; }
-    setLmLoading(true); setLmError(null);
+    setLmResult(null); setLmError(null); setLmLoading(true);
     try {
       const res = await runLandmark({
         session_id: sid, duration_col: lmDuration, event_col: lmEvent,
@@ -251,6 +251,16 @@ export default function SurvivalAdvancedPanel() {
     } catch (e: any) { setLmError(e?.response?.data?.detail ?? "Landmark analysis failed"); }
     finally { setLmLoading(false); }
   };
+
+  // ── Auto-clear stale results when their inputs change. Without this the
+  // user perceives a re-Run as 'nothing happened' because the previous
+  // result panel stays on screen even when the new fetch fails or returns
+  // a near-identical table.
+  useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup]);
+  useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
+  useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
+  useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup]);
+  useEffect(() => { setCoxResult(null); setCoxError(null); }, [coxDuration, coxEvent, coxPreds, coxInteractions]);
 
   return (
     <div className="space-y-3 max-w-5xl mx-auto">
@@ -398,7 +408,7 @@ export default function SurvivalAdvancedPanel() {
         <div className="flex items-center gap-3 flex-wrap">
           <RunButton onClick={async () => {
             if (!kmDuration || !kmEvent) { setKmError("Select duration and event columns"); return; }
-            setKmLoading(true); setKmError(null);
+            setKmResult(null); setKmError(null); setKmLoading(true);
             try {
               const res = await runKM({ session_id: sid, duration_col: kmDuration, event_col: kmEvent, group_col: kmGroup || undefined });
               setKmResult(res.data);
@@ -775,7 +785,7 @@ export default function SurvivalAdvancedPanel() {
         <div className="flex items-center gap-3 flex-wrap">
           <RunButton onClick={async () => {
             if (!coxDuration || !coxEvent || coxPreds.length === 0) { setCoxError("Select duration, event, and at least one predictor"); return; }
-            setCoxLoading(true); setCoxError(null);
+            setCoxResult(null); setCoxError(null); setCoxLoading(true);
             try {
               const res = await runCox({
                 session_id: sid,
