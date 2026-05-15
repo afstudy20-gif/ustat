@@ -18,10 +18,25 @@ from services import store
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# CORS: env-driven origin allow-list. Wildcard ("*") rejected by the OWASP
+# semgrep gate, and dangerous in production anyway because it disables
+# CSRF protection on cookie-bearing requests. Defaults below cover the
+# production domain + local dev ports; override via CORS_ALLOWED_ORIGINS
+# (comma-separated) for staging or custom deployments.
+_DEFAULT_ORIGINS = (
+    "https://ustat.drtr.uk,"
+    "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+    "http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175"
+)
+_origins_env = os.environ.get("CORS_ALLOWED_ORIGINS", _DEFAULT_ORIGINS)
+_origins = [o.strip() for o in _origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # allow all localhost ports
-    allow_methods=["*"],
+    allow_origins=_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
