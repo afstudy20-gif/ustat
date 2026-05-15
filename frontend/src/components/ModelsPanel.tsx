@@ -67,6 +67,89 @@ function fmtP(p: number | null | undefined): string {
   return p.toFixed(3);
 }
 
+interface SurfaceData {
+  x_col: string;
+  y_col: string;
+  x: number[];
+  y: number[];
+  hr: number[][];
+  ref: Record<string, number>;
+}
+
+function HRSurfaceCard({ surface }: { surface: SurfaceData }) {
+  const [view, setView] = useState<"contour" | "surface3d">("contour");
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-xs font-semibold text-gray-700">
+          HR over {surface.x_col} × {surface.y_col} (other covariates at mean)
+        </div>
+        <div className="flex gap-1">
+          {(["contour", "surface3d"] as const).map((v) => (
+            <button key={v} onClick={() => setView(v)}
+              className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${view === v ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+              {v === "contour" ? "2D contour ★" : "3D surface"}
+            </button>
+          ))}
+        </div>
+      </div>
+      <Plot
+        data={[
+          view === "contour"
+            ? {
+                z: surface.hr,
+                x: surface.x,
+                y: surface.y,
+                type: "contour",
+                colorscale: "RdBu",
+                reversescale: true,
+                contours: { coloring: "heatmap", showlabels: true },
+                colorbar: { title: { text: "HR" } as any },
+                hovertemplate: `${surface.x_col}=%{x:.2f}<br>${surface.y_col}=%{y:.2f}<br>HR=%{z:.2f}<extra></extra>`,
+              } as any
+            : {
+                z: surface.hr,
+                x: surface.x,
+                y: surface.y,
+                type: "surface",
+                colorscale: "RdBu",
+                reversescale: true,
+                colorbar: { title: { text: "HR" } as any },
+                contours: { z: { show: true, usecolormap: true, project: { z: true } } },
+                hovertemplate: `${surface.x_col}=%{x:.2f}<br>${surface.y_col}=%{y:.2f}<br>HR=%{z:.2f}<extra></extra>`,
+              } as any,
+        ]}
+        layout={
+          view === "contour"
+            ? {
+                height: 380,
+                margin: { l: 60, r: 30, t: 10, b: 50 },
+                xaxis: { title: { text: surface.x_col } },
+                yaxis: { title: { text: surface.y_col } },
+              }
+            : ({
+                height: 460,
+                margin: { l: 0, r: 0, t: 10, b: 0 },
+                scene: {
+                  xaxis: { title: { text: surface.x_col } },
+                  yaxis: { title: { text: surface.y_col } },
+                  zaxis: { title: { text: "Hazard Ratio" }, type: "log" },
+                  camera: { eye: { x: 1.4, y: -1.4, z: 0.9 } },
+                },
+              } as any)
+        }
+        config={{ displaylogo: false, responsive: true }}
+        style={{ width: "100%" }}
+        useResizeHandler
+      />
+      <div className="text-[10px] text-gray-500">
+        Reference: {surface.x_col}={surface.ref[surface.x_col]}, {surface.y_col}={surface.ref[surface.y_col]}.
+        {view === "surface3d" && " · Drag to rotate, scroll to zoom."}
+      </div>
+    </div>
+  );
+}
+
 function CoxRCSResultPanel({ result }: { result: any }) {
   const coefs = result.coefficients as Array<{ name: string; coef: number; hr: number; se: number; z: number | null; p: number | null; ci_low: number; ci_high: number }>;
   const curves = (result.curves_1d || []) as Array<{ column: string; x: number[]; hr: number[]; lower: number[]; upper: number[]; knots: number[]; ref: number }>;
@@ -138,41 +221,8 @@ function CoxRCSResultPanel({ result }: { result: any }) {
         </div>
       ))}
 
-      {/* 2D HR contour for interaction */}
-      {surface && (
-        <div className="space-y-1">
-          <div className="text-xs font-semibold text-gray-700">
-            HR contour: {surface.x_col} × {surface.y_col} (other covariates at mean)
-          </div>
-          <Plot
-            data={[
-              {
-                z: surface.hr,
-                x: surface.x,
-                y: surface.y,
-                type: "contour",
-                colorscale: "RdBu",
-                reversescale: true,
-                contours: { coloring: "heatmap", showlabels: true },
-                colorbar: { title: { text: "HR" } as any },
-                hovertemplate: `${surface.x_col}=%{x:.2f}<br>${surface.y_col}=%{y:.2f}<br>HR=%{z:.2f}<extra></extra>`,
-              } as any,
-            ]}
-            layout={{
-              height: 380,
-              margin: { l: 60, r: 30, t: 10, b: 50 },
-              xaxis: { title: { text: surface.x_col } },
-              yaxis: { title: { text: surface.y_col } },
-            }}
-            config={{ displaylogo: false, responsive: true }}
-            style={{ width: "100%" }}
-            useResizeHandler
-          />
-          <div className="text-[10px] text-gray-500">
-            Reference: {surface.x_col}={surface.ref[surface.x_col]}, {surface.y_col}={surface.ref[surface.y_col]}.
-          </div>
-        </div>
-      )}
+      {/* HR surface for interaction — 2D contour ★ or 3D surface */}
+      {surface && <HRSurfaceCard surface={surface} />}
 
       {/* Coefficients table */}
       <div className="overflow-x-auto">

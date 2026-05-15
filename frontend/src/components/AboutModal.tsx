@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.4";
-const BUILD = 95;
+const VERSION = "1.9.5";
+const BUILD = 96;
 
 const CHANGELOG = [
+  { ver: "1.9.5", date: "2026-05-15", notes: "Cox-RCS interaction HR surface: 2D contour ★ / 3D surface toggle. The 3D view uses Plotly's surface trace with a log-z axis, interactive rotate/zoom camera, and projected contour lines on the floor — easier to read the joint dose-response landscape across LDL × AGE (or any rcs × rcs pair). 2D contour with isohypse lines remains the default and stays publication-ready. Event-column pickers in the Cox / Cox-RCS / RCS-Cox forms now narrow to binary 0/1 columns (with an inline warning when none are detected)." },
   { ver: "1.9.4", date: "2026-05-15", notes: "Refresh app button (mirrors the not.drtr.uk Notepad pattern). Unregisters every service-worker registration for this origin, deletes the Cache Storage entries, then hard-reloads with a ?_r=... cache-bust query so the HTTP cache is bypassed too. Available in the main app header (with a confirm prompt because a dataset may be open), in the splash 'About uSTAT' row, and in the Power Analysis sub-header. Pure client-side, origin-scoped — other sites untouched, server session unaffected." },
   { ver: "1.9.3", date: "2026-05-14", notes: "Splash now surfaces the other drtr.uk apps as a 5-tile row (Notepad, PDF Annotator, ECG Caliper, noedw, low) with icons and short descriptions. Tiles open in a new tab. Provides a single discovery surface across the drtr.uk app suite without leaving uSTAT." },
   { ver: "1.9.2", date: "2026-05-14", notes: "Independent-verifiability pass. Security page now ships a 'Verify our claims yourself' section with curl one-liners for headers, links to Mozilla Observatory + SecurityHeaders.com + Qualys SSL Labs + HSTS-Preload + VirusTotal, and a strace recipe for proving 'never writes the dataset to disk' against a local clone. Source-side line pointers added (store.py / upload.py / middleware / CI workflow). Domain-based contact emails: security@drtr.uk for disclosure and contact@drtr.uk for general — used in privacy.html, terms.html, security.html, About modal, and /.well-known/security.txt (env-overridable via SECURITY_CONTACT_EMAIL). Privacy clarification: MapMyVisitors widget explicitly NOT advertising — uSTAT never asks users to disable an ad-blocker." },
