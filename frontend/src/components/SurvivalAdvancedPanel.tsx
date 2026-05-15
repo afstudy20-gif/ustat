@@ -169,6 +169,7 @@ export default function SurvivalAdvancedPanel() {
   const [kmDuration, setKmDuration] = useState("");
   const [kmEvent, setKmEvent] = useState("");
   const [kmGroup, setKmGroup] = useState("");
+  const [kmStratify, setKmStratify] = useState("");
   const [kmResult, setKmResult] = useState<any>(null);
   const [kmLoading, setKmLoading] = useState(false);
   const [kmError, setKmError] = useState<string | null>(null);
@@ -259,7 +260,7 @@ export default function SurvivalAdvancedPanel() {
   useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup]);
   useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
   useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
-  useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup]);
+  useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup, kmStratify]);
   useEffect(() => { setCoxResult(null); setCoxError(null); }, [coxDuration, coxEvent, coxPreds, coxInteractions]);
 
   return (
@@ -400,17 +401,18 @@ export default function SurvivalAdvancedPanel() {
 
       {/* ── Kaplan-Meier ── */}
       <Section title="Kaplan-Meier Survival" description="Visualise time-to-event data with survival curves and log-rank test">
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-3">
           <VarSelect label="Duration (time)" value={kmDuration} onChange={setKmDuration} columns={columns} kinds={["numeric"]} />
           <VarSelect label="Event (0/1)" value={kmEvent} onChange={setKmEvent} columns={columns} />
           <VarSelect label="Group (optional)" value={kmGroup} onChange={setKmGroup} columns={columns} kinds={["categorical"]} />
+          <VarSelect label="Stratify by (optional)" value={kmStratify} onChange={setKmStratify} columns={columns} kinds={["categorical"]} />
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <RunButton onClick={async () => {
             if (!kmDuration || !kmEvent) { setKmError("Select duration and event columns"); return; }
             setKmResult(null); setKmError(null); setKmLoading(true);
             try {
-              const res = await runKM({ session_id: sid, duration_col: kmDuration, event_col: kmEvent, group_col: kmGroup || undefined });
+              const res = await runKM({ session_id: sid, duration_col: kmDuration, event_col: kmEvent, group_col: kmGroup || undefined, stratify_col: kmStratify || undefined });
               setKmResult(res.data);
             } catch (e: any) { setKmError(e?.response?.data?.detail ?? "KM failed"); }
             finally { setKmLoading(false); }
@@ -668,6 +670,78 @@ export default function SurvivalAdvancedPanel() {
               )}
             </div>
           </>
+          );
+        })()}
+
+        {/* Stratified KM (small-multiples grid) — when stratify_col is set */}
+        {kmResult?.strata && (() => {
+          const strata: any[] = kmResult.strata;
+          const nCols = strata.length <= 2 ? strata.length : strata.length === 3 ? 3 : 2;
+          const miniH = 280;
+
+          const stratColMeta = columns.find((c) => c.name === kmStratify);
+          const stratLabels = stratColMeta?.value_labels ?? {};
+          const groupColMeta = columns.find((c) => c.name === kmGroup);
+          const grpLabels = groupColMeta?.value_labels ?? {};
+
+          const buildTraces = (groups: any[]) =>
+            groups.map((g: any, i: number) => ({
+              x: g.curve.map((p: any) => p.time),
+              y: g.curve.map((p: any) => p.survival),
+              type: "scatter" as const, mode: "lines" as const,
+              name: kmGroup
+                ? `${kmCustomGroupTitle || kmGroup} = ${grpLabels[String(g.group)] ?? g.group}`
+                : String(g.group),
+              line: { width: traceDefaults.lineWidth, color: pal[i % pal.length], shape: "hv" as const },
+            }));
+
+          return (
+            <div className="mt-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-gray-700">
+                  Stratified by <span className="text-indigo-600">{kmStratify}</span>
+                  {kmGroup && <span className="text-gray-400 font-normal ml-2">— curves by {kmGroup}</span>}
+                </h4>
+                <span className="text-xs text-gray-400">{strata.length} strata · {kmResult.n_total ?? "?"} total</span>
+              </div>
+              <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))` }}>
+                {strata.map((stratum: any) => {
+                  const stratLabel = stratLabels[String(stratum.label)] ?? stratum.label;
+                  const pAnnot = stratum.logrank?.p != null ? [{
+                    xref: "paper", yref: "paper", x: 0.02, y: 0.98,
+                    xanchor: "left", yanchor: "top",
+                    text: `p ${stratum.logrank.p < 0.001 ? "< 0.001" : `= ${stratum.logrank.p.toFixed(3)}`}`,
+                    showarrow: false,
+                    font: { size: 11, color: stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
+                    bgcolor: "rgba(249,250,251,0.85)", borderpad: 3, bordercolor: "#e5e7eb", borderwidth: 1,
+                  }] : [];
+                  return (
+                    <div key={stratum.label} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-700">{kmStratify} = {stratLabel}</span>
+                        <span className="text-[10px] text-gray-400">n={stratum.n}</span>
+                      </div>
+                      <Plot
+                        data={buildTraces(stratum.groups)}
+                        layout={{
+                          ...baseLayout,
+                          autosize: true,
+                          height: miniH,
+                          margin: { t: 10, r: 10, b: 40, l: 50 },
+                          xaxis: { ...(baseLayout.xaxis as any), title: { text: kmCustomDurationTitle || kmDuration } },
+                          yaxis: { ...(baseLayout.yaxis as any), range: [0, 1.05], tickformat: ".0%", title: { text: "Survival" } },
+                          legend: { font: { size: 9 }, orientation: "h", y: -0.22 },
+                          annotations: pAnnot as any,
+                        }}
+                        style={{ width: "100%", height: miniH }}
+                        config={{ responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
+                        useResizeHandler
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           );
         })()}
       </Section>
