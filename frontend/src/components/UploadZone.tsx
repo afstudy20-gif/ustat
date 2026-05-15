@@ -5,6 +5,7 @@ import api from "../api";
 import { useStore } from "../store";
 import AboutModal from "./AboutModal";
 import PowerPanel from "./PowerPanel";
+import RefreshAppButton from "./RefreshAppButton";
 
 export default function UploadZone() {
   const setSession = useStore((s) => s.setSession);
@@ -82,11 +83,14 @@ export default function UploadZone() {
             <span className="text-xs text-gray-400">·</span>
             <span className="text-xs text-indigo-600 font-medium">Power Analysis</span>
           </div>
-          <button onClick={() => setMode("home")}
-            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
-            <BarChart2 size={14} />
-            Statistical Analysis
-          </button>
+          <div className="flex items-center gap-2">
+            <RefreshAppButton />
+            <button onClick={() => setMode("home")}
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
+              <BarChart2 size={14} />
+              Statistical Analysis
+            </button>
+          </div>
         </header>
         {/* Power Panel */}
         <main className="flex-1 overflow-y-auto p-4">
@@ -215,13 +219,16 @@ export default function UploadZone() {
       {loading && <p className="text-indigo-600 animate-pulse">Opening and parsing your data…</p>}
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
-      <button
-        onClick={() => setShowAbout(true)}
-        className="flex items-center gap-1.5 text-gray-400 hover:text-indigo-600 text-xs transition-colors"
-      >
-        <Info size={14} />
-        About uSTAT — packages & methods
-      </button>
+      <div className="flex items-center gap-4">
+        <button
+          onClick={() => setShowAbout(true)}
+          className="flex items-center gap-1.5 text-gray-400 hover:text-indigo-600 text-xs transition-colors"
+        >
+          <Info size={14} />
+          About uSTAT — packages & methods
+        </button>
+        <RefreshAppButton variant="inline" />
+      </div>
 
       <p className="text-[11px] text-gray-300 mt-2">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
       <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400 mt-1">

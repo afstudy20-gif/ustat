@@ -34,6 +34,7 @@ import RepeatedMeasuresPanel from "./components/RepeatedMeasuresPanel";
 import CategoricalTestsPanel from "./components/CategoricalTestsPanel";
 import ReliabilityPanel from "./components/ReliabilityPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
+import RefreshAppButton from "./components/RefreshAppButton";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
@@ -298,6 +299,7 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <PlotThemeBar />
+            <RefreshAppButton confirmBeforeReload />
             <button
               onClick={() => setShowAbout(true)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
