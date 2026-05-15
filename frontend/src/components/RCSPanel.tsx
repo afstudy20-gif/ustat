@@ -146,7 +146,7 @@ function CoxRCSResultPanel({ result }: { result: any }) {
               { x: c.x, y: c.upper, type: "scatter", mode: "lines", line: { width: 0 }, hoverinfo: "skip", showlegend: false },
               { x: c.x, y: c.lower, type: "scatter", mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: "rgba(99,102,241,0.15)", hoverinfo: "skip", showlegend: false },
               { x: c.x, y: c.hr, type: "scatter", mode: "lines", line: { color: "#4f46e5", width: 2 }, name: "HR", hovertemplate: `${c.column}=%{x:.2f}<br>HR=%{y:.2f}<extra></extra>` },
-              { x: c.knots, y: c.knots.map(() => 1), type: "scatter", mode: "markers", marker: { color: "#4f46e5", size: 8, symbol: "circle" }, name: "knots", hoverinfo: "x" },
+              { x: c.knots ?? [], y: (c.knots ?? []).map(() => 1), type: "scatter", mode: "markers", marker: { color: "#4f46e5", size: 8, symbol: "circle" }, name: "knots", hoverinfo: "x" },
             ]}
             layout={{
               height: 280, margin: { l: 50, r: 20, t: 10, b: 40 },
@@ -160,7 +160,7 @@ function CoxRCSResultPanel({ result }: { result: any }) {
             useResizeHandler
             key={`crx-curve-${idx}`}
           />
-          <div className="text-[10px] text-gray-500">Reference = {c.ref}. Knots at: {c.knots.join(", ")}.</div>
+          <div className="text-[10px] text-gray-500">Reference = {c.ref}. Knots at: {(c.knots ?? []).join(", ")}.</div>
         </div>
       ))}
 
@@ -609,7 +609,7 @@ export default function RCSPanel() {
           <CoxRCSResultPanel result={result} />
         )}
 
-        {result && mode === "rcs" && (() => {
+        {result && mode === "rcs" && Array.isArray(result.x_values) && (() => {
           const mt = (result.model_type as string | undefined) ?? "logistic";
           const eff = mt === "cox"
             ? { label: "Hazard Ratio", abbr: "HR", refValue: 1, axisType: "log" as const }
@@ -650,7 +650,7 @@ export default function RCSPanel() {
 
               <div className="flex flex-wrap gap-1.5 text-[11px]">
                 <span className="text-gray-400">{result.n_knots} knots at:</span>
-                {(result.knots as number[]).map((k: number, i: number) => (
+                {((result.knots as number[]) ?? []).map((k: number, i: number) => (
                   <span key={i} className="bg-indigo-50 border border-indigo-100 text-indigo-600 rounded px-1.5 py-0.5">{k}</span>
                 ))}
                 <span className="text-gray-400 ml-2">reference = <strong>{result.ref_value}</strong> ({eff.abbr} = {eff.refValue.toFixed(1)})</span>
@@ -701,7 +701,7 @@ export default function RCSPanel() {
                 plotRefOut={rcsPlotRef}
                 storageKey={`rcs:${result.predictor}:${outcomeLabel}`}
                 defaultTitle={`${result.predictor}${outcomeLabel ? ` & ${outcomeLabel}` : ""}: ${modelTitle}`}
-                defaultSubtitle={`${result.n_knots} knots at ${(result.knots as number[]).join(", ")} · reference = ${result.ref_value} (${eff.abbr} = ${eff.refValue.toFixed(1)})${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
+                defaultSubtitle={`${result.n_knots} knots at ${((result.knots as number[]) ?? []).join(", ")} · reference = ${result.ref_value} (${eff.abbr} = ${eff.refValue.toFixed(1)})${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
                 defaultXAxis={result.predictor}
                 defaultYAxis={`${eff.label} (95% CI)`}
                 data={[
@@ -720,8 +720,8 @@ export default function RCSPanel() {
                   },
                   {
                     type: "scatter" as const, mode: "markers" as const,
-                    x: result.knots as number[],
-                    y: (result.knots as number[]).map((k: number) => {
+                    x: (result.knots as number[]) ?? [],
+                    y: ((result.knots as number[]) ?? []).map((k: number) => {
                       const xs = result.x_values as number[];
                       const ys = result.or_values as number[];
                       const idx = xs.reduce((best: number, x: number, i: number) =>
