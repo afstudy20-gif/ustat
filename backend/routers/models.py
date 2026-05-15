@@ -727,6 +727,7 @@ class KMRequest(BaseModel):
     duration_col: str
     event_col: str
     group_col: Optional[str] = None
+    stratify_col: Optional[str] = None
     imputation: Optional[str] = "listwise"
 
 
@@ -741,12 +742,62 @@ def _safe_float(v):
         return None
 
 
+def _km_fit_groups(df: pd.DataFrame, duration_col: str, event_col: str, group_col: Optional[str]) -> list:
+    groups = df[group_col].unique() if group_col else [None]
+    results = []
+    for grp in groups:
+        subset = df[df[group_col] == grp] if group_col else df
+        kmf = KaplanMeierFitter()
+        try:
+            kmf.fit(
+                subset[duration_col].astype(float),
+                subset[event_col].astype(int),
+                label=str(grp) if grp is not None else "All",
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"KM fitting error: {exc}")
+        sf = kmf.survival_function_.reset_index()
+        sf.columns = ["time", "survival"]
+        curve = [
+            {"time": _safe_float(row["time"]), "survival": _safe_float(row["survival"])}
+            for _, row in sf.iterrows()
+        ]
+        results.append({
+            "group": str(grp) if grp is not None else "All",
+            "n": int(len(subset)),
+            "events": int(subset[event_col].sum()),
+            "median_survival": _safe_float(kmf.median_survival_time_),
+            "curve": curve,
+        })
+    return results
+
+
+def _km_logrank(df: pd.DataFrame, duration_col: str, event_col: str, group_col: str) -> Optional[dict]:
+    groups = df[group_col].unique()
+    if len(groups) < 2:
+        return None
+    try:
+        if len(groups) == 2:
+            g0 = df[df[group_col] == groups[0]]
+            g1 = df[df[group_col] == groups[1]]
+            lr = logrank_test(
+                g0[duration_col], g1[duration_col],
+                event_observed_A=g0[event_col].astype(int),
+                event_observed_B=g1[event_col].astype(int),
+            )
+            return {"test": "Log-rank", "p": _safe_float(lr.p_value)}
+        else:
+            lr = multivariate_logrank_test(df[duration_col], df[group_col], df[event_col].astype(int))
+            return {"test": "Log-rank (multivariate)", "p": _safe_float(lr.p_value)}
+    except Exception:
+        return None
+
+
 @router.post("/survival/km")
 def kaplan_meier(req: KMRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
 
-    # Coerce to numeric first so imputation sees real NaN
     df_full = df_full.copy()
     df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
     df_full[req.event_col]    = pd.to_numeric(df_full[req.event_col],    errors="coerce")
@@ -758,64 +809,38 @@ def kaplan_meier(req: KMRequest):
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric. Check that both columns contain numbers.")
 
-    # Validate event indicator is binary 0/1
     event_vals = sorted(df[req.event_col].dropna().unique())
     if set(event_vals) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1 (0=censored, 1=event). Found: {event_vals[:10]}")
 
-    # Validate duration is positive
     if (df[req.duration_col] < 0).any():
         raise HTTPException(status_code=422, detail="Duration column contains negative values. All durations must be ≥ 0.")
 
-    results = []
-    groups = df[req.group_col].unique() if req.group_col else [None]
-    for grp in groups:
-        subset = df[df[req.group_col] == grp] if req.group_col else df
-        kmf = KaplanMeierFitter()
-        try:
-            kmf.fit(
-                subset[req.duration_col].astype(float),
-                subset[req.event_col].astype(int),
-                label=str(grp) if grp is not None else "All",
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"KM fitting error: {exc}")
+    # ── Stratified mode ──────────────────────────────────────────────────────────
+    if req.stratify_col:
+        if req.stratify_col not in df_full.columns:
+            raise HTTPException(status_code=422, detail=f"Stratify column '{req.stratify_col}' not found.")
+        strata_vals = sorted(df[req.stratify_col].dropna().unique(), key=lambda x: (isinstance(x, str), x))
+        strata_out = []
+        for sv in strata_vals:
+            sub = df[df[req.stratify_col] == sv].copy()
+            if len(sub) == 0:
+                continue
+            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col)
+            lr = _km_logrank(sub, req.duration_col, req.event_col, req.group_col) if req.group_col else None
+            strata_out.append({"label": str(sv), "n": int(len(sub)), "groups": grp_results, "logrank": lr})
+        return {
+            "model": "Kaplan-Meier",
+            "strata": strata_out,
+            "stratify_col": req.stratify_col,
+            "n_total": n_total,
+            "n_excluded": n_excluded,
+            "imputation": req.imputation,
+        }
 
-        sf = kmf.survival_function_.reset_index()
-        sf.columns = ["time", "survival"]
-        # Clean curve: replace inf/nan with None
-        curve = [
-            {"time": _safe_float(row["time"]), "survival": _safe_float(row["survival"])}
-            for _, row in sf.iterrows()
-        ]
-        results.append({
-            "group": str(grp) if grp is not None else "All",
-            "n": int(len(subset)),
-            "events": int(subset[req.event_col].sum()),
-            "median_survival": _safe_float(kmf.median_survival_time_),
-            "curve": curve,
-        })
-
-    # Log-rank test (only when group column supplied with ≥2 groups)
-    logrank = None
-    if req.group_col and len(groups) >= 2:
-        try:
-            if len(groups) == 2:
-                g0 = df[df[req.group_col] == groups[0]]
-                g1 = df[df[req.group_col] == groups[1]]
-                lr = logrank_test(
-                    g0[req.duration_col], g1[req.duration_col],
-                    event_observed_A=g0[req.event_col].astype(int),
-                    event_observed_B=g1[req.event_col].astype(int),
-                )
-                logrank = {"test": "Log-rank", "p": _safe_float(lr.p_value)}
-            else:
-                lr = multivariate_logrank_test(
-                    df[req.duration_col], df[req.group_col], df[req.event_col].astype(int)
-                )
-                logrank = {"test": "Log-rank (multivariate)", "p": _safe_float(lr.p_value)}
-        except Exception:
-            pass
+    # ── Standard (non-stratified) mode ──────────────────────────────────────────
+    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col)
+    logrank = _km_logrank(df, req.duration_col, req.event_col, req.group_col) if req.group_col else None
 
     return {
         "model": "Kaplan-Meier",

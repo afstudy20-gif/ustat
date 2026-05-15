@@ -1549,6 +1549,7 @@ export default function ModelsPanel() {
   const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
   const [eventCol, setEventCol] = useState(binaryCols[0] ?? numCols[1] ?? "");
   const [groupCol, setGroupCol] = useState("");
+  const [stratifyCol, setStratifyCol] = useState("");
   const cachedModels = useStore((s) => s.panelCache.models);
   const setCacheModels = useStore((s) => s.setPanelCache);
   const [result, _setResultRaw] = useState<any>(cachedModels?.result ?? null);
@@ -1615,7 +1616,7 @@ export default function ModelsPanel() {
       else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
-      else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, imputation });
+      else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
       else if (model === "rcs") {
         const customKnotsArr = rcsKnotMode === "custom"
           ? rcsCustomKnots.split(/[,\s]+/).filter(Boolean).map(Number).filter((n) => !Number.isNaN(n))
@@ -1963,13 +1964,22 @@ export default function ModelsPanel() {
                 </select>
               </div>
               {model === "km" && (
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Group column (optional)</label>
-                  <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
-                    <option value="">None</option>
-                    {allCols.map((c) => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
+                <>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Group column (optional)</label>
+                    <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
+                      <option value="">None</option>
+                      {allCols.map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Stratify by (optional)</label>
+                    <select className="select w-full" value={stratifyCol} onChange={(e) => setStratifyCol(e.target.value)}>
+                      <option value="">None</option>
+                      {allCols.filter((c) => c !== groupCol && c !== durationCol && c !== eventCol).map((c) => <option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </>
               )}
               {model === "cox" && (
                 <div>
@@ -2820,6 +2830,85 @@ export default function ModelsPanel() {
                         modeBarButtonsToRemove: ["select2d", "lasso2d"],
                       }}
                     />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* KM stratified small-multiples grid */}
+            {result.strata && (() => {
+              const strata: any[] = result.strata;
+              const nCols = strata.length <= 2 ? strata.length : strata.length === 3 ? 3 : 2;
+              const palette = _pal();
+              const miniH = 280;
+
+              const buildMiniTraces = (groups: any[]) => {
+                const traces: any[] = [];
+                groups.forEach((g: any, i: number) => {
+                  const color = palette[i % palette.length];
+                  const times = g.curve.map((p: any) => p.time);
+                  const survs = g.curve.map((p: any) => p.survival);
+                  // CI via Greenwood
+                  let cumVar = 0;
+                  const upper: number[] = [], lower: number[] = [];
+                  g.curve.forEach((p: any) => {
+                    const n = p.n_at_risk ?? 0, d = p.events ?? 0, S = p.survival;
+                    if (n > 0 && d > 0 && n > d) cumVar += d / (n * (n - d));
+                    const se = S * Math.sqrt(cumVar);
+                    upper.push(Math.min(1, S + 1.96 * se));
+                    lower.push(Math.max(0, S - 1.96 * se));
+                  });
+                  traces.push({ type: "scatter", mode: "lines", x: times, y: upper, line: { width: 0, shape: "hv" }, showlegend: false, hoverinfo: "skip", name: `__u${i}` });
+                  traces.push({ type: "scatter", mode: "lines", x: times, y: lower, fill: "tonexty", fillcolor: `${color}28`, line: { width: 0, shape: "hv" }, showlegend: false, hoverinfo: "skip", name: `__l${i}` });
+                  traces.push({ type: "scatter", mode: "lines", x: times, y: survs, name: `${g.group} (n=${g.n})`, line: { color, width: 2, shape: "hv" } });
+                });
+                return traces;
+              };
+
+              return (
+                <div className="panel space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold text-gray-900 text-sm">
+                      Stratified by <span className="text-indigo-600">{result.stratify_col}</span>
+                      {groupCol && <span className="text-gray-400 font-normal ml-2">— curves by {groupCol}</span>}
+                    </h4>
+                    <span className="text-xs text-gray-400">{strata.length} strata · {result.n_total} total</span>
+                  </div>
+                  <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${nCols}, minmax(0, 1fr))` }}>
+                    {strata.map((stratum: any) => {
+                      const pAnnot = stratum.logrank?.p != null ? [{
+                        xref: "paper", yref: "paper", x: 0.02, y: 0.98,
+                        xanchor: "left", yanchor: "top",
+                        text: `p ${stratum.logrank.p < 0.001 ? "< 0.001" : `= ${stratum.logrank.p.toFixed(3)}`}`,
+                        showarrow: false,
+                        font: { size: 11, color: stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
+                        bgcolor: "rgba(249,250,251,0.85)", borderpad: 3, bordercolor: "#e5e7eb", borderwidth: 1,
+                      }] : [];
+                      return (
+                        <div key={stratum.label} className="border border-gray-200 rounded-lg overflow-hidden">
+                          <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-gray-700">{stratum.label}</span>
+                            <span className="text-[10px] text-gray-400">n={stratum.n}</span>
+                          </div>
+                          <Plot
+                            data={buildMiniTraces(stratum.groups)}
+                            layout={{
+                              ...PLOT_LAYOUT,
+                              autosize: true,
+                              height: miniH,
+                              margin: { t: 10, r: 10, b: 40, l: 50 },
+                              yaxis: { ...PLOT_LAYOUT.yaxis, range: [0, 1.05], title: { text: "Survival" }, showgrid: showGrid },
+                              xaxis: { ...PLOT_LAYOUT.xaxis, title: { text: durationCol }, showgrid: showGrid },
+                              legend: { font: { size: 9 }, orientation: "h", y: -0.22 },
+                              annotations: pAnnot,
+                            }}
+                            style={{ width: "100%", height: miniH }}
+                            useResizeHandler
+                            config={{ responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
