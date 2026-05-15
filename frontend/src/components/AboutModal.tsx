@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.7";
-const BUILD = 98;
+const VERSION = "1.9.8";
+const BUILD = 99;
 
 const CHANGELOG = [
+  { ver: "1.9.8", date: "2026-05-15", notes: "PNG exports now include the chart title + caption + axis labels (was bare plot only). New TitledPlot wrapper exposes inline editable fields for Title / Subtitle / X axis / Y axis above every chart — edits are persisted per session and applied to the Plotly layout, so the PNG / SVG / PDF that gets downloaded carries exactly what's on screen. RCS dose-response and Cox-RCS HR surface migrated. PNG-export resolver hardened: searches the plot ref for the graph div via .el, the ref itself, .elRef.current, or a .plotly-graph-div query, and only triggers the download when Plotly has actually attached _fullLayout. Fixes 'PNG export failed: Cannot read properties of undefined'." },
   { ver: "1.9.7", date: "2026-05-15", notes: "RCS dose-response result now adapts to the selected outcome type: Cox runs render Hazard Ratio everywhere (axis title, hover, knot tooltips, export header, reference annotation, plain-English summary) and the panel title says 'Cox-RCS'; logistic stays Odds Ratio; linear shows Mean difference with a zero reference line and a linear y-axis. Was hardcoded to 'Odds Ratio' regardless of model_type so Cox fits looked like logistic." },
   { ver: "1.9.6", date: "2026-05-15", notes: "Variable-kind dropdown audit. ROC Binary Outcome picker now narrows to detected 0/1 columns (was every column — could silently accept a continuous variable as the outcome). RCS Dose-Response Outcome picker now switches list by outcome type: Logistic = binary columns, Linear = numeric columns, Cox uses duration+event already. ICC tab now offers only numeric columns for Rater 1 / Rater 2 — Cohen's κ stays on all columns (categorical or binary). Inline amber warning when no binary column is detected, with a suggestion to recode in the Dictionary modal." },
   { ver: "1.9.5", date: "2026-05-15", notes: "Cox-RCS interaction HR surface: 2D contour ★ / 3D surface toggle. The 3D view uses Plotly's surface trace with a log-z axis, interactive rotate/zoom camera, and projected contour lines on the floor — easier to read the joint dose-response landscape across LDL × AGE (or any rcs × rcs pair). 2D contour with isohypse lines remains the default and stays publication-ready. Event-column pickers in the Cox / Cox-RCS / RCS-Cox forms now narrow to binary 0/1 columns (with an inline warning when none are detected)." },

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
+import TitledPlot from "./TitledPlot";
 import { useStore } from "../store";
 import { runLinear, runLogistic, runKM, runCox, runLogisticTable, runRCS, runCoxRCS, runPoisson, getSparklines } from "../api";
 import { Tip, InfoBanner } from "./Tip";
@@ -93,7 +94,12 @@ function HRSurfaceCard({ surface }: { surface: SurfaceData }) {
           ))}
         </div>
       </div>
-      <Plot
+      <TitledPlot
+        storageKey={`crx-surface:${surface.x_col}:${surface.y_col}:${view}`}
+        defaultTitle={`HR surface: ${surface.x_col} × ${surface.y_col}`}
+        defaultSubtitle={`Reference: ${surface.x_col} = ${surface.ref[surface.x_col]}, ${surface.y_col} = ${surface.ref[surface.y_col]} · other covariates at their mean`}
+        defaultXAxis={surface.x_col}
+        defaultYAxis={view === "contour" ? surface.y_col : ""}
         data={[
           view === "contour"
             ? {
@@ -140,12 +146,10 @@ function HRSurfaceCard({ surface }: { surface: SurfaceData }) {
         }
         config={{ displaylogo: false, responsive: true }}
         style={{ width: "100%" }}
-        useResizeHandler
       />
-      <div className="text-[10px] text-gray-500">
-        Reference: {surface.x_col}={surface.ref[surface.x_col]}, {surface.y_col}={surface.ref[surface.y_col]}.
-        {view === "surface3d" && " · Drag to rotate, scroll to zoom."}
-      </div>
+      {view === "surface3d" && (
+        <div className="text-[10px] text-gray-500">Drag to rotate, scroll to zoom.</div>
+      )}
     </div>
   );
 }
@@ -2139,8 +2143,13 @@ export default function ModelsPanel() {
             </div>
 
             {/* Dose-response plot */}
-            <Plot
-              ref={rcsPlotRef}
+            <TitledPlot
+              plotRefOut={rcsPlotRef}
+              storageKey={`rcs:${result.predictor}:${outcomeLabel}`}
+              defaultTitle={`${result.predictor}${outcomeLabel ? ` & ${outcomeLabel}` : ""}: ${modelTitle}`}
+              defaultSubtitle={`${result.n_knots} knots at ${(result.knots as number[]).join(", ")} · reference = ${result.ref_value} (${eff.abbr} = ${eff.refValue.toFixed(1)})${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
+              defaultXAxis={result.predictor}
+              defaultYAxis={`${eff.label} (95% CI)`}
               data={[
                 /* CI band */
                 {
@@ -2227,8 +2236,7 @@ export default function ModelsPanel() {
                 legend: { font: { size: 11, color: "#374151" }, x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const },
                 margin: { t: 20, r: 20, b: 50, l: 65 },
               }}
-              style={{ width: "100%", height: 440 }}
-              useResizeHandler
+              style={{ width: "100%", height: 520 }}
               config={{ responsive: true, displaylogo: false,
                 toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${outcomeLabel || "result"}`, width: 1200, height: 600 },
                 modeBarButtonsToRemove: ["select2d", "lasso2d"] }}

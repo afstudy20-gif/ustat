@@ -58,11 +58,31 @@ async function downloadXLSX(filename: string, headers: string[], rows: (string |
 }
 
 async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
-  const el: HTMLElement | null = plotRef.current?.el ?? plotRef.current;
-  if (!el) return;
-  const Plotly = (await import("plotly.js")).default;
+  // Resolve to a Plotly graph div. react-plotly.js exposes `.el`; raw refs
+  // give the DOM node directly; some wrappers nest it one deeper. A graph
+  // div is recognisable by the `_fullLayout` property Plotly attaches at
+  // mount time.
+  const candidates: any[] = [];
+  const r = plotRef.current;
+  if (r) {
+    candidates.push(r.el);
+    candidates.push(r);
+    candidates.push(r.elRef?.current);
+    if (typeof r.querySelector === "function") {
+      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
+    }
+  }
+  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+  if (!el) {
+    throw new Error("plot is not mounted yet — wait for the chart to render and try again");
+  }
+  const mod: any = await import("plotly.js");
+  const Plotly: any = mod?.downloadImage ? mod : mod?.default;
+  if (!Plotly?.downloadImage) {
+    throw new Error("plotly.js downloadImage not available");
+  }
   // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300)
-  await (Plotly as any).downloadImage(el, {
+  await Plotly.downloadImage(el, {
     format: "png",
     width: 1200,
     height: 700,
