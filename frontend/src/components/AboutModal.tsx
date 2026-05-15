@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.9";
-const BUILD = 100;
+const VERSION = "1.9.10";
+const BUILD = 101;
 
 const CHANGELOG = [
+  { ver: "1.9.10", date: "2026-05-15", notes: "Cox Proportional Hazards endpoint (/api/models/survival/cox) now dummy-encodes categorical predictors (drop_first=True) just like the RCS endpoint does. Previously a Surv(time, event) ~ LDL + AGE + SEX + DM + HT + SMOKER fit would crash with 'could not convert string to float' as soon as the user ticked a categorical predictor; now SEX/DM/HT/SMOKER expand into binary dummies automatically." },
   { ver: "1.9.9", date: "2026-05-15", notes: "RCS covariate picker now lists ALL columns (numeric AND categorical) with a small N/C badge. Categorical covariates are dummy-coded server-side (drop_first=True) so the user can adjust for SEX, DM, HT, etc. directly without recoding. Result card now surfaces an 'Adjusted for: …' chip row with the per-covariate effect ratio (HR/OR for cox/logistic, β for linear) so the user can verify the model actually used what they ticked. n_total / n_excluded reported when rows are dropped. Univariate RCS allows only one spline term — for an LDL spline AND an AGE spline use the Cox-RCS multivariable panel and toggle interaction." },
   { ver: "1.9.8", date: "2026-05-15", notes: "PNG exports now include the chart title + caption + axis labels (was bare plot only). New TitledPlot wrapper exposes inline editable fields for Title / Subtitle / X axis / Y axis above every chart — edits are persisted per session and applied to the Plotly layout, so the PNG / SVG / PDF that gets downloaded carries exactly what's on screen. RCS dose-response and Cox-RCS HR surface migrated. PNG-export resolver hardened: searches the plot ref for the graph div via .el, the ref itself, .elRef.current, or a .plotly-graph-div query, and only triggers the download when Plotly has actually attached _fullLayout. Fixes 'PNG export failed: Cannot read properties of undefined'." },
   { ver: "1.9.7", date: "2026-05-15", notes: "RCS dose-response result now adapts to the selected outcome type: Cox runs render Hazard Ratio everywhere (axis title, hover, knot tooltips, export header, reference annotation, plain-English summary) and the panel title says 'Cox-RCS'; logistic stays Odds Ratio; linear shows Mean difference with a zero reference line and a linear y-axis. Was hardcoded to 'Odds Ratio' regardless of model_type so Cox fits looked like logistic." },

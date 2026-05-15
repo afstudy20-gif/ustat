@@ -859,8 +859,33 @@ def cox_regression(req: CoxRequest):
     if (df[req.duration_col] < 0).any():
         raise HTTPException(status_code=422, detail="Duration column contains negative values.")
 
+    # Encode predictors: numeric stays numeric, categorical / text columns
+    # are dummy-coded with drop_first=True so lifelines receives only float
+    # columns. Without this, a SEX column with values 'M' / 'F' would crash
+    # CoxPHFitter with a 'could not convert string to float' error.
+    pred_raw = df[req.predictors].copy()
+    numeric_pred: list[str] = []
+    cat_pred:     list[str] = []
+    for c in req.predictors:
+        col = pred_raw[c]
+        if pd.api.types.is_numeric_dtype(col):
+            numeric_pred.append(c)
+        else:
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= 0.8 and len(coerced.dropna().unique()) > 2:
+                pred_raw[c] = coerced
+                numeric_pred.append(c)
+            else:
+                cat_pred.append(c)
+    num_part = pred_raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=pred_raw.index)
+    cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1).astype(float)
+
+    fit_df = pd.concat([df[[req.duration_col, req.event_col]], enc], axis=1).dropna()
+    if len(fit_df) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows after encoding (need ≥ 10, got {len(fit_df)}).")
+
     cph = CoxPHFitter()
-    fit_df = df[[req.duration_col, req.event_col] + req.predictors]
     try:
         cph.fit(fit_df, duration_col=req.duration_col, event_col=req.event_col)
     except Exception as exc:
