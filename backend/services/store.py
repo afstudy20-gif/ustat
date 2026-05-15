@@ -8,6 +8,7 @@ _store: Dict[str, dict] = {}  # {session_id: {"df": DataFrame, "timestamp": floa
 _filters: Dict[str, List[dict]] = {}
 _audit: Dict[str, list] = {}
 _metadata: Dict[str, dict] = {}
+_kinds: Dict[str, Dict[str, str]] = {}  # {session_id: {col: "numeric"|"categorical"|...}}
 _undo: Dict[str, list] = {}   # {session_id: [DataFrame snapshots]}
 _redo: Dict[str, list] = {}
 _lock = Lock()
@@ -35,6 +36,7 @@ def _cleanup_old_sessions() -> None:
             _filters.pop(sid, None)
             _audit.pop(sid, None)
             _metadata.pop(sid, None)
+            _kinds.pop(sid, None)
             _undo.pop(sid, None)
             _redo.pop(sid, None)
 
@@ -46,6 +48,7 @@ def _cleanup_old_sessions() -> None:
                 _store.pop(sid, None)
                 _filters.pop(sid, None)
                 _audit.pop(sid, None)
+                _kinds.pop(sid, None)
                 _undo.pop(sid, None)
                 _redo.pop(sid, None)
                 _metadata.pop(sid, None)
@@ -246,3 +249,30 @@ def save_metadata(session_id: str, meta: dict) -> None:
 def get_metadata(session_id: str) -> dict:
     """Return column-level metadata for a session."""
     return _metadata.get(session_id, {})
+
+
+# ── Column kind overrides ────────────────────────────────────────────────────
+# User-driven `numeric` ↔ `categorical` (etc.) flips made through the data-tab
+# badge / dictionary. Persists alongside the dataframe so save_session can
+# round-trip them — otherwise the next load re-runs auto-detection and the
+# user's classification choices are silently discarded.
+
+def save_kind_overrides(session_id: str, overrides: Dict[str, str]) -> None:
+    """Merge a dict of {column: kind} into the per-session override map."""
+    current = _kinds.get(session_id, {})
+    current.update({k: v for k, v in overrides.items() if v})
+    _kinds[session_id] = current
+
+
+def set_kind_overrides(session_id: str, overrides: Dict[str, str]) -> None:
+    """Replace the override map wholesale (used on load_session restore)."""
+    _kinds[session_id] = dict(overrides or {})
+
+
+def get_kind_overrides(session_id: str) -> Dict[str, str]:
+    return _kinds.get(session_id, {})
+
+
+def clear_kind_override(session_id: str, column: str) -> None:
+    if session_id in _kinds:
+        _kinds[session_id].pop(column, None)

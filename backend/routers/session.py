@@ -336,19 +336,23 @@ async def save_session(session_id: str):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Build columns metadata (same shape as upload response)
+    # Build columns metadata (same shape as upload response). User-driven kind
+    # overrides win over auto-detection so the dictionary classification
+    # survives the save/load round-trip.
     from routers.upload import _detect_kind
+    kind_overrides = store.get_kind_overrides(session_id)
     columns = []
     for col in df.columns:
-        kind = _detect_kind(df[col])
+        kind = kind_overrides.get(col) or _detect_kind(df[col])
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
 
     payload = {
-        "version": "1.0",
+        "version": "1.1",
         "filename": f"session_{session_id[:8]}.json",
         "created": time.time(),
         "columns": columns,
         "col_metadata": store.get_metadata(session_id),
+        "kind_overrides": kind_overrides,
         "case_filter": store.get_filter(session_id),
         "audit": store.get_audit(session_id),
         "data": json.loads(
@@ -394,11 +398,21 @@ async def load_session(file: UploadFile = File(...)):
     if col_metadata:
         store.save_metadata(new_session_id, col_metadata)
 
-    # Build columns info
+    # Restore user-driven kind overrides (v1.1+ session files). For older v1.0
+    # files we fall back to the "columns" array on the payload, which already
+    # carries the kind the user saw at save time.
+    kind_overrides = payload.get("kind_overrides")
+    if not kind_overrides and isinstance(payload.get("columns"), list):
+        kind_overrides = {c["name"]: c["kind"] for c in payload["columns"] if c.get("name") and c.get("kind")}
+    if kind_overrides:
+        store.set_kind_overrides(new_session_id, kind_overrides)
+
+    # Build columns info — overrides win over auto-detection.
     from routers.upload import _detect_kind
+    overrides = store.get_kind_overrides(new_session_id)
     columns = []
     for col in df.columns:
-        kind = _detect_kind(df[col])
+        kind = overrides.get(col) or _detect_kind(df[col])
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
 
     preview = json.loads(
@@ -493,3 +507,26 @@ async def save_metadata(session_id: str, body: ColumnMetadataRequest):
     store.log_action(session_id, "metadata_updated", {"columns": list(body.columns.keys())})
 
     return {"status": "ok", "columns_updated": list(body.columns.keys())}
+
+
+# ── Column kind override ─────────────────────────────────────────────────────
+
+class KindOverrideRequest(BaseModel):
+    column: str
+    kind: str  # "numeric" | "categorical" | "text" | "date" | "boolean"
+
+
+@router.post("/{session_id}/kind")
+async def set_column_kind(session_id: str, body: KindOverrideRequest):
+    """Persist a user-driven kind change (data-tab badge / dictionary)."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{body.column}' not in session")
+    if body.kind not in ("numeric", "categorical", "text", "date", "boolean"):
+        raise HTTPException(status_code=422, detail=f"Invalid kind '{body.kind}'")
+
+    store.save_kind_overrides(session_id, {body.column: body.kind})
+    store.log_action(session_id, "kind_override", {"column": body.column, "kind": body.kind})
+    return {"status": "ok", "column": body.column, "kind": body.kind}

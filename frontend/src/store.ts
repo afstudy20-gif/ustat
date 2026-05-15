@@ -137,9 +137,18 @@ export const useStore = create<AppState>((set) => ({
     return { plotTheme: next };
   }),
   clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0 }),
-  updateColumnKind: (name, kind) =>
+  updateColumnKind: (name, kind) => {
     set((state) => {
       if (!state.session) return state;
+      // Fire-and-forget persistence to the backend so save_session captures
+      // the user's classification override. Import done lazily to avoid a
+      // circular import (api.ts → store).
+      import("./api").then(({ setColumnKind }) => {
+        setColumnKind(state.session!.session_id, name, kind).catch(() => {
+          /* network errors here are non-fatal — UI state is the source of
+             truth for the current session; the next save attempt re-syncs. */
+        });
+      });
       return {
         session: {
           ...state.session,
@@ -148,7 +157,8 @@ export const useStore = create<AppState>((set) => ({
           ),
         },
       };
-    }),
+    });
+  },
   updatePreviewCell: (rowIdx, col, value) =>
     set((state) => {
       if (!state.session) return state;
