@@ -43,19 +43,43 @@ function VarSelect({ label, value, onChange, columns, kinds }: {
   );
 }
 
-function MultiSelect({ label, columns, selected, onChange, kinds }: {
+function MultiSelect({ label, columns, selected, onChange, kinds, excludeNames }: {
   label: string; columns: { name: string; kind: string }[];
-  selected: string[]; onChange: (v: string[]) => void; kinds?: string[];
+  selected: string[]; onChange: (v: string[]) => void;
+  kinds?: string[]; excludeNames?: string[];
 }) {
-  const filtered = kinds ? columns.filter((c) => kinds.includes(c.kind)) : columns;
+  const filtered = (kinds ? columns.filter((c) => kinds.includes(c.kind)) : columns)
+    .filter((c) => !(excludeNames ?? []).includes(c.name));
+  const toggle = (name: string) =>
+    onChange(selected.includes(name) ? selected.filter((c) => c !== name) : [...selected, name]);
   return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-gray-500 font-medium">{label}</span>
-      <select multiple value={selected} onChange={(e) => onChange(Array.from(e.target.selectedOptions, (o) => o.value))}
-        className="text-xs border border-gray-300 rounded-lg px-2 py-1 bg-white h-28 focus:outline-none focus:border-indigo-400">
-        {filtered.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-      </select>
-    </label>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-gray-500 font-medium">{label}</span>
+        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+          <span>{selected.length} selected</span>
+          {selected.length > 0 && (
+            <button type="button" onClick={() => onChange([])} className="hover:text-red-500">Clear</button>
+          )}
+        </div>
+      </div>
+      <div className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white max-h-40 overflow-y-auto space-y-0.5">
+        {filtered.length === 0 && <p className="text-[11px] text-gray-400 italic">No columns available</p>}
+        {filtered.map((c) => {
+          const isNum = c.kind === "numeric";
+          const isChecked = selected.includes(c.name);
+          return (
+            <label key={c.name} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+              <input type="checkbox" checked={isChecked} onChange={() => toggle(c.name)} className="accent-indigo-500 flex-shrink-0" />
+              <span className={`flex-1 truncate ${isChecked ? "text-gray-900 font-medium" : "text-gray-700"}`}>{c.name}</span>
+              <span className={`text-[9px] px-1 rounded flex-shrink-0 ${isNum ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"}`}>
+                {isNum ? "N" : "C"}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
@@ -359,7 +383,7 @@ export default function SurvivalAdvancedPanel() {
           </label>
           <VarSelect label="Group (optional)" value={lmGroup} onChange={setLmGroup} columns={columns} kinds={["categorical"]} />
         </div>
-        <MultiSelect label="Predictors for Cox (optional)" columns={columns} selected={lmPreds} onChange={setLmPreds} kinds={["numeric"]} />
+        <MultiSelect label="Predictors for Cox (optional)" columns={columns} selected={lmPreds} onChange={setLmPreds} excludeNames={[lmDuration, lmEvent].filter(Boolean)} />
         <div className="flex items-center gap-3">
           <RunButton onClick={handleLandmark} loading={lmLoading} label="Run Landmark" />
           {lmError && <p className="text-xs text-red-500">{lmError}</p>}
