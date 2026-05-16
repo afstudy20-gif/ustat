@@ -364,9 +364,26 @@ export default function Table1Panel() {
 
         {/* Variable selector */}
         <div className="px-3 py-2 border-b border-gray-200 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-            Variables ({selected.size})
-          </h3>
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="accent-indigo-500 flex-shrink-0"
+              ref={(el) => {
+                if (!el) return;
+                const eligibleCount = allCols.filter((c) => c !== groupCol).length;
+                el.indeterminate = selected.size > 0 && selected.size < eligibleCount;
+              }}
+              checked={(() => {
+                const eligibleCount = allCols.filter((c) => c !== groupCol).length;
+                return eligibleCount > 0 && selected.size >= eligibleCount;
+              })()}
+              onChange={(e) => (e.target.checked ? selectAll() : selectNone())}
+              title="Toggle all variables"
+            />
+            <h3 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+              Variables ({selected.size})
+            </h3>
+          </label>
           <div className="flex gap-2">
             <button className="text-[10px] text-indigo-600 hover:text-indigo-700" onClick={selectAll}>All</button>
             <button className="text-[10px] text-indigo-600 hover:text-indigo-700" onClick={selectNone}>None</button>

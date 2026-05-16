@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.25";
-const BUILD = 116;
+const VERSION = "1.9.26";
+const BUILD = 117;
 
 const CHANGELOG = [
+  { ver: "1.9.26", date: "2026-05-16", notes: "Table panel: master tri-state checkbox left of the 'Variables (N)' heading. Clicking it selects all eligible variables when unchecked, clears them all when checked. Shows the indeterminate state when only some are picked, matching the column-selector pattern most users expect from spreadsheet tools. The existing 'All / None' text buttons stay in place." },
   { ver: "1.9.25", date: "2026-05-16", notes: "Compute → Recode: new 'Duplicate' button next to Remove on every rule. Clicking it deep-clones the rule's conditions + result and inserts the copy directly below the original — useful when building parallel cut-points (e.g. AGE<55→1, 55–65→2, 65+→3 where each rule shares the same column and only the bounds change). Beats re-typing every AND condition from scratch." },
   { ver: "1.9.24", date: "2026-05-16", notes: "Fix: 'Save Session' inside the open-new-file modal was downloading the JSON and then ALSO clearing the session, kicking the user back to the splash screen — easily misread as a page refresh / data loss. The modal's intent (save before opening a new file) is now stated by the button label itself ('Session + Open New'), and a dedicated header Save icon (top-right, next to FolderOpen) downloads the session WITHOUT clearing it for the everyday backup case." },
   { ver: "1.9.23", date: "2026-05-16", notes: "Landmark Survival Analysis: 'Predictors for Cox' control now shows ALL columns (numeric AND categorical, with N/C kind badges) and is a checkbox list instead of the native <select multiple> — multi-selection was effectively unusable on macOS without Cmd-click and the numeric-only kinds filter hid SEX/DM/HT/SMOKER. Duration + Event columns are auto-excluded from the predictor list, a 'X selected' counter + Clear shortcut sit on the right of the label." },
