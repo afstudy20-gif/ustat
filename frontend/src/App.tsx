@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 
@@ -125,8 +125,9 @@ function SaveBeforeOpenModal({
             <button
               onClick={() => onSave("json")}
               className="flex-1 btn-primary text-sm py-2"
+              title="Download .json then open a new file"
             >
-              Save Session
+              Session + Open New
             </button>
           </div>
           <button
@@ -314,6 +315,20 @@ export default function App() {
               title={showGrid ? "Hide chart grid lines" : "Show chart grid lines"}
             >
               {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
+            </button>
+            <button
+              onClick={async () => {
+                if (!session) return;
+                try { await triggerSessionDownload(session.session_id, session.filename); }
+                catch (e) {
+                  console.error("Save session failed:", e);
+                  alert(`Save session failed: ${e instanceof Error ? e.message : String(e)}`);
+                }
+              }}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+              title="Save Session (JSON) — downloads only, keeps the session open"
+            >
+              <Save size={16} />
             </button>
             <button
               onClick={handleOpenNew}

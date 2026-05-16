@@ -5,14 +5,14 @@
       "name": "backend",
       "runtimeExecutable": "uvicorn",
       "runtimeArgs": ["main:app", "--reload", "--port", "8000"],
-      "cwd": "/Users/yh/Documents/wiz3/backend",
+      "cwd": "backend",
       "port": 8000
     },
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "cwd": "/Users/yh/Documents/wiz3/frontend",
+      "cwd": "frontend",
       "port": 5173
     }
   ]
