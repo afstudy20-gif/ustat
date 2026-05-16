@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.24";
-const BUILD = 115;
+const VERSION = "1.9.25";
+const BUILD = 116;
 
 const CHANGELOG = [
+  { ver: "1.9.25", date: "2026-05-16", notes: "Compute → Recode: new 'Duplicate' button next to Remove on every rule. Clicking it deep-clones the rule's conditions + result and inserts the copy directly below the original — useful when building parallel cut-points (e.g. AGE<55→1, 55–65→2, 65+→3 where each rule shares the same column and only the bounds change). Beats re-typing every AND condition from scratch." },
   { ver: "1.9.24", date: "2026-05-16", notes: "Fix: 'Save Session' inside the open-new-file modal was downloading the JSON and then ALSO clearing the session, kicking the user back to the splash screen — easily misread as a page refresh / data loss. The modal's intent (save before opening a new file) is now stated by the button label itself ('Session + Open New'), and a dedicated header Save icon (top-right, next to FolderOpen) downloads the session WITHOUT clearing it for the everyday backup case." },
   { ver: "1.9.23", date: "2026-05-16", notes: "Landmark Survival Analysis: 'Predictors for Cox' control now shows ALL columns (numeric AND categorical, with N/C kind badges) and is a checkbox list instead of the native <select multiple> — multi-selection was effectively unusable on macOS without Cmd-click and the numeric-only kinds filter hid SEX/DM/HT/SMOKER. Duration + Event columns are auto-excluded from the predictor list, a 'X selected' counter + Clear shortcut sit on the right of the label." },
   { ver: "1.9.22", date: "2026-05-15", notes: "Fix: column kind overrides (numeric ↔ categorical flips done via the data-tab badge / dictionary) were only stored in client state — save_session re-ran auto-detection on the server and the user's classifications were lost on the next load. Now: new POST /api/sessions/{sid}/kind endpoint persists each flip server-side; store.save_kind_overrides keeps a per-session map; save_session writes them into the JSON under `kind_overrides`; load_session restores them and applies them on top of _detect_kind when rebuilding the columns list (legacy v1.0 files fall back to the kind field on the embedded columns array, so older saves still round-trip). Frontend store.updateColumnKind fires the POST lazily so existing badge clicks now persist with no UX change." },

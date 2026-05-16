@@ -510,6 +510,17 @@ function RecodeTab({
   const addRule = () =>
     setRules((r) => [...r, { conditions: [{ col: firstCol, op: "<", val: "" }], result: "" }]);
 
+  const duplicateRule = (i: number) =>
+    setRules((r) => {
+      const src = r[i];
+      // Deep-copy conditions so edits on the duplicate don't mutate the original.
+      const clone: Rule = {
+        conditions: src.conditions.map((c) => ({ ...c })),
+        result: src.result,
+      };
+      return [...r.slice(0, i + 1), clone, ...r.slice(i + 1)];
+    });
+
   const removeRule = (i: number) => setRules((r) => r.filter((_, idx) => idx !== i));
 
   const addCond = (ri: number) =>
@@ -588,7 +599,21 @@ function RecodeTab({
             <div key={ri} className="border border-gray-200 rounded-lg p-3 space-y-2 bg-gray-50">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-gray-500">Rule {ri + 1}</span>
-                <button onClick={() => removeRule(ri)} className="text-xs text-red-400 hover:text-red-600">✕ Remove</button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => duplicateRule(ri)}
+                    className="text-xs text-indigo-500 hover:text-indigo-700"
+                    title="Duplicate this rule (inserted directly below)"
+                  >
+                    ⧉ Duplicate
+                  </button>
+                  <button
+                    onClick={() => removeRule(ri)}
+                    className="text-xs text-red-400 hover:text-red-600"
+                  >
+                    ✕ Remove
+                  </button>
+                </div>
               </div>
 
               {rule.conditions.map((cond, ci) => {
