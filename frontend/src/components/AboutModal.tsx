@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "1.9.26";
-const BUILD = 117;
+const VERSION = "1.9.27";
+const BUILD = 118;
 
 const CHANGELOG = [
+  { ver: "1.9.27", date: "2026-05-16", notes: "Fix: 'Save As → Excel (.xlsx) / SPSS (.sav) / TSV / CSV' from the Data toolbar appeared to do nothing on production. Root cause: the download used a hidden <iframe> whose src was set to the export endpoint — when the backend returned any error (500, 413, 422) the iframe silently loaded the error HTML into the hidden frame and the user saw no download and no message. Switched both export paths (Data toolbar + the open-new-file modal CSV/XLSX shortcut) to fetch + Blob + anchor click. Errors now surface as a visible alert with the server's detail message. Same-origin so no CORS, no X-Frame-Options interaction. The session.json save was already on this pattern (v1.6.0)." },
   { ver: "1.9.26", date: "2026-05-16", notes: "Table panel: master tri-state checkbox left of the 'Variables (N)' heading. Clicking it selects all eligible variables when unchecked, clears them all when checked. Shows the indeterminate state when only some are picked, matching the column-selector pattern most users expect from spreadsheet tools. The existing 'All / None' text buttons stay in place." },
   { ver: "1.9.25", date: "2026-05-16", notes: "Compute → Recode: new 'Duplicate' button next to Remove on every rule. Clicking it deep-clones the rule's conditions + result and inserts the copy directly below the original — useful when building parallel cut-points (e.g. AGE<55→1, 55–65→2, 65+→3 where each rule shares the same column and only the bounds change). Beats re-typing every AND condition from scratch." },
   { ver: "1.9.24", date: "2026-05-16", notes: "Fix: 'Save Session' inside the open-new-file modal was downloading the JSON and then ALSO clearing the session, kicking the user back to the splash screen — easily misread as a page refresh / data loss. The modal's intent (save before opening a new file) is now stated by the button label itself ('Session + Open New'), and a dedicated header Save icon (top-right, next to FolderOpen) downloads the session WITHOUT clearing it for the everyday backup case." },

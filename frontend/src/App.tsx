@@ -55,22 +55,33 @@ const TABS = [
   { id: "code",        label: "Code",        icon: Terminal },
 ];
 
-/** Download file via hidden iframe — most reliable cross-platform method.
- *  Browser downloads file without navigating away (no SPA state loss). */
-function downloadViaIframe(url: string) {
-  let iframe = document.getElementById("download-iframe") as HTMLIFrameElement | null;
-  if (!iframe) {
-    iframe = document.createElement("iframe");
-    iframe.id = "download-iframe";
-    iframe.style.display = "none";
-    document.body.appendChild(iframe);
+/** Download via fetch + blob + anchor click. Iframe-based downloads swallow
+ *  backend errors silently (the iframe loads the error HTML and nothing
+ *  reaches the user) — this surfaces failures via the catch path. */
+async function downloadViaFetch(url: string, filename: string, mime: string) {
+  const res = await import("./api").then(m => m.default.get(url, { responseType: "blob" }));
+  const ct = (res.headers["content-type"] || "").toString();
+  if (ct.includes("application/json")) {
+    const txt = await (res.data as Blob).text();
+    throw new Error(`Server returned JSON instead of file: ${txt.slice(0, 200)}`);
   }
-  iframe.src = url;
+  const blob = new Blob([res.data], { type: mime });
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
-function triggerDownload(sessionId: string, format: "csv" | "xlsx", originalFilename: string) {
+async function triggerDownload(sessionId: string, format: "csv" | "xlsx", originalFilename: string) {
   const outName = originalFilename.replace(/\.(csv|xlsx|sav|xls|sas7bdat|dta)$/i, "") + `_export.${format}`;
-  downloadViaIframe(`/api/sessions/${sessionId}/export/${format}?filename=${encodeURIComponent(outName)}`);
+  const mime = format === "xlsx"
+    ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    : "text/csv";
+  await downloadViaFetch(`/api/sessions/${sessionId}/export/${format}?filename=${encodeURIComponent(outName)}`, outName, mime);
 }
 
 /** Save Session → fetch JSON as Blob via axios (same-origin) and trigger
@@ -246,13 +257,12 @@ export default function App() {
         setShowSaveModal(false);
         clearSession();
       } else {
-        triggerDownload(session.session_id, fmt, session.filename);
-        // CSV/XLSX go via hidden iframe — give the browser time to start
-        // the download before tearing down the React tree.
-        setTimeout(() => {
-          setShowSaveModal(false);
-          clearSession();
-        }, 3000);
+        // CSV/XLSX go via fetch+blob now (was iframe). Await so failures
+        // surface in the catch block and the React tree stays mounted on
+        // error — clearing the session only after the download completes.
+        await triggerDownload(session.session_id, fmt, session.filename);
+        setShowSaveModal(false);
+        clearSession();
       }
     } catch (e) {
       console.error("Save failed:", e);

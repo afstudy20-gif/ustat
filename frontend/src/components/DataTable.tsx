@@ -836,24 +836,56 @@ export default function DataTable() {
     }
   };
 
-  const triggerIframeDownload = useCallback((url: string) => {
-    let iframe = document.getElementById("download-iframe") as HTMLIFrameElement | null;
-    if (!iframe) {
-      iframe = document.createElement("iframe");
-      iframe.id = "download-iframe";
-      iframe.style.display = "none";
-      document.body.appendChild(iframe);
-    }
-    iframe.src = url;
-  }, []);
-
-  const downloadAs = useCallback((fmt: "csv" | "tsv" | "xlsx" | "sav") => {
-    const base     = (session.filename ?? "data").replace(/\.[^.]+$/, "");
+  const downloadAs = useCallback(async (fmt: "csv" | "tsv" | "xlsx" | "sav") => {
+    const base = (session.filename ?? "data").replace(/\.[^.]+$/, "");
+    // Iframe-based downloads silently swallowed any backend error (500, 413,
+    // 422) — the iframe loaded the error HTML in the hidden frame and the
+    // user saw nothing happen. Switching to fetch + blob + anchor click
+    // surfaces failures via the alert() catch path and avoids the X-Frame /
+    // CSP edge cases that come with iframe loads of API responses.
     const colKinds = encodeURIComponent(JSON.stringify(Object.fromEntries(columns.map((c) => [c.name, c.kind]))));
-    const url      = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}&col_kinds=${colKinds}`;
-    triggerIframeDownload(url);
+    const url = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}&col_kinds=${colKinds}`;
     setShowSaveMenu(false);
-  }, [session.session_id, session.filename, columns, triggerIframeDownload]);
+    try {
+      const res = await api.get(url, { responseType: "blob" });
+      // Backend may return a JSON error body with the same 200 envelope on
+      // some misconfigurations — sniff the content-type and bail if so.
+      const ct = (res.headers["content-type"] || "").toString();
+      if (ct.includes("application/json")) {
+        const txt = await (res.data as Blob).text();
+        throw new Error(`Server returned JSON instead of ${fmt.toUpperCase()}: ${txt.slice(0, 200)}`);
+      }
+      const ext = fmt;
+      const mime = fmt === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                 : fmt === "sav"  ? "application/x-spss-sav"
+                 : fmt === "tsv"  ? "text/tab-separated-values"
+                 : "text/csv";
+      const blob = new Blob([res.data], { type: mime });
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `${base}.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    } catch (e: any) {
+      // Try to extract the server's detail message from a Blob-typed error body.
+      let detail = e?.message ?? String(e);
+      const blobBody = e?.response?.data;
+      if (blobBody instanceof Blob) {
+        try {
+          const txt = await blobBody.text();
+          const parsed = JSON.parse(txt);
+          detail = parsed?.detail ?? txt.slice(0, 200);
+        } catch {
+          // not JSON, leave detail as-is
+        }
+      }
+      console.error(`Export as ${fmt} failed:`, e);
+      alert(`Export as ${fmt.toUpperCase()} failed: ${detail}`);
+    }
+  }, [session.session_id, session.filename, columns]);
 
   const downloadSession = useCallback(async () => {
     try {
