@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+title: "uSTAT — Browser-based Statistical Analysis Platform"
+message: "If you use uSTAT in your research, please cite it as below."
+type: software
+authors:
+  - given-names: Yusuf
+    family-names: Hoşoğlu
+    email: contact@drtr.uk
+    affiliation: Department of Cardiology, Diyarbakır Gazi Yaşargil Training and Research Hospital
+repository-code: "https://github.com/afstudy20-gif/wiz3"
+url: "https://ustat.drtr.uk"
+abstract: >-
+  uSTAT is a free, browser-based statistical analysis platform aimed at
+  clinicians, biostatisticians, and medical researchers. It provides
+  hypothesis tests, regression (GLM/Cox/RCS), survival analysis, propensity
+  score matching with Austin 2011 gold-standard diagnostics, method
+  agreement, ROC + decision-curve analysis, Table 1, power calculations,
+  and reproducible session round-trip — all running in memory on the
+  server with a 30-minute TTL and no persistent storage.
+keywords:
+  - biostatistics
+  - clinical-statistics
+  - epidemiology
+  - survival-analysis
+  - propensity-score-matching
+  - restricted-cubic-splines
+  - cox-regression
+  - kaplan-meier
+  - logistic-regression
+  - ROC
+  - decision-curve-analysis
+  - hypothesis-testing
+  - data-analysis
+  - python
+  - fastapi
+  - react
+license: "Other (Proprietary — see LICENSE)"
+version: "1.9.27"
+date-released: "2026-05-16"
+preferred-citation:
+  type: software
+  title: "uSTAT — Browser-based Statistical Analysis Platform"
+  authors:
+    - given-names: Yusuf
+      family-names: Hoşoğlu
+  year: 2026
+  url: "https://ustat.drtr.uk"
+  repository-code: "https://github.com/afstudy20-gif/wiz3"

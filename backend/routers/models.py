@@ -26,6 +26,33 @@ def _get_df(session_id: str) -> pd.DataFrame:
     return df
 
 
+def _compute_vif(X: pd.DataFrame) -> dict:
+    """Variance Inflation Factor per column of the design matrix X.
+
+    Excludes the intercept ('const' column) from the calculation. Returns
+    {column_name: vif_float} so callers can splice into their coefficient
+    rows. VIF > 5 ≈ moderate multicollinearity, > 10 ≈ severe.
+    """
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+    Xn = X.copy().astype(float)
+    if "const" in Xn.columns:
+        Xn = Xn.drop(columns=["const"])
+    if Xn.shape[1] < 2:
+        # VIF undefined for a single predictor — no other column to regress on.
+        return {c: 1.0 for c in Xn.columns}
+    arr = Xn.values
+    out: dict = {}
+    for i, col in enumerate(Xn.columns):
+        try:
+            v = float(variance_inflation_factor(arr, i))
+            if not np.isfinite(v):
+                v = None  # perfect collinearity → inf
+        except Exception:
+            v = None
+        out[str(col)] = v
+    return out
+
+
 # ── Linear Regression ────────────────────────────────────────────────────────
 
 class LinearRequest(BaseModel):
@@ -48,6 +75,7 @@ def linear_regression(req: LinearRequest):
     base = sm.OLS(y, X)
     model = base.fit(cov_type="HC3", use_t=True) if req.robust_se else base.fit()
 
+    vifs = _compute_vif(X)
     coefs = []
     ci = model.conf_int()
     for var in model.params.index:
@@ -59,6 +87,7 @@ def linear_regression(req: LinearRequest):
             "p": float(model.pvalues[var]),
             "ci_low": float(ci.loc[var, 0]),
             "ci_high": float(ci.loc[var, 1]),
+            "vif": vifs.get(str(var)),  # None for intercept
         })
 
     # ── Predictor metadata for the interactive prediction panel ──────────────
@@ -256,6 +285,7 @@ def logistic_regression(req: LogisticRequest):
     model = sm.Logit(y, X_const).fit(disp=False, cov_type=cov_type)
 
     # ── Variables in the Equation (B, SE, Wald, df, Sig, Exp(B), CI) ──
+    vifs = _compute_vif(X_const)
     coefs = []
     ci = model.conf_int()
     for var in model.params.index:
@@ -275,6 +305,7 @@ def logistic_regression(req: LogisticRequest):
             "z": z_val,
             "or_ci_low": float(np.exp(ci.loc[var, 0])),
             "or_ci_high": float(np.exp(ci.loc[var, 1])),
+            "vif": vifs.get(str(var)),
         })
 
     # ── SPSS-style Model-Level Statistics ──
@@ -444,6 +475,7 @@ def poisson_regression(req: PoissonRequest):
     cov_type = "HC3" if req.robust_se else "nonrobust"
     model = sm.GLM(y, X, family=sm.families.Poisson()).fit(cov_type=cov_type)
     ci = model.conf_int()
+    vifs = _compute_vif(X)
     coefs = []
     for var in model.params.index:
         est = float(model.params[var])
@@ -458,6 +490,7 @@ def poisson_regression(req: PoissonRequest):
             "ci_high": float(ci.loc[var, 1]),
             "irr_ci_low":  float(np.exp(ci.loc[var, 0])),
             "irr_ci_high": float(np.exp(ci.loc[var, 1])),
+            "vif": vifs.get(str(var)),
         })
     return {
         "model": f"Poisson Regression{' [Robust SE]' if req.robust_se else ''}",
@@ -950,10 +983,13 @@ def cox_regression(req: CoxRequest):
         raise HTTPException(status_code=400, detail=f"Cox fitting error: {exc}")
 
     summary = cph.summary.reset_index()
+    # VIF computed on the encoded predictor matrix (no intercept by design).
+    vifs = _compute_vif(enc)
     coefs = []
     for _, row in summary.iterrows():
+        name = str(row["covariate"])
         coefs.append({
-            "variable": row["covariate"],
+            "variable": name,
             "log_hr": _safe_float(row["coef"]),
             "hr": _safe_float(row["exp(coef)"]),
             "se": _safe_float(row["se(coef)"]),
@@ -961,7 +997,38 @@ def cox_regression(req: CoxRequest):
             "p": _safe_float(row["p"]),
             "hr_ci_low": _safe_float(row["exp(coef) lower 95%"]),
             "hr_ci_high": _safe_float(row["exp(coef) upper 95%"]),
+            "vif": vifs.get(name),
         })
+
+    # Schoenfeld proportional-hazards test — auto-attach so users don't have to
+    # navigate to the diagnostics tab to find out their PH assumption status.
+    ph_test = None
+    try:
+        from lifelines.statistics import proportional_hazard_test
+        ph_res = proportional_hazard_test(cph, fit_df, time_transform="rank")
+        ph_summary = ph_res.summary.reset_index() if hasattr(ph_res.summary, "reset_index") else ph_res.summary
+        per_term = []
+        for _, row in ph_summary.iterrows():
+            per_term.append({
+                "variable": str(row.get("index", row.get("covariate", ""))),
+                "test_stat": _safe_float(row.get("test_statistic")),
+                "p": _safe_float(row.get("p")),
+            })
+        # Global PH test: combine per-term χ² (sum), df = number of covariates.
+        from scipy.stats import chi2 as _chi2
+        chi_vals = [t["test_stat"] for t in per_term if t["test_stat"] is not None]
+        if chi_vals:
+            global_chi = float(sum(chi_vals))
+            global_df = len(chi_vals)
+            global_p = float(1 - _chi2.cdf(global_chi, global_df)) if global_df > 0 else None
+        else:
+            global_chi, global_df, global_p = None, None, None
+        ph_test = {
+            "global": {"chi2": global_chi, "df": global_df, "p": global_p},
+            "per_term": per_term,
+        }
+    except Exception as exc:
+        ph_test = {"error": str(exc)}
 
     return {
         "model": "Cox Proportional Hazards",
@@ -973,6 +1040,7 @@ def cox_regression(req: CoxRequest):
         "concordance": _safe_float(cph.concordance_index_),
         "coefficients": coefs,
         "interactions_used": interaction_cols,
+        "ph_test": ph_test,
     }
 
 
@@ -2103,6 +2171,7 @@ def gamma_regression(req: GammaRequest):
     model = sm.GLM(y, X, family=family).fit(cov_type=cov_type)
     ci = model.conf_int()
 
+    vifs = _compute_vif(X)
     coefs = []
     for var in model.params.index:
         b = float(model.params[var])
@@ -2115,6 +2184,7 @@ def gamma_regression(req: GammaRequest):
             "p": float(model.pvalues[var]),
             "ci_low": float(ci.loc[var, 0]),
             "ci_high": float(ci.loc[var, 1]),
+            "vif": vifs.get(str(var)),
         })
 
     return {
@@ -2164,6 +2234,7 @@ def negative_binomial_regression(req: NegBinomRequest):
         alpha_est = 1.0
     model = sm.GLM(y, X, family=sm.families.NegativeBinomial(alpha=alpha_est)).fit(cov_type=cov_type)
     ci = model.conf_int()
+    vifs = _compute_vif(X)
 
     coefs = []
     for var in model.params.index:
@@ -2179,6 +2250,7 @@ def negative_binomial_regression(req: NegBinomRequest):
             "ci_high": float(ci.loc[var, 1]),
             "irr_ci_low":  float(np.exp(ci.loc[var, 0])),
             "irr_ci_high": float(np.exp(ci.loc[var, 1])),
+            "vif": vifs.get(str(var)),
         })
 
     return {

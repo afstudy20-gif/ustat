@@ -573,8 +573,25 @@ def roc_analysis(req: ROCRequest):
     indices = list(range(0, n_pts, step))
     if (n_pts - 1) not in indices:
         indices.append(n_pts - 1)
-    curve = [{"fpr": round(float(fpr[i]), 6), "tpr": round(float(tpr[i]), 6),
-               "threshold": round(float(thresholds[i]), 6)} for i in indices]
+    # Each curve point now carries the full clinical diagnostic table
+    # (sens / spec / PPV / NPV / LR+ / LR-) so the UI can render an interactive
+    # threshold-table without a second round-trip.
+    curve = []
+    for i in indices:
+        thr = float(thresholds[i])
+        m = _roc_metrics_at_cutoff(scores_arr, y_arr, thr)
+        curve.append({
+            "fpr": round(float(fpr[i]), 6),
+            "tpr": round(float(tpr[i]), 6),
+            "threshold": round(thr, 6),
+            "sensitivity": m["sensitivity"],
+            "specificity": m["specificity"],
+            "ppv": m["ppv"],
+            "npv": m["npv"],
+            "lr_pos": m["lr_pos"],
+            "lr_neg": m["lr_neg"],
+            "youden_j": m["youden_j"],
+        })
 
     return _sanitize({
         "test": "ROC Analysis",
@@ -1790,6 +1807,105 @@ def cohens_kappa(req: KappaRequest):
         "interpretation": interp,
         "labels": labels,
         "confusion_matrix": cm.tolist(),
+    }
+
+
+# ── Fleiss κ (≥3 raters) ───────────────────────────────────────────────────────
+
+class FleissKappaRequest(BaseModel):
+    session_id: str
+    rater_cols: List[str]  # ≥3 raters
+
+
+@router.post("/fleiss_kappa")
+def fleiss_kappa_endpoint(req: FleissKappaRequest):
+    """Fleiss κ for 3+ raters on a nominal/ordinal categorical outcome.
+
+    Each rater column must contain the same set of categories. The aggregate
+    table is N × k where N = subjects, k = categories. Each cell = number of
+    raters assigning that category to that subject.
+
+    Reports overall κ + per-category κ (a.k.a. PABAK / category-specific
+    agreement) + Landis-Koch interpretation.
+    """
+    from statsmodels.stats.inter_rater import fleiss_kappa, aggregate_raters
+    if len(req.rater_cols) < 3:
+        raise HTTPException(status_code=422, detail="Fleiss κ requires ≥3 raters. Use Cohen's κ for 2 raters.")
+    df = _get_df(req.session_id).dropna(subset=req.rater_cols)
+    if len(df) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 subjects with complete ratings across all raters.")
+
+    raters = df[req.rater_cols].astype(str).values  # shape (N, n_raters)
+    table, categories = aggregate_raters(raters)  # table shape (N, k_categories)
+
+    kappa = float(fleiss_kappa(table, method="fleiss"))
+    # Standard error per Fleiss 1971: SE(κ) ≈ √(2/[Nn(n-1)]) under H₀=chance,
+    # but Conger 1980 derived the proper SE. statsmodels has no SE; use the
+    # asymptotic SE formula from Fleiss 1971 (chance-corrected, OK as 95% CI).
+    n_subjects, k_cats = table.shape
+    n_raters = int(table.sum(axis=1).mean())
+    p_j = table.sum(axis=0) / (n_subjects * n_raters)
+    p_e = float(np.sum(p_j ** 2))
+    if (1 - p_e) > 0 and n_subjects > 0 and n_raters > 1:
+        var_k = 2.0 / (n_subjects * n_raters * (n_raters - 1) * (1 - p_e) ** 2) * (
+            p_e - (2 * n_raters - 3) * p_e ** 2 + 2 * (n_raters - 2) * float(np.sum(p_j ** 3))
+        )
+        se = float(np.sqrt(max(var_k, 0.0)))
+    else:
+        se = 0.0
+    ci_low = float(kappa - 1.96 * se)
+    ci_high = float(kappa + 1.96 * se)
+
+    # Landis & Koch interpretation
+    if kappa >= 0.81:
+        interp = "Almost Perfect"
+    elif kappa >= 0.61:
+        interp = "Substantial"
+    elif kappa >= 0.41:
+        interp = "Moderate"
+    elif kappa >= 0.21:
+        interp = "Fair"
+    elif kappa >= 0.0:
+        interp = "Slight"
+    else:
+        interp = "Poor (< chance)"
+
+    # Per-category κ (Fleiss 1971, eq. 12 — proportion of agreement above chance for each category)
+    per_category = []
+    for j, cat in enumerate(categories):
+        # κ_j = (p_jbar - p_j²) / (p_j (1 - p_j))
+        p_j_val = float(p_j[j])
+        # p_jbar = mean agreement on category j across subjects
+        # using sum_i n_ij(n_ij - 1) / sum_i n_i(n_i - 1)
+        num = float(np.sum(table[:, j] * (table[:, j] - 1)))
+        den = float(np.sum(table.sum(axis=1) * (table.sum(axis=1) - 1)))
+        p_jbar = num / den if den > 0 else 0.0
+        if p_j_val > 0 and p_j_val < 1:
+            kj = (p_jbar - p_j_val ** 2) / (p_j_val * (1 - p_j_val))
+        else:
+            kj = None
+        per_category.append({
+            "category": str(cat),
+            "kappa": round(kj, 4) if kj is not None else None,
+            "prevalence": round(p_j_val, 4),
+        })
+
+    return {
+        "test": "Fleiss' κ",
+        "kappa": round(kappa, 4),
+        "ci_low": round(ci_low, 4),
+        "ci_high": round(ci_high, 4),
+        "se": round(se, 4),
+        "n_subjects": int(n_subjects),
+        "n_raters": int(n_raters),
+        "n_categories": int(k_cats),
+        "categories": [str(c) for c in categories],
+        "per_category": per_category,
+        "interpretation": interp,
+        "result_text": (
+            f"Fleiss' κ for {n_raters} raters on {n_subjects} subjects = {kappa:.3f} "
+            f"(95% CI {ci_low:.3f} to {ci_high:.3f}) — {interp.lower()} agreement (Landis & Koch)."
+        ),
     }
 
 

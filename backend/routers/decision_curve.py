@@ -25,6 +25,67 @@ def _p_str(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.4f}"
 
 
+def _hosmer_lemeshow(y: np.ndarray, probs: np.ndarray, n_groups: int = 10) -> dict:
+    """Hosmer-Lemeshow goodness-of-fit test.
+
+    Bins observations by deciles of predicted probability (default g=10).
+    χ² = Σ (O_g − E_g)² / [E_g (1 − E_g/n_g)]
+    df = g − 2
+    p > 0.05 ⇒ model fits the data (failure to reject good-fit null).
+
+    Returns dict with chi2, df, p, n_groups_used, and the per-group table
+    (predicted mean, observed events, expected events, n).
+    """
+    from scipy.stats import chi2 as _chi2
+
+    y = np.asarray(y, dtype=float)
+    probs = np.asarray(probs, dtype=float)
+    n = len(probs)
+    if n < n_groups * 2:
+        # Not enough data; cap groups so each bin has ≥ 2 observations.
+        n_groups = max(2, min(n_groups, n // 2))
+
+    # Sort by predicted probability, then bin into equal-sized groups.
+    order = np.argsort(probs)
+    y_s = y[order]
+    p_s = probs[order]
+    # Use np.array_split for near-equal bin sizes even when n is not divisible.
+    idx_split = np.array_split(np.arange(n), n_groups)
+
+    chi2_val = 0.0
+    groups = []
+    used_groups = 0
+    for idx_arr in idx_split:
+        if len(idx_arr) == 0:
+            continue
+        used_groups += 1
+        obs = float(y_s[idx_arr].sum())
+        exp = float(p_s[idx_arr].sum())
+        ng = int(len(idx_arr))
+        # Denominator zero-guard: if expected events are 0 OR equal to n_g
+        # (everyone perfectly predicted), the bin's contribution to χ² is 0.
+        denom = exp * (1 - exp / ng) if ng > 0 else 0.0
+        if denom > 0:
+            chi2_val += (obs - exp) ** 2 / denom
+        groups.append({
+            "predicted_mean": round(float(p_s[idx_arr].mean()), 4),
+            "observed_events": int(obs),
+            "expected_events": round(exp, 4),
+            "n": ng,
+        })
+
+    df_val = max(used_groups - 2, 1)
+    p_val = float(1 - _chi2.cdf(chi2_val, df_val))
+    return {
+        "chi2": round(chi2_val, 4),
+        "df": df_val,
+        "p": p_val,
+        "n_groups": used_groups,
+        "interpretation": "Good fit (p > 0.05)" if p_val > 0.05 else "Poor fit (p ≤ 0.05) — model misspecified",
+        "groups": groups,
+    }
+
+
 def _fit_logistic(df: pd.DataFrame, outcome: str, predictors: List[str]):
     """Fit logistic regression and return model + predicted probabilities."""
     X = pd.get_dummies(df[predictors], drop_first=True).astype(float)
@@ -131,11 +192,15 @@ def calibration(req: CalibrationRequest):
 
     # ── Result text ────────────────────────────────────────────────────────
     slope_interp = "well-calibrated" if 0.8 <= cal_slope <= 1.2 else ("overfitting" if cal_slope < 0.8 else "underfitting")
+    # Hosmer-Lemeshow goodness-of-fit test (deciles).
+    hl = _hosmer_lemeshow(y, probs, n_groups=10)
+
     result_text = (
         f"Calibration analysis of {req.outcome} predicted by {', '.join(req.predictors)} "
         f"(n = {len(df)}, {n_excluded} excluded). "
         f"Calibration slope = {cal_slope}, intercept = {cal_intercept} ({slope_interp}). "
-        f"E/O ratio = {eo_ratio}. Brier score = {brier}."
+        f"E/O ratio = {eo_ratio}. Brier score = {brier}. "
+        f"Hosmer-Lemeshow χ²({hl['df']}) = {hl['chi2']}, p = {_p_str(hl['p'])}."
     )
     if c_stat is not None:
         result_text += f" C-statistic (AUC) = {c_stat}."
@@ -149,6 +214,7 @@ def calibration(req: CalibrationRequest):
         "calibration_intercept": cal_intercept,
         "eo_ratio": eo_ratio,
         "brier_score": brier,
+        "hosmer_lemeshow": hl,
         "c_statistic": c_stat,
         "n": len(df),
         "n_excluded": n_excluded,
@@ -191,6 +257,50 @@ def _wilson_ci(k: int, n: int, alpha: float = 0.05) -> tuple:
 # ═══════════════════════════════════════════════════════════════════════════════
 # 2. DECISION CURVE ANALYSIS
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 1b. HOSMER-LEMESHOW (standalone)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class HLRequest(BaseModel):
+    session_id: str
+    outcome: str
+    predictors: List[str]
+    n_groups: int = 10
+    imputation: str = "listwise"
+
+
+@router.post("/hosmer_lemeshow")
+def hosmer_lemeshow_endpoint(req: HLRequest):
+    """Standalone Hosmer-Lemeshow goodness-of-fit for a logistic model.
+
+    Fits the logistic model from the predictors, bins predicted probabilities
+    into n_groups deciles, returns χ²/df/p plus the per-group observed vs
+    expected table. p > 0.05 ⇒ model fits.
+    """
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation)
+    n_excluded = n_total - len(df)
+
+    if len(df) < req.n_groups * 2:
+        raise HTTPException(400, f"Need at least {req.n_groups * 2} complete observations for an H-L test with {req.n_groups} groups.")
+
+    _, _, y, probs = _fit_logistic(df, req.outcome, req.predictors)
+    hl = _hosmer_lemeshow(y, probs, n_groups=req.n_groups)
+    return {
+        "test": "Hosmer-Lemeshow Goodness-of-Fit",
+        **hl,
+        "n": int(len(df)),
+        "n_excluded": int(n_excluded),
+        "outcome": req.outcome,
+        "predictors": req.predictors,
+        "result_text": (
+            f"Hosmer-Lemeshow χ²({hl['df']}) = {hl['chi2']}, p = {_p_str(hl['p'])}. "
+            f"{hl['interpretation']}."
+        ),
+    }
+
 
 class DCARequest(BaseModel):
     session_id: str
