@@ -382,6 +382,19 @@ export default function DataTable() {
   const [dragIdx,  setDragIdx]  = useState<number | null>(null);
   const [dropIdx,  setDropIdx]  = useState<number | null>(null);
 
+  // Frozen (pinned-left) columns. `#` row-number column is always pinned.
+  // `frozenCount` = number of leading data columns to freeze.
+  const [frozenCount, setFrozenCount] = useState(0);
+  const HASH_COL_W = 40;       // width of `#` column (matches w-10)
+  const FROZEN_COL_W = 150;    // forced width per frozen data column
+  const frozenLeft = (colIdx: number) => HASH_COL_W + colIdx * FROZEN_COL_W;
+  const isFrozenCol = (colIdx: number) => colIdx < frozenCount;
+  // Clamp frozenCount when columns are deleted
+  useEffect(() => {
+    const n = session?.columns.length ?? 0;
+    setFrozenCount((c) => Math.min(c, n));
+  }, [session?.columns.length]);
+
   // Column rename
   const [renameCol, setRenameCol] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
@@ -991,6 +1004,33 @@ export default function DataTable() {
             ↪ Redo
           </button>
 
+          <div className="w-px h-5 bg-gray-200" />
+
+          {/* Freeze (pin-left) columns */}
+          <div className="flex items-center gap-0.5 text-xs">
+            <span className="text-gray-500 mr-1" title="Freeze leading columns so they stay visible while scrolling right">❄ Freeze</span>
+            <button
+              onClick={() => setFrozenCount((n) => Math.max(0, n - 1))}
+              disabled={frozenCount === 0}
+              title="Freeze one fewer column"
+              className={`w-6 h-6 rounded border transition-colors flex items-center justify-center ${frozenCount > 0 ? "text-gray-600 border-gray-300 hover:bg-gray-100" : "text-gray-300 border-gray-200 cursor-default"}`}
+            >−</button>
+            <span className="w-6 text-center font-medium text-gray-700">{frozenCount}</span>
+            <button
+              onClick={() => setFrozenCount((n) => Math.min(columns.length, n + 1))}
+              disabled={frozenCount >= columns.length}
+              title="Freeze one more column"
+              className={`w-6 h-6 rounded border transition-colors flex items-center justify-center ${frozenCount < columns.length ? "text-gray-600 border-gray-300 hover:bg-gray-100" : "text-gray-300 border-gray-200 cursor-default"}`}
+            >+</button>
+            {frozenCount > 0 && (
+              <button
+                onClick={() => setFrozenCount(0)}
+                title="Unfreeze all"
+                className="ml-1 text-[10px] text-orange-600 hover:text-orange-700 border border-orange-300 rounded px-1.5 py-0.5"
+              >✕</button>
+            )}
+          </div>
+
           {sortCol && (
             <button
               onClick={() => setSortCol(null)}
@@ -1129,23 +1169,33 @@ export default function DataTable() {
 
             {/* Column headers */}
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="px-3 py-2 text-left text-gray-400 text-xs font-normal w-10 border-r border-gray-200 select-none">
+              <th
+                className="px-3 py-2 text-left text-gray-400 text-xs font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
+                style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
+              >
                 #
               </th>
               {columns.map((col, colIdx) => {
                 const isSorted = sortCol === col.name;
                 const nMissing = missingCounts[col.name] ?? 0;
                 const isDragOver = dropIdx === colIdx && dragIdx !== colIdx;
+                const frozen = isFrozenCol(colIdx);
+                const draggable = !frozen && renameCol !== col.name;
                 return (
                   <th
                     key={col.name}
-                    draggable={renameCol !== col.name}
+                    draggable={draggable}
                     onDragStart={(e) => {
+                      if (!draggable) { e.preventDefault(); return; }
                       setDragIdx(colIdx);
                       e.dataTransfer.effectAllowed = "move";
                       e.dataTransfer.setData("text/plain", String(colIdx));
                     }}
                     onDragOver={(e) => {
+                      // Block dropping unfrozen → frozen region and vice versa
+                      if (dragIdx === null) return;
+                      const srcFrozen = isFrozenCol(dragIdx);
+                      if (srcFrozen !== frozen) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = "move";
                       setDropIdx(colIdx);
@@ -1153,16 +1203,20 @@ export default function DataTable() {
                     onDragLeave={() => { if (dropIdx === colIdx) setDropIdx(null); }}
                     onDrop={(e) => {
                       e.preventDefault();
-                      if (dragIdx !== null && dragIdx !== colIdx) { reorderColumns(dragIdx, colIdx); }
+                      if (dragIdx !== null && dragIdx !== colIdx && isFrozenCol(dragIdx) === frozen) {
+                        reorderColumns(dragIdx, colIdx);
+                      }
                       setDragIdx(null);
                       setDropIdx(null);
                     }}
                     onDragEnd={() => { setDragIdx(null); setDropIdx(null); }}
                     onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
-                    className={`px-2 py-2 border-r border-gray-200 min-w-[130px] max-w-[200px]
-                      ${renameCol === col.name ? "" : "cursor-grab active:cursor-grabbing select-none"}
+                    className={`px-2 py-2 border-r border-gray-200
+                      ${frozen ? "sticky bg-gray-50 z-20" : "min-w-[130px] max-w-[200px]"}
+                      ${renameCol === col.name || frozen ? "" : "cursor-grab active:cursor-grabbing select-none"}
                       ${dragIdx === colIdx ? "opacity-40" : ""}
                       ${isDragOver ? "border-l-2 border-l-indigo-500" : ""}`}
+                    style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                   >
                     <div className="flex items-center gap-1 justify-between">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -1223,20 +1277,30 @@ export default function DataTable() {
             {/* Filter row */}
             {showFilters && (
               <tr className="bg-gray-50 border-b border-gray-200">
-                <td className="border-r border-gray-200" />
-                {columns.map((col) => (
-                  <td key={col.name} className="px-1.5 py-1 border-r border-gray-200">
-                    <input
-                      className="w-full bg-white border border-gray-300 rounded px-2 py-0.5 text-xs text-gray-700
-                        placeholder-gray-300 focus:outline-none focus:border-indigo-400"
-                      placeholder="filter…"
-                      value={filters[col.name] ?? ""}
-                      onChange={(e) =>
-                        setFilters((prev) => ({ ...prev, [col.name]: e.target.value }))
-                      }
-                    />
-                  </td>
-                ))}
+                <td
+                  className="border-r border-gray-200 sticky left-0 bg-gray-50 z-20"
+                  style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
+                />
+                {columns.map((col, colIdx) => {
+                  const frozen = isFrozenCol(colIdx);
+                  return (
+                    <td
+                      key={col.name}
+                      className={`px-1.5 py-1 border-r border-gray-200 ${frozen ? "sticky bg-gray-50 z-20" : ""}`}
+                      style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
+                    >
+                      <input
+                        className="w-full bg-white border border-gray-300 rounded px-2 py-0.5 text-xs text-gray-700
+                          placeholder-gray-300 focus:outline-none focus:border-indigo-400"
+                        placeholder="filter…"
+                        value={filters[col.name] ?? ""}
+                        onChange={(e) =>
+                          setFilters((prev) => ({ ...prev, [col.name]: e.target.value }))
+                        }
+                      />
+                    </td>
+                  );
+                })}
               </tr>
             )}
           </thead>
@@ -1247,20 +1311,22 @@ export default function DataTable() {
               return (
                 <tr
                   key={origIdx}
-                  className="border-t border-gray-100 hover:bg-gray-50 transition-colors"
+                  className="group border-t border-gray-100 hover:bg-gray-50 transition-colors"
                 >
                   <td
-                    className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu"
+                    className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
+                    style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
                     onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
                   >
                     {origIdx + 1}
                   </td>
 
-                  {columns.map((col) => {
+                  {columns.map((col, colIdx) => {
                     const isEditing = editCell?.rowIdx === origIdx && editCell?.col === col.name;
                     const cellVal   = row[col.name];
                     const isNull    = cellVal === null || cellVal === undefined;
                     const isSel     = selectedCells.has(cellKey(origIdx, col.name));
+                    const frozen    = isFrozenCol(colIdx);
 
                     return (
                       <td
@@ -1287,13 +1353,15 @@ export default function DataTable() {
                           setCellCtx({ x: e.clientX, y: e.clientY, row: origIdx, col: col.name });
                         }}
                         className={`border-r border-gray-200 font-mono text-xs transition-colors
+                          ${frozen ? "sticky z-10 group-hover:bg-gray-50" : ""}
                           ${isEditing
                             ? "p-0 bg-indigo-50"
                             : isSel
                               ? "px-3 py-1.5 cursor-pointer bg-blue-100 outline outline-1 outline-blue-400"
                               : isNull
                                 ? "px-3 py-1.5 cursor-pointer bg-amber-50/60 hover:bg-amber-100/60"
-                                : "px-3 py-1.5 cursor-pointer hover:bg-indigo-50/50"}`}
+                                : `px-3 py-1.5 cursor-pointer hover:bg-indigo-50/50 ${frozen ? "bg-white" : ""}`}`}
+                        style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                       >
                         {isEditing ? (
                           <input
@@ -1411,6 +1479,22 @@ export default function DataTable() {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ➡️ Send to end
           </button>
+          <button
+            onClick={() => {
+              const idx = columns.findIndex((c) => c.name === ctxMenu.col);
+              if (idx >= 0) setFrozenCount(idx + 1);
+              setCtxMenu(null);
+            }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ❄ Freeze up to here
+          </button>
+          {frozenCount > 0 && (
+            <button
+              onClick={() => { setFrozenCount(0); setCtxMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              ❄ Unfreeze all
+            </button>
+          )}
           <div className="border-t border-gray-100 mt-0.5" />
           <button onClick={() => { const idx = columns.findIndex((c) => c.name === ctxMenu.col); setCtxMenu(null); addColumn(idx); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
