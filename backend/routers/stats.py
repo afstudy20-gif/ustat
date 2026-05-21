@@ -1288,15 +1288,29 @@ def table1(req: Table1Request):
                 except Exception:
                     p_value_str = "N/A"
 
-            # SMD (Standardized Mean Difference) — only for 2-group comparisons
+            # SMD (Standardized Mean Difference).
+            # For 2 groups we report the standard Cohen's d (mean difference /
+            # pooled SD). For k>2 groups we follow Austin 2011 / Yang-Dalton
+            # 2012 and report the MAXIMUM pairwise SMD — the most conservative
+            # measure of between-group imbalance for multi-arm Table 1.
             smd_val: Optional[float] = None
-            if groups is not None and len(group_arrs) == 2:
+            if groups is not None and len(group_arrs) >= 2:
                 try:
-                    g1, g2 = group_arrs[0], group_arrs[1]
-                    if len(g1) > 0 and len(g2) > 0:
-                        pooled_std = np.sqrt((g1.var(ddof=1) + g2.var(ddof=1)) / 2)
-                        if pooled_std > 0:
-                            smd_val = round(float(abs(g1.mean() - g2.mean()) / pooled_std), 4)
+                    def _smd_num_pair(g1, g2) -> Optional[float]:
+                        if len(g1) == 0 or len(g2) == 0:
+                            return None
+                        ps = np.sqrt((g1.var(ddof=1) + g2.var(ddof=1)) / 2)
+                        if not np.isfinite(ps) or ps <= 0:
+                            return None
+                        return float(abs(g1.mean() - g2.mean()) / ps)
+                    from itertools import combinations as _comb
+                    pair_smds = []
+                    for i, j in _comb(range(len(group_arrs)), 2):
+                        s = _smd_num_pair(group_arrs[i], group_arrs[j])
+                        if s is not None:
+                            pair_smds.append(s)
+                    if pair_smds:
+                        smd_val = round(max(pair_smds), 4)
                 except Exception:
                     pass
 
@@ -1350,23 +1364,25 @@ def table1(req: Table1Request):
                 except Exception:
                     p_val = "N/A"
 
-            # SMD for categorical (proportion difference / pooled SE) — 2-group only
+            # SMD for categorical. 2-group uses Cohen's-style proportion SMD
+            # (binary) or Yang-Dalton 2012 multinomial SMD; k>2 groups report
+            # the MAXIMUM pairwise value (Austin 2011 convention).
             cat_smd: Optional[float] = None
-            if groups is not None and len(groups) == 2:
+            if groups is not None and len(groups) >= 2:
                 try:
-                    g1_s = df[df[req.group_column] == groups[0]][var].astype(str)
-                    g2_s = df[df[req.group_column] == groups[1]][var].astype(str)
-                    all_cats = sorted(set(g1_s.dropna()) | set(g2_s.dropna()))
-                    if len(all_cats) == 2:
-                        # Binary: use simple proportion SMD
-                        target = all_cats[0]
-                        p1 = (g1_s == target).mean()
-                        p2 = (g2_s == target).mean()
-                        pooled = np.sqrt((p1 * (1 - p1) + p2 * (1 - p2)) / 2)
-                        if pooled > 0:
-                            cat_smd = round(float(abs(p1 - p2) / pooled), 4)
-                    elif len(all_cats) > 2:
-                        # Multi-category: Mahalanobis-like SMD (Yang & Dalton 2012)
+                    def _smd_cat_pair(g1_s: pd.Series, g2_s: pd.Series) -> Optional[float]:
+                        all_cats = sorted(set(g1_s.dropna()) | set(g2_s.dropna()))
+                        if len(all_cats) < 2:
+                            return None
+                        if len(all_cats) == 2:
+                            target = all_cats[0]
+                            p1 = (g1_s == target).mean()
+                            p2 = (g2_s == target).mean()
+                            pooled = np.sqrt((p1 * (1 - p1) + p2 * (1 - p2)) / 2)
+                            if pooled <= 0:
+                                return None
+                            return float(abs(p1 - p2) / pooled)
+                        # Yang-Dalton 2012 multinomial SMD
                         p1_vec = np.array([(g1_s == c).mean() for c in all_cats[:-1]])
                         p2_vec = np.array([(g2_s == c).mean() for c in all_cats[:-1]])
                         s1 = np.diag(p1_vec * (1 - p1_vec))
@@ -1374,8 +1390,18 @@ def table1(req: Table1Request):
                         s_pool = (s1 + s2) / 2
                         diff = p1_vec - p2_vec
                         det = np.linalg.det(s_pool)
-                        if det > 1e-12:
-                            cat_smd = round(float(np.sqrt(diff @ np.linalg.inv(s_pool) @ diff)), 4)
+                        if det <= 1e-12:
+                            return None
+                        return float(np.sqrt(diff @ np.linalg.inv(s_pool) @ diff))
+                    from itertools import combinations as _comb
+                    g_series = [df[df[req.group_column] == g][var].astype(str) for g in groups]
+                    pair_smds = []
+                    for i, j in _comb(range(len(g_series)), 2):
+                        s = _smd_cat_pair(g_series[i], g_series[j])
+                        if s is not None and np.isfinite(s):
+                            pair_smds.append(s)
+                    if pair_smds:
+                        cat_smd = round(max(pair_smds), 4)
                 except Exception:
                     pass
 
