@@ -110,19 +110,25 @@ _HIDE_ZERO_VARS = {
 }
 
 
-def _transcode_category(var_name: str, cat_value: str) -> str:
-    """Convert raw category value to a meaningful label."""
+def _transcode_category(var_name: str, cat_value: str, is_binary: bool = False) -> str:
+    """Convert raw category value to a meaningful label.
+
+    `is_binary` must be True before the generic 0/1 → No/Yes fallback fires —
+    otherwise a 3-category variable whose codes happen to start at 1 would
+    silently get its first level relabelled as 'Yes'.
+    """
     var_lower = var_name.lower().strip()
     # Check specific variable labels
     for key, mapping in _VALUE_LABELS.items():
         if key in var_lower:
             if cat_value in mapping:
                 return mapping[cat_value]
-    # Generic 0/1 → No/Yes
-    if cat_value in ("0", "0.0"):
-        return "No"
-    if cat_value in ("1", "1.0"):
-        return "Yes"
+    # Generic 0/1 → No/Yes — only for binary variables
+    if is_binary:
+        if cat_value in ("0", "0.0"):
+            return "No"
+        if cat_value in ("1", "1.0"):
+            return "Yes"
     return cat_value
 
 
@@ -130,6 +136,18 @@ def _should_hide_zero(var_name: str) -> bool:
     """Check if this variable should hide the '0' category row."""
     var_lower = var_name.lower().strip()
     return any(kw == var_lower or kw in var_lower for kw in _HIDE_ZERO_VARS)
+
+
+def _is_binary_01(sub_rows: list) -> bool:
+    """True iff the categorical has exactly two levels and they are 0/1.
+
+    Used to decide both (a) whether to collapse the 'No' row into a single
+    'n (%)' line and (b) whether to apply the 0→No / 1→Yes relabel.
+    """
+    if len(sub_rows) != 2:
+        return False
+    cats = {str(c.get("category", "")).strip() for c in sub_rows}
+    return cats <= {"0", "1", "0.0", "1.0"}
 
 
 def _detect_unit(var_name: str) -> Optional[str]:
@@ -299,9 +317,15 @@ def format_table1_for_journal(result: dict, options: dict = None) -> dict:
             sub_rows = row.get("sub_rows", [])
             hide_zero = _should_hide_zero(var_name)
             is_binary = len(sub_rows) == 2
+            is_binary_01 = _is_binary_01(sub_rows)
 
-            # For binary variables that should hide zero: show as single row (just the "1"/Yes count)
-            if is_binary and hide_zero:
+            # Collapse to a single 'n (%)' row when:
+            #   • the variable is a 0/1 binary (auto — no whitelist needed), OR
+            #   • the variable name matches the explicit hide-zero list.
+            # This is what users expect from AMA Table 1 ("DM, n (%)" with one
+            # number, not two rows for No/Yes).
+            collapse = is_binary and (is_binary_01 or hide_zero)
+            if collapse:
                 # Find the "1" row (positive case)
                 pos_row = None
                 for cat in sub_rows:
@@ -341,7 +365,7 @@ def format_table1_for_journal(result: dict, options: dict = None) -> dict:
 
                 for cat in sub_rows:
                     raw_cat = str(cat.get("category", ""))
-                    cat_label = _transcode_category(var_name, raw_cat)
+                    cat_label = _transcode_category(var_name, raw_cat, is_binary=is_binary_01)
 
                     values = []
                     if has_groups:
