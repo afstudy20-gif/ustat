@@ -1097,6 +1097,71 @@ def _build_stat_rows(
     return rows_out
 
 
+def _fisher_freeman_halton_mc(observed: np.ndarray, n_resamples: int = 5000, seed: int = 42) -> float:
+    """Monte Carlo p-value for an r×c contingency table, conditional on
+    the observed margins (Fisher-Freeman-Halton). Uses the chi-square
+    statistic as the discrepancy measure; group labels are permuted
+    `n_resamples` times. Returns the adjusted p-value
+    (count_extreme + 1) / (n_resamples + 1) per Davison & Hinkley 1997.
+    """
+    obs = np.asarray(observed, dtype=float)
+    if obs.ndim != 2 or obs.sum() <= 0:
+        return float("nan")
+    n_rows, n_cols = obs.shape
+
+    # Expand to long-form (item-level) arrays so we can permute group labels.
+    cats_list: list[int] = []
+    grps_list: list[int] = []
+    for i in range(n_rows):
+        for j in range(n_cols):
+            n_ij = int(obs[i, j])
+            if n_ij > 0:
+                cats_list.extend([i] * n_ij)
+                grps_list.extend([j] * n_ij)
+    cats = np.asarray(cats_list, dtype=np.int64)
+    grps = np.asarray(grps_list, dtype=np.int64)
+
+    def _chi(ct: np.ndarray) -> float:
+        rs = ct.sum(axis=1, keepdims=True)
+        cs = ct.sum(axis=0, keepdims=True)
+        total = ct.sum()
+        if total <= 0:
+            return 0.0
+        e = rs * cs / total
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return float(((ct - e) ** 2 / np.where(e > 0, e, 1)).sum())
+
+    obs_chi = _chi(obs)
+    rng = np.random.default_rng(seed)
+    minlength = n_rows * n_cols
+    count = 0
+    for _ in range(n_resamples):
+        perm = rng.permutation(grps)
+        enc = cats * n_cols + perm
+        ct = np.bincount(enc, minlength=minlength).reshape(n_rows, n_cols).astype(float)
+        if _chi(ct) >= obs_chi - 1e-9:
+            count += 1
+    return (count + 1) / (n_resamples + 1)
+
+
+def _categorical_p_with_rule(ct: np.ndarray) -> tuple[float, str]:
+    """Pick the right p-value for a contingency table.
+
+    Rule (matches AMA/CONSORT convention):
+      • If all expected cell counts ≥ 5 → Pearson chi-square.
+      • Else, for a 2×2 table → Fisher's exact test.
+      • Else, for an r×c table → Fisher-Freeman-Halton (Monte Carlo).
+    """
+    obs = np.asarray(ct, dtype=float)
+    chi2, p_chi, dof, expected = scipy_stats.chi2_contingency(obs)
+    if (expected < 5).any():
+        if obs.shape == (2, 2):
+            _, p_fisher = scipy_stats.fisher_exact(obs)
+            return float(p_fisher), "Fisher"
+        return _fisher_freeman_halton_mc(obs), "Fisher-Freeman-Halton (MC)"
+    return float(p_chi), "Chi-square"
+
+
 def _normality_test(s_clean: pd.Series) -> tuple[float, str]:
     """Return (p_value, test_name).
 
@@ -1280,12 +1345,7 @@ def table1(req: Table1Request):
             if groups is not None:
                 try:
                     ct = pd.crosstab(df[var].astype(str), df[req.group_column])
-                    chi2, p_chi_raw, dof, expected = scipy_stats.chi2_contingency(ct)
-                    if ct.shape == (2, 2) and (expected < 5).any():
-                        _, p_chi_raw = scipy_stats.fisher_exact(ct.values)
-                        test_name = "Fisher"
-                    else:
-                        test_name = "Chi-square"
+                    p_chi_raw, test_name = _categorical_p_with_rule(ct.values)
                     p_val = _fmt_p(float(p_chi_raw))
                 except Exception:
                     p_val = "N/A"

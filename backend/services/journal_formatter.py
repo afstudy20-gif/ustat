@@ -17,6 +17,7 @@ _TEST_SYMBOL_MAP = [
     (["student", "t-test", "t test", "independent t", "paired t"], "*"),
     (["mann", "whitney", "mann-whitney", "wilcoxon rank", "u test"], "\u2020"),
     (["chi-square", "chi square", "pearson chi"], "\u2021"),
+    (["fisher-freeman-halton", "freeman-halton"], "\u2016"),
     (["fisher"], "\u00A7"),
     (["anova", "one-way anova"], "\u00B6"),
     (["kruskal", "kruskal-wallis"], "**"),
@@ -26,8 +27,9 @@ _TEST_SYMBOL_MAP = [
 _TEST_DISPLAY_NAMES = {
     "*": "Student\u2019s t-test",
     "\u2020": "Mann-Whitney U test",
-    "\u2021": "Chi-square test",
-    "\u00A7": "Fisher\u2019s exact test",
+    "\u2021": "Pearson chi-square test",
+    "\u00A7": "Fisher\u2019s exact test (used when any expected cell count was <5 in a 2\u00D72 table)",
+    "\u2016": "Fisher-Freeman-Halton exact test, Monte Carlo p-value with 5,000 resamples (used when any expected cell count was <5 in an r\u00D7c table)",
     "\u00B6": "One-way ANOVA",
     "**": "Kruskal-Wallis test",
     "\u2020\u2020": "Log-rank test",
@@ -370,6 +372,17 @@ def format_table1_for_journal(result: dict, options: dict = None) -> dict:
         test_notes = "; ".join(f"{sym} {_TEST_DISPLAY_NAMES.get(sym, '')}" for sym in sorted(used_tests))
         footnotes.append(f"Statistical tests: {test_notes}")
     footnotes.append("Values are presented as mean \u00B1 SD, median [IQR], or n (%) as appropriate.")
+    # Document the categorical-test selection rule when any categorical
+    # variable was tested \u2014 even if Fisher / Fisher-Freeman-Halton did
+    # not end up firing, the reader needs to know the policy.
+    if any(s in ("\u2021", "\u00A7", "\u2016") for s in used_tests):
+        footnotes.append(
+            "For categorical variables, Pearson chi-square was used when all expected "
+            "cell counts were \u22655; Fisher's exact test (2\u00D72 tables) or the "
+            "Fisher-Freeman-Halton exact test with a Monte Carlo p-value "
+            "(r\u00D7c tables, 5,000 resamples, seed=42) was substituted when any "
+            "expected cell count was <5."
+        )
 
     # Title
     title = f"Table {table_num}. Baseline Clinical Characteristics"
