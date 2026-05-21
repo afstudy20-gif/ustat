@@ -1306,7 +1306,7 @@ export default function DataTable() {
           </thead>
 
           <tbody>
-            {displayRows.map((row) => {
+            {displayRows.map((row, visualIdx) => {
               const origIdx = row._idx as number;
               return (
                 <tr
@@ -1317,8 +1317,9 @@ export default function DataTable() {
                     className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
                     style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
                     onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
+                    title={`Original row #${origIdx + 1} in the dataset`}
                   >
-                    {origIdx + 1}
+                    {visualIdx + 1}
                   </td>
 
                   {columns.map((col, colIdx) => {
