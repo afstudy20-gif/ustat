@@ -1397,6 +1397,15 @@ export default function ModelsPanel() {
               </span>
             </label>
           )}
+          {(model === "linear" || model === "logistic" || model === "ortable") && (
+            <div className="mt-1 pt-2 border-t border-gray-100 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
+              Need a non-linear continuous effect? Use the
+              {" "}<span className="font-semibold">Restricted Cubic Spline</span> sub-tab —
+              <code>rcs(X, k)</code> with Harrell or custom knots, Wald non-linearity test,
+              OR / β / HR curve with 95 % CI, and optional spline × covariate or spline × spline
+              interaction (LR test + 2D contour / 3D surface).
+            </div>
+          )}
         </div>
 
         <div className="panel space-y-3">
@@ -1440,6 +1449,14 @@ export default function ModelsPanel() {
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs text-gray-400">Predictors</label>
                     <button onClick={() => { setPredictors([]); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
+                  </div>
+                  <div className="mb-2 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
+                    Predictors enter the model linearly. For non-linear continuous effects (e.g.
+                    J-shaped LDL ↔ mortality), use the
+                    {" "}<span className="font-semibold">Restricted Cubic Spline</span> sub-tab —
+                    it fits <code>rcs(X, 4)</code> in the same Cox PH framework with knot placement
+                    (Harrell percentiles or custom), Wald non-linearity test, HR curve with 95% CI,
+                    optional <code>rcs(X) × rcs(Y)</code> interaction, and 2D/3D HR surfaces.
                   </div>
                   <input
                     type="text"
