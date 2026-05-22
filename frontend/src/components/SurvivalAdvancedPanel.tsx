@@ -205,7 +205,15 @@ export default function SurvivalAdvancedPanel() {
   const [kmGroupLabels, setKmGroupLabels] = useState<Record<string, string>>({});
   const [kmCustomGroupTitle, setKmCustomGroupTitle] = useState("");
   const [kmCustomDurationTitle, setKmCustomDurationTitle] = useState("");
-  const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"; group?: string; x: number; y: number } | null>(null);
+  // Publication-quality customisation
+  const [kmCustomPlotTitle, setKmCustomPlotTitle] = useState("");      // editable plot title
+  const [kmShowPInTitle, setKmShowPInTitle] = useState(true);          // append " (log-rank p=…)"
+  const [kmShowNInLegend, setKmShowNInLegend] = useState(true);        // append " (n=…)"
+  const [kmHidePrefix, setKmHidePrefix] = useState(true);              // drop "groupCol = " prefix
+  const [kmAutoZoomY, setKmAutoZoomY] = useState(true);                // zoom Y to data range
+  const [kmYAxisAsPct, setKmYAxisAsPct] = useState(false);             // % vs decimal Y
+  const [kmGroupColors, setKmGroupColors] = useState<Record<string, string>>({}); // per-group color
+  const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"|"plotTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
 
   // Cox state
@@ -519,37 +527,100 @@ export default function SurvivalAdvancedPanel() {
           const resolveGroupName = (raw: string) =>
             kmGroupLabels[raw] ?? vLabels[raw] ?? raw;
 
+          // Build legend label per group
+          const legendLabel = (g: any) => {
+            const resolved = resolveGroupName(String(g.group));
+            const nSuffix = kmShowNInLegend ? ` (n=${g.n})` : "";
+            if (!kmGroup) return `${resolved}${nSuffix}`;
+            if (kmHidePrefix) return `${resolved}${nSuffix}`;
+            return `${kmCustomGroupTitle || kmGroup} = ${resolved}${nSuffix}`;
+          };
+
+          // Compute Y-axis range
+          let yRange: [number, number] = [0, 1.05];
+          if (kmAutoZoomY) {
+            let minSurv = 1;
+            for (const g of kmResult.groups) {
+              for (const p of g.curve) {
+                if (typeof p.survival === "number" && p.survival < minSurv) minSurv = p.survival;
+              }
+            }
+            const floor = Math.max(0, Math.floor((minSurv - 0.02) * 20) / 20);
+            yRange = [floor, 1.0];
+          }
+
+          // Build plot title
+          const lrP = kmResult.logrank?.p;
+          const pStr = lrP == null ? null : (lrP < 0.001 ? "<0.001" : lrP.toFixed(3));
+          const baseTitle = kmCustomPlotTitle || (kmGroup ? `Kaplan–Meier survival by ${kmCustomGroupTitle || kmGroup}` : "Kaplan–Meier survival");
+          const titleText = (kmShowPInTitle && pStr) ? `${baseTitle} (log-rank p=${pStr})` : baseTitle;
+
           return (
           <>
+            {/* Publication-style customisation strip */}
+            <div className="flex flex-wrap items-center gap-3 text-[10px] text-gray-500 mb-2 px-1">
+              <button
+                onClick={(e) => {
+                  setKmContextMenu({ type: "plotTitle", x: e.clientX, y: e.clientY });
+                  setKmRenameValue(kmCustomPlotTitle || (kmGroup ? `Kaplan–Meier survival by ${kmCustomGroupTitle || kmGroup}` : "Kaplan–Meier survival"));
+                }}
+                className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+              >✏️ Plot title</button>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmShowPInTitle} onChange={(e) => setKmShowPInTitle(e.target.checked)} className="accent-indigo-500" />
+                log-rank p in title
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmShowNInLegend} onChange={(e) => setKmShowNInLegend(e.target.checked)} className="accent-indigo-500" />
+                (n=…) in legend
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmHidePrefix} onChange={(e) => setKmHidePrefix(e.target.checked)} className="accent-indigo-500" />
+                hide "{kmCustomGroupTitle || kmGroup || "group"} =" prefix
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmAutoZoomY} onChange={(e) => setKmAutoZoomY(e.target.checked)} className="accent-indigo-500" />
+                zoom Y to data
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmYAxisAsPct} onChange={(e) => setKmYAxisAsPct(e.target.checked)} className="accent-indigo-500" />
+                Y as %
+              </label>
+              {(kmCustomPlotTitle || Object.keys(kmGroupColors).length > 0 || Object.keys(kmGroupLabels).length > 0) && (
+                <button
+                  onClick={() => { setKmCustomPlotTitle(""); setKmGroupColors({}); setKmGroupLabels({}); }}
+                  className="text-[10px] px-2 py-0.5 rounded border border-orange-300 text-orange-600 hover:bg-orange-50"
+                >✕ Reset customisation</button>
+              )}
+            </div>
+
             <div className="relative" ref={kmPlotRef}>
               <Plot
                 data={kmResult.groups.map((g: any, i: number) => ({
                   x: g.curve.map((p: any) => p.time),
                   y: g.curve.map((p: any) => p.survival),
                   type: "scatter", mode: "lines",
-                  name: kmGroup
-                    ? `${kmCustomGroupTitle || kmGroup} = ${resolveGroupName(String(g.group))}`
-                    : resolveGroupName(String(g.group)),
-                  line: { width: traceDefaults.lineWidth, color: pal[i % pal.length] },
+                  name: legendLabel(g),
+                  line: { width: traceDefaults.lineWidth, color: kmGroupColors[String(g.group)] ?? pal[i % pal.length], shape: "hv" },
                 }))}
                 layout={{
                   ...baseLayout,
-                  title: { text: "Kaplan-Meier Survival Curves", font: { color: "#374151", size: 13 } },
+                  title: { text: titleText, font: { color: "#374151", size: 14 } },
                   xaxis: {
                     ...(baseLayout.xaxis as any),
                      // Using custom duration title if available
-                    title: { text: `Time (${kmCustomDurationTitle || kmDuration})` },
+                    title: { text: kmCustomDurationTitle ? kmCustomDurationTitle : `Time (${kmDuration})` },
                   },
                   yaxis: {
                     ...(baseLayout.yaxis as any),
-                    title: { text: "Survival Probability" },
-                    range: [0, 1.05],
-                    tickformat: ".0%",
+                    title: { text: "Survival probability" },
+                    range: yRange,
+                    tickformat: kmYAxisAsPct ? ".0%" : ".2f",
                   },
-                  margin: { t: 44, r: 20, b: 56, l: 68 }, showlegend: true,
+                  margin: { t: 50, r: 20, b: 56, l: 68 }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                 }}
-                config={{ responsive: true }} style={{ width: "100%", height: 400 }}
+                config={{ responsive: true }} style={{ width: "100%", height: 420 }}
               />
               <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
             </div>
@@ -639,6 +710,7 @@ export default function SurvivalAdvancedPanel() {
                     {kmContextMenu.type === "item" && `Rename group "${kmContextMenu.group}"`}
                     {kmContextMenu.type === "groupTitle" && `Rename Legend Title`}
                     {kmContextMenu.type === "durationTitle" && `Rename Time Axis Title`}
+                    {kmContextMenu.type === "plotTitle" && `Edit plot title`}
                   </p>
                   <input
                     autoFocus
@@ -653,12 +725,33 @@ export default function SurvivalAdvancedPanel() {
                           setKmCustomGroupTitle(kmRenameValue);
                         } else if (kmContextMenu.type === "durationTitle") {
                           setKmCustomDurationTitle(kmRenameValue);
+                        } else if (kmContextMenu.type === "plotTitle") {
+                          setKmCustomPlotTitle(kmRenameValue);
                         }
                         setKmContextMenu(null);
                       }
                       if (e.key === "Escape") setKmContextMenu(null);
                     }}
                   />
+                  {kmContextMenu.type === "item" && kmContextMenu.group && (
+                    <div className="mb-2">
+                      <p className="text-[10px] text-gray-400 mb-1 font-medium uppercase tracking-wide">Color</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {["#dc2626", "#16a34a", "#2563eb", "#ea580c", "#9333ea", "#0891b2", "#ca8a04", "#475569"].map((c) => (
+                          <button key={c} title={c}
+                            onClick={() => setKmGroupColors((prev) => ({ ...prev, [kmContextMenu.group!]: c }))}
+                            className="w-5 h-5 rounded-full border border-gray-300 hover:scale-110 transition-transform"
+                            style={{ background: c }}
+                          />
+                        ))}
+                        <input type="color"
+                          value={kmGroupColors[kmContextMenu.group] ?? "#6366f1"}
+                          onChange={(e) => setKmGroupColors((prev) => ({ ...prev, [kmContextMenu.group!]: e.target.value }))}
+                          className="w-6 h-6 cursor-pointer border border-gray-300 rounded"
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => {
@@ -668,6 +761,8 @@ export default function SurvivalAdvancedPanel() {
                           setKmCustomGroupTitle(kmRenameValue);
                         } else if (kmContextMenu.type === "durationTitle") {
                           setKmCustomDurationTitle(kmRenameValue);
+                        } else if (kmContextMenu.type === "plotTitle") {
+                          setKmCustomPlotTitle(kmRenameValue);
                         }
                         setKmContextMenu(null);
                       }}
@@ -679,10 +774,15 @@ export default function SurvivalAdvancedPanel() {
                           const next = { ...kmGroupLabels };
                           delete next[kmContextMenu.group];
                           setKmGroupLabels(next);
+                          const nc = { ...kmGroupColors };
+                          delete nc[kmContextMenu.group];
+                          setKmGroupColors(nc);
                         } else if (kmContextMenu.type === "groupTitle") {
                           setKmCustomGroupTitle("");
                         } else if (kmContextMenu.type === "durationTitle") {
                           setKmCustomDurationTitle("");
+                        } else if (kmContextMenu.type === "plotTitle") {
+                          setKmCustomPlotTitle("");
                         }
                         setKmContextMenu(null);
                       }}
