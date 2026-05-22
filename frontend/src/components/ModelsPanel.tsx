@@ -496,6 +496,9 @@ function precisionSize(est: number, lo: number, hi: number): number {
   return Math.min(16, Math.max(6, sz));
 }
 
+type ForestLayout = "overlay" | "split";
+type ForestColorMode = "series" | "significance";
+
 function ForestPlot({ result, modelType, outcome }: {
   result: any;
   modelType: string;
@@ -506,6 +509,75 @@ function ForestPlot({ result, modelType, outcome }: {
   const isCox     = modelType === "cox";
   const metric    = isCox ? "HR" : "OR";
   const showGrid  = useStore((s) => s.showGrid);
+
+  // ── User-tunable layout options ───────────────────────────────────────────
+  const [opts, setOpts] = useState<{
+    layout: ForestLayout;
+    colorBy: ForestColorMode;
+    showValueColumns: boolean;
+    customTitle: string;
+    markerStyle: "square" | "circle";
+  }>({
+    layout: "overlay",
+    colorBy: "series",
+    showValueColumns: true,
+    customTitle: "",
+    markerStyle: "square",
+  });
+  // Significance color helper: when colorBy="significance" use red when CI
+  // excludes 1 (the typical clinical convention) and slate when it doesn't.
+  const sigColor = (est: number | null, lo: number | null, hi: number | null): string => {
+    if (est == null || lo == null || hi == null) return "#9ca3af";
+    const includesOne = lo <= 1 && hi >= 1;
+    return includesOne ? "#475569" : "#dc2626";
+  };
+
+  // Tiny inline toolbar — sits above whatever the rest of ForestPlot draws.
+  const Toolbar = (
+    <div className="flex flex-wrap items-center gap-2 mb-2 text-[10px] text-gray-600">
+      {isORTable && (
+        <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+          {(["overlay", "split"] as const).map((v) => (
+            <button key={v}
+              onClick={() => setOpts((o) => ({ ...o, layout: v }))}
+              className={`px-2 py-0.5 text-[10px] ${opts.layout === v ? "bg-indigo-600 text-white" : "bg-white hover:bg-gray-50 text-gray-600"}`}>
+              {v === "overlay" ? "Overlay (one panel)" : "Split (two panels)"}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+        {(["series", "significance"] as const).map((v) => (
+          <button key={v}
+            onClick={() => setOpts((o) => ({ ...o, colorBy: v }))}
+            className={`px-2 py-0.5 text-[10px] ${opts.colorBy === v ? "bg-indigo-600 text-white" : "bg-white hover:bg-gray-50 text-gray-600"}`}>
+            {v === "series" ? "Color by series" : "Color by significance (red ↔ CI excludes 1)"}
+          </button>
+        ))}
+      </div>
+      <div className="inline-flex rounded-md border border-gray-300 overflow-hidden">
+        {(["square", "circle"] as const).map((v) => (
+          <button key={v}
+            onClick={() => setOpts((o) => ({ ...o, markerStyle: v }))}
+            className={`px-2 py-0.5 text-[10px] ${opts.markerStyle === v ? "bg-indigo-600 text-white" : "bg-white hover:bg-gray-50 text-gray-600"}`}>
+            ▪ {v}
+          </button>
+        ))}
+      </div>
+      <label className="flex items-center gap-1 cursor-pointer ml-1">
+        <input type="checkbox" checked={opts.showValueColumns}
+          onChange={(e) => setOpts((o) => ({ ...o, showValueColumns: e.target.checked }))}
+          className="accent-indigo-500" />
+        Value columns (HR / p)
+      </label>
+      <input type="text"
+        placeholder="Custom title (optional)…"
+        value={opts.customTitle}
+        onChange={(e) => setOpts((o) => ({ ...o, customTitle: e.target.value }))}
+        className="ml-auto text-[10px] border border-gray-300 rounded px-2 py-0.5 w-72 focus:outline-none focus:border-indigo-400"
+      />
+    </div>
+  );
 
   // ── Shared helpers ────────────────────────────────────────────────────────
   const fmtP  = (p: number | null) =>
@@ -542,104 +614,178 @@ function ForestPlot({ result, modelType, outcome }: {
     const uniValid   = rows.filter((r) => r.uni_or   != null && r.uni_or   > 0);
     const multiValid = rows.filter((r) => r.multi_or != null && r.multi_or > 0);
     const plotH      = Math.max(320, n * 58 + 120);
+    const splitLayout = opts.layout === "split";
 
-    // xaxis.domain = [0, 0.47] → forest occupies left 47% of the figure's plot area.
-    // Text columns sit at paper x ∈ [0.49, 0.78] — safely INSIDE the SVG, no clipping.
-    const TX1 = 0.49;  // OR (95% CI) column start
-    const TX2 = 0.76;  // p-value column start
+    // Color resolvers honour the colorBy toggle:
+    //   • "series"        — uni=slate / multi=emerald (existing palette)
+    //   • "significance"  — gray when CI includes 1, red when it doesn't
+    const uniColor = (r: any) =>
+      opts.colorBy === "significance"
+        ? sigColor(r.uni_or, r.uni_ci_low, r.uni_ci_high)
+        : (r.uni_p != null && r.uni_p < 0.05 ? "#6366f1" : "#6b7280");
+    const multiColor = (r: any) =>
+      opts.colorBy === "significance"
+        ? sigColor(r.multi_or, r.multi_ci_low, r.multi_ci_high)
+        : (r.multi_p != null && r.multi_p < 0.05 ? "#10b981" : "#6b7280");
+
+    // Forest x-domain depends on layout: overlay puts text columns to the
+    // right of a single forest; split spreads two forests side-by-side and
+    // skips the text columns by default (they can still be re-enabled).
+    const forestRight = splitLayout
+      ? 1.0           // entire width filled by two side-by-side forests
+      : (opts.showValueColumns ? 0.47 : 0.95);
+    const TX1 = splitLayout ? null : 0.49;
+    const TX2 = splitLayout ? null : 0.76;
+    const showCols = !splitLayout && opts.showValueColumns;
 
     const annotations: object[] = [
-      { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.055,
-        text: "<b>OR (95% CI)</b>", font: HDR },
-      { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.055,
-        text: "<b>p</b>", font: HDR },
-      { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.012,
-        text: "● Uni   ◆ Multi", font: { size: 8, color: "#4b5563" } },
-      ...dirAnnotations(0.47),
+      ...(showCols && TX1 && TX2
+        ? [
+            { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.055,
+              text: "<b>OR (95% CI)</b>", font: HDR },
+            { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.055,
+              text: "<b>p</b>", font: HDR },
+            { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.012,
+              text: opts.colorBy === "significance"
+                ? "● Uni   ◆ Multi (red = CI excl. 1)"
+                : "● Uni   ◆ Multi", font: { size: 8, color: "#4b5563" } },
+          ]
+        : []),
+      ...(splitLayout
+        ? [
+            { ...AB, xref: "paper" as const, yref: "paper" as const, x: 0.215, y: 1.045,
+              xanchor: "center" as const,
+              text: "<b>Unadjusted</b>", font: HDR },
+            { ...AB, xref: "paper" as const, yref: "paper" as const, x: 0.755, y: 1.045,
+              xanchor: "center" as const,
+              text: "<b>Adjusted (mutually adjusted model)</b>", font: HDR },
+          ]
+        : []),
+      ...(splitLayout ? [] : dirAnnotations(forestRight)),
     ];
 
-    rows.forEach((r, i) => {
-      // Univariate row — at same y-offset as uni marker (+0.18)
-      if (r.uni_or != null) {
-        const col = r.uni_p != null && r.uni_p < 0.05 ? "#818cf8" : "#6b7280";
-        annotations.push(
-          { ...AB, xref: "paper", yref: "y", x: TX1, y: i + 0.18,
-            text: fmtCI(r.uni_or, r.uni_ci_low, r.uni_ci_high), font: { size: 9, color: col } },
-          { ...AB, xref: "paper", yref: "y", x: TX2, y: i + 0.18,
-            text: fmtP(r.uni_p), font: { size: 9, color: col } },
-        );
-      }
-      // Multivariate row — at same y-offset as multi marker (-0.18)
-      if (r.multi_or != null) {
-        const col = r.multi_p != null && r.multi_p < 0.05 ? "#34d399" : "#6b7280";
-        annotations.push(
-          { ...AB, xref: "paper", yref: "y", x: TX1, y: i - 0.18,
-            text: fmtCI(r.multi_or, r.multi_ci_low, r.multi_ci_high), font: { size: 9, color: col } },
-          { ...AB, xref: "paper", yref: "y", x: TX2, y: i - 0.18,
-            text: fmtP(r.multi_p), font: { size: 9, color: col } },
-        );
-      }
-    });
+    if (showCols && TX1 && TX2) {
+      rows.forEach((r, i) => {
+        if (r.uni_or != null) {
+          const col = uniColor(r);
+          annotations.push(
+            { ...AB, xref: "paper", yref: "y", x: TX1, y: i + 0.18,
+              text: fmtCI(r.uni_or, r.uni_ci_low, r.uni_ci_high), font: { size: 9, color: col } },
+            { ...AB, xref: "paper", yref: "y", x: TX2, y: i + 0.18,
+              text: fmtP(r.uni_p), font: { size: 9, color: col } },
+          );
+        }
+        if (r.multi_or != null) {
+          const col = multiColor(r);
+          annotations.push(
+            { ...AB, xref: "paper", yref: "y", x: TX1, y: i - 0.18,
+              text: fmtCI(r.multi_or, r.multi_ci_low, r.multi_ci_high), font: { size: 9, color: col } },
+            { ...AB, xref: "paper", yref: "y", x: TX2, y: i - 0.18,
+              text: fmtP(r.multi_p), font: { size: 9, color: col } },
+          );
+        }
+      });
+    }
+
+    // Trace builders shared by both layouts
+    const uniMarker = opts.markerStyle === "square" ? "square" : "circle";
+    const multiMarker = opts.markerStyle === "square" ? "square" : "diamond";
+    const uniTrace: any = {
+      name: splitLayout ? "Unadjusted" : "Univariate",
+      type: "scatter", mode: "markers",
+      x: uniValid.map((r) => r.uni_or),
+      y: uniValid.map((r) => splitLayout ? yIdx[r.variable] : yIdx[r.variable] + 0.18),
+      error_x: {
+        type: "data", symmetric: false,
+        array:      uniValid.map((r) => r.uni_ci_high - r.uni_or),
+        arrayminus: uniValid.map((r) => r.uni_or - r.uni_ci_low),
+        color: opts.colorBy === "series" ? "#6366f1" : "#9ca3af",
+        thickness: 2, width: 7,
+      },
+      marker: {
+        size: uniValid.map((r) => precisionSize(r.uni_or, r.uni_ci_low, r.uni_ci_high)),
+        symbol: uniMarker,
+        color: uniValid.map((r) => uniColor(r)),
+        line: { color: "#d1d5db", width: 1 },
+      },
+      hovertemplate: uniValid.map((r) =>
+        `<b>${r.variable}</b> (Unadjusted)<br>OR: ${r.uni_or?.toFixed(3)}<br>95% CI: ${r.uni_ci_low?.toFixed(3)} – ${r.uni_ci_high?.toFixed(3)}<br>p = ${fmtP(r.uni_p)}<extra></extra>`
+      ),
+      ...(splitLayout ? { xaxis: "x", yaxis: "y" } : {}),
+    };
+    const multiTrace: any = {
+      name: splitLayout ? "Adjusted" : "Multivariate",
+      type: "scatter", mode: "markers",
+      x: multiValid.map((r) => r.multi_or),
+      y: multiValid.map((r) => splitLayout ? yIdx[r.variable] : yIdx[r.variable] - 0.18),
+      error_x: {
+        type: "data", symmetric: false,
+        array:      multiValid.map((r) => r.multi_ci_high - r.multi_or),
+        arrayminus: multiValid.map((r) => r.multi_or - r.multi_ci_low),
+        color: opts.colorBy === "series" ? "#10b981" : "#9ca3af",
+        thickness: 2, width: 7,
+      },
+      marker: {
+        size: multiValid.map((r) => precisionSize(r.multi_or, r.multi_ci_low, r.multi_ci_high)),
+        symbol: multiMarker,
+        color: multiValid.map((r) => multiColor(r)),
+        line: { color: "#d1d5db", width: 1 },
+      },
+      hovertemplate: multiValid.map((r) =>
+        `<b>${r.variable}</b> (Adjusted)<br>OR: ${r.multi_or?.toFixed(3)}<br>95% CI: ${r.multi_ci_low?.toFixed(3)} – ${r.multi_ci_high?.toFixed(3)}<br>p = ${fmtP(r.multi_p)}<extra></extra>`
+      ),
+      ...(splitLayout ? { xaxis: "x2", yaxis: "y" } : {}),
+    };
+
+    // Split layout uses two x-axes (xaxis [0, 0.43] / xaxis2 [0.50, 0.93])
+    // anchored to the same y-axis, both log-scaled with the same null line.
+    const splitShapes = splitLayout
+      ? [
+          { type: "line" as const, x0: 1, x1: 1, xref: "x" as const, yref: "paper" as const, y0: 0, y1: 1,
+            line: { color: "#9ca3af", dash: "dash" as const, width: 1.2 } },
+          { type: "line" as const, x0: 1, x1: 1, xref: "x2" as const, yref: "paper" as const, y0: 0, y1: 1,
+            line: { color: "#9ca3af", dash: "dash" as const, width: 1.2 } },
+        ]
+      : [
+          ...FOREST_BASE.shapes,
+          ...(showCols
+            ? [{ type: "line" as const, xref: "paper" as const, yref: "paper" as const,
+                x0: 0.48, x1: 0.48, y0: 0, y1: 1,
+                line: { color: "#e5e7eb", width: 1 } }]
+            : []),
+        ];
 
     return (
       <div className="relative" ref={forestRef}>
+      {Toolbar}
       <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
       <Plot
-        data={[
-          {
-            name: "Univariate",
-            type: "scatter", mode: "markers",
-            x: uniValid.map((r) => r.uni_or),
-            y: uniValid.map((r) => yIdx[r.variable] + 0.18),
-            error_x: {
-              type: "data", symmetric: false,
-              array:      uniValid.map((r) => r.uni_ci_high - r.uni_or),
-              arrayminus: uniValid.map((r) => r.uni_or - r.uni_ci_low),
-              color: "#6366f1", thickness: 2, width: 7,
-            },
-            marker: {
-              size: uniValid.map((r) => precisionSize(r.uni_or, r.uni_ci_low, r.uni_ci_high)),
-              symbol: "circle",
-              color: uniValid.map((r) => r.uni_p != null && r.uni_p < 0.05 ? "#6366f1" : "#6b7280"),
-              line: { color: "#d1d5db", width: 1 },
-            },
-            hovertemplate: uniValid.map((r) =>
-              `<b>${r.variable}</b> (Univariate)<br>OR: ${r.uni_or?.toFixed(3)}<br>95% CI: ${r.uni_ci_low?.toFixed(3)} – ${r.uni_ci_high?.toFixed(3)}<br>p = ${fmtP(r.uni_p)}<extra></extra>`
-            ),
-          },
-          {
-            name: "Multivariate",
-            type: "scatter", mode: "markers",
-            x: multiValid.map((r) => r.multi_or),
-            y: multiValid.map((r) => yIdx[r.variable] - 0.18),
-            error_x: {
-              type: "data", symmetric: false,
-              array:      multiValid.map((r) => r.multi_ci_high - r.multi_or),
-              arrayminus: multiValid.map((r) => r.multi_or - r.multi_ci_low),
-              color: "#10b981", thickness: 2, width: 7,
-            },
-            marker: {
-              size: multiValid.map((r) => precisionSize(r.multi_or, r.multi_ci_low, r.multi_ci_high)),
-              symbol: "diamond",
-              color: multiValid.map((r) => r.multi_p != null && r.multi_p < 0.05 ? "#10b981" : "#6b7280"),
-              line: { color: "#d1d5db", width: 1 },
-            },
-            hovertemplate: multiValid.map((r) =>
-              `<b>${r.variable}</b> (Multivariate)<br>OR: ${r.multi_or?.toFixed(3)}<br>95% CI: ${r.multi_ci_low?.toFixed(3)} – ${r.multi_ci_high?.toFixed(3)}<br>p = ${fmtP(r.multi_p)}<extra></extra>`
-            ),
-          },
-        ]}
+        data={[uniTrace, multiTrace]}
         layout={{
           ...FOREST_BASE,
           height: plotH,
           autosize: true,
-          margin: { t: 20, r: 20, b: 70, l: 160 },
+          margin: { t: opts.customTitle ? 50 : 30, r: 20, b: 70, l: 180 },
+          title: opts.customTitle
+            ? { text: opts.customTitle, font: { size: 12, color: "#1f2937" }, x: 0.5, xanchor: "center" as const }
+            : undefined,
           xaxis: {
             ...FOREST_BASE.xaxis,
             showgrid: showGrid,
-            domain: [0, 0.47],
-            title: { text: `Odds Ratio (95% CI)${outcome ? ` — Outcome: ${outcome}` : ""}`, font: { size: 10, color: "#374151" } },
+            domain: splitLayout ? [0, 0.43] : [0, forestRight],
+            title: { text: `Odds Ratio (95% CI)${splitLayout ? "" : (outcome ? ` — Outcome: ${outcome}` : "")}, log scale`, font: { size: 10, color: "#374151" } },
           },
+          ...(splitLayout
+            ? {
+                xaxis2: {
+                  ...FOREST_BASE.xaxis,
+                  showgrid: showGrid,
+                  domain: [0.50, 0.93],
+                  anchor: "y" as const,
+                  title: { text: `Odds Ratio (95% CI), log scale${outcome ? ` — Outcome: ${outcome}` : ""}`, font: { size: 10, color: "#374151" } },
+                },
+              }
+            : {}),
           yaxis: {
             ...FOREST_BASE.yaxis,
             tickvals: rows.map((_, i) => i),
@@ -647,12 +793,7 @@ function ForestPlot({ result, modelType, outcome }: {
             autorange: "reversed" as const,
             range: [-0.5, n - 0.5],
           },
-          shapes: [
-            ...FOREST_BASE.shapes,
-            { type: "line", xref: "paper", yref: "paper",
-              x0: 0.48, x1: 0.48, y0: 0, y1: 1,
-              line: { color: "#e5e7eb", width: 1 } },
-          ],
+          shapes: splitShapes,
           annotations,
           showlegend: true,
           legend: { font: { color: "#374151", size: 11 }, bgcolor: "rgba(249,250,251,0.9)", orientation: "h" as const, x: 0, y: -0.18 },
@@ -679,30 +820,44 @@ function ForestPlot({ result, modelType, outcome }: {
   const COLOR_SIG = isCox ? "#34d399" : "#818cf8";
   const plotH     = Math.max(260, n * 46 + 120);
 
-  // xaxis.domain = [0, 0.55] → forest left 55%; text at paper [0.57, 0.80] — no clipping.
+  // Color resolver honours the colorBy toggle for the single-model branch.
+  const rowColor = (i: number) =>
+    opts.colorBy === "significance"
+      ? sigColor(estimates[i], ciLow[i], ciHigh[i])
+      : (pVals[i] < 0.05 ? COLOR_SIG : "#6b7280");
+
+  // xaxis.domain depends on whether the value columns are visible.
+  const forestRight = opts.showValueColumns ? 0.55 : 0.95;
   const TX1 = 0.57;
   const TX2 = 0.80;
 
   const annotations: object[] = [
-    { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.06,
-      text: `<b>${metric} (95% CI)</b>`, font: HDR },
-    { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.06,
-      text: "<b>p</b>", font: HDR },
-    ...dirAnnotations(0.55),
-    // Per-variable rows
-    ...coefs.map((_: any, i: number) => {
-      const col = pVals[i] < 0.05 ? COLOR_SIG : "#6b7280";
-      return [
-        { ...AB, xref: "paper", yref: "y", x: TX1, y: i,
-          text: fmtCI(estimates[i], ciLow[i], ciHigh[i]), font: { size: 9, color: col } },
-        { ...AB, xref: "paper", yref: "y", x: TX2, y: i,
-          text: fmtP(pVals[i]), font: { size: 9, color: col } },
-      ];
-    }).flat(),
+    ...(opts.showValueColumns
+      ? [
+          { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.06,
+            text: `<b>${metric} (95% CI)</b>`, font: HDR },
+          { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.06,
+            text: "<b>p</b>", font: HDR },
+        ]
+      : []),
+    ...dirAnnotations(forestRight),
+    // Per-variable rows (only when value columns are shown)
+    ...(opts.showValueColumns
+      ? coefs.map((_: any, i: number) => {
+          const col = rowColor(i);
+          return [
+            { ...AB, xref: "paper", yref: "y", x: TX1, y: i,
+              text: fmtCI(estimates[i], ciLow[i], ciHigh[i]), font: { size: 9, color: col } },
+            { ...AB, xref: "paper", yref: "y", x: TX2, y: i,
+              text: fmtP(pVals[i]), font: { size: 9, color: col } },
+          ];
+        }).flat()
+      : []),
   ];
 
   return (
     <div className="relative" ref={forestRef}>
+    {Toolbar}
     <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
     <Plot
       data={[{
@@ -713,12 +868,13 @@ function ForestPlot({ result, modelType, outcome }: {
           type: "data", symmetric: false,
           array:      estimates.map((e: number, i: number) => (ciHigh[i] ?? e) - e),
           arrayminus: estimates.map((e: number, i: number) => e - (ciLow[i]  ?? e)),
-          color: COLOR, thickness: 2.5, width: 9,
+          color: opts.colorBy === "series" ? COLOR : "#9ca3af",
+          thickness: 2.5, width: 9,
         },
         marker: {
           size: estimates.map((_: number, i: number) => precisionSize(estimates[i], ciLow[i], ciHigh[i])),
-          symbol: "square",
-          color: pVals.map((p: number) => p < 0.05 ? COLOR_SIG : "#6b7280"),
+          symbol: opts.markerStyle === "square" ? "square" : "circle",
+          color: coefs.map((_: any, i: number) => rowColor(i)),
           line: { color: "#d1d5db", width: 1 },
         },
         hovertemplate: coefs.map((_: any, i: number) =>
@@ -730,15 +886,18 @@ function ForestPlot({ result, modelType, outcome }: {
         ...FOREST_BASE,
         height: plotH,
         autosize: true,
-        margin: { t: 20, r: 20, b: 70, l: 160 },
+        margin: { t: opts.customTitle ? 50 : 20, r: 20, b: 70, l: 180 },
+        title: opts.customTitle
+          ? { text: opts.customTitle, font: { size: 12, color: "#1f2937" }, x: 0.5, xanchor: "center" as const }
+          : undefined,
         xaxis: {
           ...FOREST_BASE.xaxis,
           showgrid: showGrid,
-          domain: [0, 0.55],
+          domain: [0, forestRight],
           title: {
             text: isCox
-              ? `Hazard Ratio (95% CI)${outcome ? ` — Outcome: ${outcome}` : ""}`
-              : `Odds Ratio (95% CI)${outcome ? ` — Outcome: ${outcome}` : ""}`,
+              ? `Hazard Ratio (95% CI), log scale${outcome ? ` — Outcome: ${outcome}` : ""}`
+              : `Odds Ratio (95% CI), log scale${outcome ? ` — Outcome: ${outcome}` : ""}`,
             font: { size: 10, color: "#374151" },
           },
         },
@@ -751,9 +910,11 @@ function ForestPlot({ result, modelType, outcome }: {
         },
         shapes: [
           ...FOREST_BASE.shapes,
-          { type: "line", xref: "paper", yref: "paper",
-            x0: 0.56, x1: 0.56, y0: 0, y1: 1,
-            line: { color: "#e5e7eb", width: 1 } },
+          ...(opts.showValueColumns
+            ? [{ type: "line" as const, xref: "paper" as const, yref: "paper" as const,
+                x0: 0.56, x1: 0.56, y0: 0, y1: 1,
+                line: { color: "#e5e7eb", width: 1 } }]
+            : []),
         ],
         annotations,
         showlegend: false,
