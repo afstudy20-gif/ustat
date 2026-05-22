@@ -21,6 +21,7 @@ import UploadZone from "./components/UploadZone";
 import DataTable from "./components/DataTable";
 import DescriptivePanel from "./components/DescriptivePanel";
 import ChartsPanel from "./components/ChartsPanel";
+import ForestBuilderPanel from "./components/ForestBuilderPanel";
 import HypothesisPanel from "./components/HypothesisPanel";
 import CorrelationPanel from "./components/CorrelationPanel";
 import ModelsPanel from "./components/ModelsPanel";
@@ -217,11 +218,15 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = useState<"models" | "charts">("models");
+  const [sub, setSub] = useState<"models" | "charts" | "forest">("models");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["models", "Models & Diagnostics"], ["charts", "Charts"]] as const).map(([id, label]) => (
+        {([
+          ["models", "Models & Diagnostics"],
+          ["charts", "Charts"],
+          ["forest", "Forest plot (sensitivity / multi-endpoint)"],
+        ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -231,7 +236,9 @@ function VisualChartsCombo() {
         ))}
       </div>
       <div className="flex-1 p-4 overflow-y-auto">
-        {sub === "models" ? <VisualModelPanel /> : <ChartsPanel />}
+        {sub === "models" ? <VisualModelPanel />
+          : sub === "charts" ? <ChartsPanel />
+          : <ForestBuilderPanel />}
       </div>
     </div>
   );
