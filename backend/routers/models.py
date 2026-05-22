@@ -1498,6 +1498,109 @@ def rcs_regression(req: RCSRequest):
                 "se":   round(se, 6) if se is not None else None,
             })
 
+    # ── Non-linearity Wald test ────────────────────────────────────────────
+    # Test H₀: every NONLINEAR spline basis coefficient = 0 (i.e. the
+    # relationship is linear). The non-linear basis has (n_knots − 2)
+    # columns located right after the single linear x term.
+    nonlin_p: Optional[float] = None
+    nonlin_wald: Optional[float] = None
+    nonlin_df: Optional[int] = None
+    try:
+        # Index of the first non-linear basis column inside `params`/`cov_params`.
+        # Cox design: [x_lin, sp1, sp2, …, covs, ix…]      → linear at 0
+        # GLM design: [intercept, x_lin, sp1, …, covs, ix] → linear at 1
+        lin_idx = 0 if is_cox else 1
+        nl_start = lin_idx + 1
+        nl_end = nl_start + spline_cols.shape[1]
+        if nl_end > nl_start:
+            idx = np.arange(nl_start, nl_end)
+            beta_nl = np.asarray(params)[idx]
+            cov_nl = np.asarray(cov_params)[np.ix_(idx, idx)]
+            from scipy.stats import chi2 as _chi2
+            wald = float(beta_nl @ np.linalg.solve(cov_nl, beta_nl))
+            df_nl = int(len(idx))
+            nonlin_wald = round(wald, 4)
+            nonlin_df = df_nl
+            nonlin_p = round(float(_chi2.sf(wald, df=df_nl)), 6)
+    except Exception:
+        nonlin_p = None
+        nonlin_wald = None
+        nonlin_df = None
+
+    # ── Crude (unadjusted) reference curve ────────────────────────────────
+    # When the user passes covariates we also fit the same spline WITHOUT
+    # adjustment so the result panel can overlay 'Crude vs Adjusted' on the
+    # same axes — the standard publication figure.
+    crude_block: Optional[dict] = None
+    if cov_names or interaction_extra_names:
+        try:
+            if is_cox:
+                feat_cols_c = [f"_x_lin"] + [f"_spl_{i}" for i in range(spline_cols.shape[1])]
+                fit_df_c = pd.DataFrame(
+                    np.column_stack([x_raw, spline_cols]),
+                    columns=feat_cols_c,
+                    index=df.index,
+                )
+                fit_df_c["_dur_"] = duration
+                fit_df_c["_evt_"] = event
+                cph_c = CoxPHFitter()
+                cph_c.fit(fit_df_c, duration_col="_dur_", event_col="_evt_")
+                design_cols_c = feat_cols_c
+                params_c = cph_c.params_.reindex(design_cols_c).values
+                cov_params_c = cph_c.variance_matrix_.reindex(index=design_cols_c, columns=design_cols_c).values
+                # Synthetic design for crude
+                X_syn_c = np.column_stack([x_syn, sp_syn])
+            else:
+                X_parts_c = [np.ones(n), x_raw, spline_cols]
+                X_c = np.column_stack(X_parts_c)
+                if model_type == "logistic":
+                    res_c = sm.Logit(y, X_c).fit(disp=0, maxiter=200)
+                else:
+                    res_c = sm.OLS(y, X_c).fit()
+                params_c = res_c.params
+                cov_params_c = res_c.cov_params()
+                X_syn_c = np.column_stack([np.ones(200), x_syn, sp_syn])
+
+            lp_syn_c = X_syn_c @ params_c
+            ref_idx_c = int(np.argmin(np.abs(x_syn - ref_val)))
+            rel_lp_c = lp_syn_c - lp_syn_c[ref_idx_c]
+            diffs_c = X_syn_c - X_syn_c[ref_idx_c]
+            var_lp_c = np.einsum("ij,jk,ik->i", diffs_c, cov_params_c, diffs_c)
+            se_lp_c = np.sqrt(np.maximum(var_lp_c, 0))
+            if is_cox or model_type == "logistic":
+                or_vals_c = np.exp(rel_lp_c)
+                ci_low_c = np.exp(rel_lp_c - z95 * se_lp_c)
+                ci_high_c = np.exp(rel_lp_c + z95 * se_lp_c)
+            else:
+                or_vals_c = rel_lp_c
+                ci_low_c = rel_lp_c - z95 * se_lp_c
+                ci_high_c = rel_lp_c + z95 * se_lp_c
+
+            # Crude non-linearity Wald
+            crude_nl_p = None
+            try:
+                lin_idx_c = 0 if is_cox else 1
+                nl_start_c = lin_idx_c + 1
+                nl_end_c = nl_start_c + spline_cols.shape[1]
+                idx_c = np.arange(nl_start_c, nl_end_c)
+                beta_nl_c = np.asarray(params_c)[idx_c]
+                cov_nl_c = np.asarray(cov_params_c)[np.ix_(idx_c, idx_c)]
+                from scipy.stats import chi2 as _chi2
+                w_c = float(beta_nl_c @ np.linalg.solve(cov_nl_c, beta_nl_c))
+                crude_nl_p = round(float(_chi2.sf(w_c, df=int(len(idx_c)))), 6)
+            except Exception:
+                crude_nl_p = None
+
+            crude_block = {
+                "x_values": _clean(x_syn),
+                "or_values": _clean(or_vals_c),
+                "ci_low": _clean(ci_low_c),
+                "ci_high": _clean(ci_high_c),
+                "nonlinearity_p": crude_nl_p,
+            }
+        except Exception:
+            crude_block = None
+
     return {
         "predictor":      req.predictor,
         "outcome":        req.outcome,
@@ -1521,11 +1624,17 @@ def rcs_regression(req: RCSRequest):
         "covariates_summary":   cov_summary,
         "interaction":          interaction_result,
         "interaction_terms":    interaction_extra_names,
+        # Non-linearity Wald (joint test on the (k-2) non-linear basis columns)
+        "nonlinearity_wald":    nonlin_wald,
+        "nonlinearity_df":      nonlin_df,
+        "nonlinearity_p":       nonlin_p,
         "x_values":       _clean(x_syn),
         "or_values":      _clean(or_vals),   # kept for backward compat; really effect_type values
         "ci_low":         _clean(ci_low),
         "ci_high":        _clean(ci_high),
         "x_data":         _clean(x_raw[:500]),  # raw data rug (first 500 points)
+        # Crude (unadjusted) curve only present when covariates / interactions were used
+        "crude":          crude_block,
     }
 
 

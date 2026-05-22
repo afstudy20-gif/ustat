@@ -663,6 +663,17 @@ export default function RCSPanel() {
                   <span key={i} className="bg-indigo-50 border border-indigo-100 text-indigo-600 rounded px-1.5 py-0.5">{k}</span>
                 ))}
                 <span className="text-gray-400 ml-2">reference = <strong>{result.ref_value}</strong> ({eff.abbr} = {eff.refValue.toFixed(1)})</span>
+                {result.nonlinearity_p != null && (
+                  <span className={`ml-2 rounded px-1.5 py-0.5 border ${result.nonlinearity_p < 0.05 ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-gray-50 text-gray-600 border-gray-200"}`}
+                    title={`Joint Wald test on the ${(result.nonlinearity_df ?? "k-2")} non-linear basis columns`}>
+                    non-linearity {result.crude ? "adjusted " : ""}p = {result.nonlinearity_p < 0.001 ? "<0.001" : (result.nonlinearity_p as number).toFixed(3)}
+                  </span>
+                )}
+                {result.crude?.nonlinearity_p != null && (
+                  <span className="ml-1 rounded px-1.5 py-0.5 border bg-gray-50 text-gray-500 border-gray-200" title="Non-linearity test from the unadjusted model">
+                    crude p = {result.crude.nonlinearity_p < 0.001 ? "<0.001" : (result.crude.nonlinearity_p as number).toFixed(3)}
+                  </span>
+                )}
               </div>
 
               {Array.isArray(result.covariates_used) && result.covariates_used.length > 0 && (
@@ -706,77 +717,118 @@ export default function RCSPanel() {
                 <p className="text-xs text-red-500">Interaction test failed: {result.interaction.error}</p>
               )}
 
-              <TitledPlot
-                plotRefOut={rcsPlotRef}
-                storageKey={`rcs:${result.predictor}:${outcomeLabel}`}
-                defaultTitle={`${result.predictor}${outcomeLabel ? ` & ${outcomeLabel}` : ""}: ${modelTitle}`}
-                defaultSubtitle={`${result.n_knots} knots at ${((result.knots as number[]) ?? []).join(", ")} · reference = ${result.ref_value} (${eff.abbr} = ${eff.refValue.toFixed(1)})${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
-                defaultXAxis={result.predictor}
-                defaultYAxis={`${eff.label} (95% CI)`}
-                data={[
+              {(() => {
+                // Build dose-response figure data, optionally overlaying the
+                // crude (unadjusted) curve when the backend returned one.
+                const crude = result.crude as null | {
+                  x_values: number[]; or_values: number[];
+                  ci_low: number[]; ci_high: number[];
+                  nonlinearity_p: number | null;
+                };
+                const nlp = result.nonlinearity_p as number | null | undefined;
+                const nlAdjStr = nlp == null ? null : (nlp < 0.001 ? "<0.001" : nlp.toFixed(2));
+                const titleBase = `Restricted cubic spline: ${result.predictor}${outcomeLabel ? ` and ${outcomeLabel}` : ""}`;
+                const titleWithP = nlAdjStr
+                  ? `${titleBase} (non-linearity ${crude ? "adjusted " : ""}p=${nlAdjStr})`
+                  : titleBase;
+
+                const traces: any[] = [
+                  // Adjusted 95% CI band
                   {
-                    type: "scatter" as const,
-                    x: [...(result.x_values as number[]), ...(result.x_values as number[]).slice().reverse()],
+                    type: "scatter", x: [...(result.x_values as number[]), ...(result.x_values as number[]).slice().reverse()],
                     y: [...(result.ci_high as number[]), ...(result.ci_low as number[]).slice().reverse()],
-                    fill: "toself", fillcolor: "rgba(99,102,241,0.12)",
-                    line: { color: "transparent" }, hoverinfo: "skip", showlegend: false, name: "95% CI",
+                    fill: "toself", fillcolor: crude ? "rgba(220,38,38,0.13)" : "rgba(99,102,241,0.12)",
+                    line: { color: "transparent" }, hoverinfo: "skip", name: crude ? "95% CI (adjusted)" : "95% CI",
+                    showlegend: true,
                   },
+                  // Adjusted central line
                   {
-                    type: "scatter" as const, mode: "lines" as const,
+                    type: "scatter", mode: "lines",
                     x: result.x_values as number[], y: result.or_values as number[],
-                    line: { color: "#6366f1", width: 2.5 }, name: eff.label,
+                    line: { color: crude ? "#dc2626" : "#6366f1", width: 2.5 },
+                    name: crude
+                      ? `Adjusted${result.covariates_used?.length ? ` (${(result.covariates_used as string[]).join(" + ")})` : ""}`
+                      : eff.label,
                     hovertemplate: `${result.predictor}: %{x:.2f}<br>${eff.abbr}: %{y:.3f}<extra></extra>`,
                   },
-                  {
-                    type: "scatter" as const, mode: "markers" as const,
-                    x: (result.knots as number[]) ?? [],
-                    y: ((result.knots as number[]) ?? []).map((k: number) => {
-                      const xs = result.x_values as number[];
-                      const ys = result.or_values as number[];
-                      const idx = xs.reduce((best: number, x: number, i: number) =>
-                        Math.abs(x - k) < Math.abs(xs[best] - k) ? i : best, 0);
-                      return ys[idx];
-                    }),
-                    marker: { color: "#6366f1", size: 8, line: { color: "#fff", width: 2 } },
-                    name: "Knots",
-                    hovertemplate: `Knot: %{x:.2f}<br>${eff.abbr}: %{y:.3f}<extra></extra>`,
-                  },
-                  ...(rcsShowData ? [{
-                    type: "scatter" as const, mode: "markers" as const,
+                ];
+
+                if (crude) {
+                  traces.push({
+                    type: "scatter", mode: "lines",
+                    x: crude.x_values, y: crude.or_values,
+                    line: { color: "#475569", width: 2, dash: "dash" },
+                    name: "Crude (unadjusted)",
+                    hovertemplate: `${result.predictor}: %{x:.2f}<br>${eff.abbr} (crude): %{y:.3f}<extra></extra>`,
+                  });
+                }
+
+                // Knot markers
+                traces.push({
+                  type: "scatter", mode: "markers",
+                  x: (result.knots as number[]) ?? [],
+                  y: ((result.knots as number[]) ?? []).map((k: number) => {
+                    const xs = result.x_values as number[];
+                    const ys = result.or_values as number[];
+                    const idx = xs.reduce((best: number, x: number, i: number) =>
+                      Math.abs(x - k) < Math.abs(xs[best] - k) ? i : best, 0);
+                    return ys[idx];
+                  }),
+                  marker: { color: crude ? "#dc2626" : "#6366f1", size: 7, line: { color: "#fff", width: 1.5 } },
+                  name: "Knots",
+                  showlegend: false,
+                  hovertemplate: `Knot: %{x:.2f}<br>${eff.abbr}: %{y:.3f}<extra></extra>`,
+                });
+
+                if (rcsShowData) {
+                  traces.push({
+                    type: "scatter", mode: "markers",
                     x: result.x_data as number[],
                     y: Array((result.x_data as number[]).length).fill(useLogY ? Math.exp(-0.35) : (eff.refValue === 0 ? eff.refValue - 0.5 : 0.7)),
-                    marker: { color: "#6366f1", size: 3, opacity: 0.2, symbol: "line-ns-open" as const },
-                    yaxis: "y" as const, showlegend: false, hoverinfo: "skip" as const, name: "Data",
-                  }] : []),
-                ]}
-                layout={{
-                  ...PLOT_LAYOUT, autosize: true, height: 440,
-                  xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor }, zeroline: false },
-                  yaxis: {
-                    ...PLOT_LAYOUT.yaxis, showgrid: showGrid,
-                    title: { text: `${eff.label} (95% CI)` }, zeroline: false,
-                    ...(useLogY ? { type: "log" as const, dtick: 1 } : {}),
-                  },
-                  shapes: [
-                    { type: "line" as const, xref: "paper" as const, yref: "y" as const,
-                      x0: 0, x1: 1, y0: eff.refValue, y1: eff.refValue,
-                      line: { color: "#9ca3af", width: 1.5, dash: "dash" as const } },
-                  ],
-                  annotations: [
-                    { xref: "paper" as const, yref: "y" as const,
-                      x: 0.01, y: eff.refValue,
-                      text: `Reference (${eff.abbr} = ${eff.refValue.toFixed(1)})`,
-                      showarrow: false, font: { size: 10, color: "#9ca3af" },
-                      xanchor: "left" as const, yanchor: "bottom" as const },
-                  ],
-                  legend: { font: { size: 11, color: "#374151" }, x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const },
-                  margin: { t: 20, r: 20, b: 50, l: 65 },
-                }}
-                style={{ width: "100%", height: 520 }}
-                config={{ responsive: true, displaylogo: false,
-                  toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${outcomeLabel || "result"}`, width: 1200, height: 600 },
-                  modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
-              />
+                    marker: { color: "#9ca3af", size: 3, opacity: 0.25, symbol: "line-ns-open" },
+                    yaxis: "y", showlegend: false, hoverinfo: "skip", name: "Data",
+                  });
+                }
+
+                const yTitle = `${eff.label} (reference = ${result.ref_value}${eff.abbr === "Δ" ? "" : `, ${eff.abbr} = ${eff.refValue.toFixed(1)}`})`;
+
+                return (
+                  <TitledPlot
+                    plotRefOut={rcsPlotRef}
+                    storageKey={`rcs:${result.predictor}:${outcomeLabel}`}
+                    defaultTitle={titleWithP}
+                    defaultSubtitle={`${result.n_knots} knots at ${((result.knots as number[]) ?? []).join(", ")}${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
+                    defaultXAxis={result.predictor}
+                    defaultYAxis={yTitle}
+                    data={traces}
+                    layout={{
+                      ...PLOT_LAYOUT, autosize: true, height: 440,
+                      xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor }, zeroline: false },
+                      yaxis: {
+                        ...PLOT_LAYOUT.yaxis, showgrid: showGrid,
+                        title: { text: yTitle }, zeroline: false,
+                        ...(useLogY ? { type: "log" as const, dtick: 1 } : {}),
+                      },
+                      shapes: [
+                        // Horizontal reference at HR/OR = 1 (or Δ = 0)
+                        { type: "line", xref: "paper", yref: "y",
+                          x0: 0, x1: 1, y0: eff.refValue, y1: eff.refValue,
+                          line: { color: "#9ca3af", width: 1.2, dash: "dash" } },
+                        // Vertical reference at x = ref_value
+                        { type: "line", xref: "x", yref: "paper",
+                          x0: result.ref_value, x1: result.ref_value, y0: 0, y1: 1,
+                          line: { color: "#9ca3af", width: 1.2, dash: "dot" } },
+                      ],
+                      legend: { font: { size: 11, color: "#374151" }, x: 0.02, y: 0.06, xanchor: "left", yanchor: "bottom", bgcolor: "rgba(255,255,255,0.85)", bordercolor: "#e5e7eb", borderwidth: 1 },
+                      margin: { t: 20, r: 20, b: 50, l: 70 },
+                    }}
+                    style={{ width: "100%", height: 520 }}
+                    config={{ responsive: true, displaylogo: false,
+                      toImageButtonOptions: { format: "png", filename: `RCS_${result.predictor}_${outcomeLabel || "result"}`, width: 1200, height: 600 },
+                      modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
+                  />
+                );
+              })()}
 
               <div className="flex items-center gap-6 pt-1 border-t border-gray-100">
                 <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
