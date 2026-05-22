@@ -5,6 +5,7 @@ import { useStore, PALETTES } from "../store";
 import { runROC, runROCCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
+import { fmtP } from "../lib/format";
 
 // ── Helper to get current palette primary color ────────────────────────────
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
@@ -36,7 +37,6 @@ const aucColor = (auc: number) =>
 const aucLabel = (auc: number) =>
   auc >= 0.9 ? "Excellent" : auc >= 0.8 ? "Good" : auc >= 0.7 ? "Fair" : "Poor";
 const fmtPct = (v: number) => `${(v * 100).toFixed(1)}%`;
-const fmtP   = (p: number) => p < 0.001 ? "<0.001" : p.toFixed(4);
 const fmtAUC = (auc: number, lo?: number, hi?: number) =>
   lo != null && hi != null
     ? `AUC ${auc} (95% CI ${lo}–${hi})`

@@ -15,9 +15,9 @@ import { runPSM } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-const fmtP = (p: number) => (p < 0.001 ? "<0.001" : p.toFixed(3));
 const smdColor = (smd: number) =>
   smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
 
@@ -769,6 +769,17 @@ export default function PSMPanel() {
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
                       </div>
                     ))
+                  ) : result.outcome_result.type === "conditional_logistic" ? (
+                    [
+                      ["n (in fit)",           result.outcome_result.n],
+                      ["Informative sets",     result.outcome_result.n_informative_sets],
+                      ["Concordant sets",      result.outcome_result.n_uninformative_sets],
+                    ].map(([k, v]: any) => (
+                      <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
+                        <p className="text-[10px] text-gray-400">{k}</p>
+                        <p className="font-semibold text-gray-800 text-sm">{v}</p>
+                      </div>
+                    ))
                   ) : (
                     [
                       ["n (matched)", result.outcome_result.n],
@@ -822,6 +833,9 @@ export default function PSMPanel() {
                 <p className="text-[10px] text-gray-400">
                   {result.outcome_result.type === "stratified_cox"
                     ? "HR = Hazard Ratio (exp(β)). Stratified Cox preserves the matched-pair baseline hazard — each match set acts as its own stratum."
+                    : result.outcome_result.type === "conditional_logistic"
+                    ? (result.outcome_result.method_note
+                        ?? "Conditional logistic regression. Each matched set is its own stratum, so the intercept and pair-level confounding are absorbed into the conditional likelihood.")
                     : "OR = Odds Ratio (exp(β)). Results are from the matched cohort only. The treatment variable is included as a predictor."}
                 </p>
               </div>

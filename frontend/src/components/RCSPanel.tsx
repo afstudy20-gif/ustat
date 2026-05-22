@@ -6,6 +6,7 @@ import { runRCS, runCoxRCS } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import ResultExporter from "./ResultExporter";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
+import { fmtP } from "../lib/format";
 
 const PLOT_LAYOUT = {
   paper_bgcolor: "transparent",
@@ -15,12 +16,6 @@ const PLOT_LAYOUT = {
   xaxis: { gridcolor: "#e5e7eb" },
   yaxis: { gridcolor: "#e5e7eb" },
 };
-
-function fmtP(p: number | null | undefined): string {
-  if (p == null || Number.isNaN(p)) return "—";
-  if (p < 0.001) return "<0.001";
-  return p.toFixed(3);
-}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

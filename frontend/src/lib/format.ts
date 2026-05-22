@@ -1,0 +1,45 @@
+/**
+ * Centralised numeric formatters used everywhere a result is rendered.
+ *
+ * The p-value formatter is the canonical one — every panel should call
+ * `fmtP` for the *display* string and `fmtPFull` (or the underlying
+ * number) for the tooltip / clipboard / export. This keeps formatting
+ * identical across panels and exports, and lets the user always see
+ * the full-precision value on hover.
+ */
+
+/**
+ * Display p-value with 3 decimal places.
+ *   • null / NaN  → "—"
+ *   • < 0.001     → "<0.001"
+ *   • otherwise   → 3-decimal fixed (0.0293 → "0.029")
+ */
+export function fmtP(p: number | null | undefined): string {
+  if (p == null) return "—";
+  const n = typeof p === "number" ? p : parseFloat(p as any);
+  if (!Number.isFinite(n)) return "—";
+  if (n < 0.001) return "<0.001";
+  return n.toFixed(3);
+}
+
+/**
+ * Full-precision p-value for tooltips / hover / exports. Falls back to
+ * the same 3-decimal output when the input is already coarse.
+ */
+export function fmtPFull(p: number | null | undefined): string {
+  if (p == null) return "—";
+  const n = typeof p === "number" ? p : parseFloat(p as any);
+  if (!Number.isFinite(n)) return "—";
+  // For very small p we show scientific notation so significand is not lost.
+  if (n < 1e-4 && n > 0) return n.toExponential(3);
+  return n.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/**
+ * Standard tooltip wrapper. Used by every p-value cell so the user
+ * sees the full precision on hover.
+ */
+export function pCellTitle(p: number | null | undefined): string {
+  if (p == null) return "p = —";
+  return `p = ${fmtPFull(p)}`;
+}

@@ -15,9 +15,9 @@ import {
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import PlotExporter from "./PlotExporter";
+import { fmtP } from "../lib/format";
 
-// ── p-value formatter ──────────────────────────────────────────────────────────
-const fmtP = (p: number) => (p < 0.001 ? "<0.001" : p.toFixed(4));
+// ── p-value formatter (centralised in lib/format.ts) ───────────────────────────
 const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
 
 // ── CoefRow component ──────────────────────────────────────────────────────────

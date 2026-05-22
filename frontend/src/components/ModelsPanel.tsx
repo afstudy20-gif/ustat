@@ -7,6 +7,7 @@ import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES } from "../store";
+import { fmtP } from "../lib/format";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -146,7 +147,6 @@ function CoefTable({
   coefs: any[]; hrMode?: boolean; allColumns?: string[];
   selectedIdx?: number | null; onSelect?: (i: number) => void; nullHyp?: string;
 }) {
-  const fmtP = (p: number) => (p < 0.001 ? "<0.001" : p.toFixed(4));
   const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
 
   const isConst   = (n: string) => n === "const" || n === "Intercept";
@@ -347,7 +347,6 @@ function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
   nMulti?: number;
   nTotal?: number;
 }) {
-  const fmtP  = (p: number) => (p == null ? "–" : p < 0.001 ? "<0.001" : p.toFixed(4));
   const sig   = (p: number) => p == null ? "" : p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
   const fmtOR = (or: number | null, low: number | null, high: number | null) =>
     or == null ? "–" : `${or.toFixed(2)} (${low?.toFixed(2)}–${high?.toFixed(2)})`;
@@ -656,8 +655,6 @@ function ForestPlot({ result, modelType, outcome }: {
   );
 
   // ── Shared helpers ────────────────────────────────────────────────────────
-  const fmtP  = (p: number | null) =>
-    p == null ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
   const fmtCI = (est: number | null, lo: number | null, hi: number | null) =>
     est == null ? "—" : `${est.toFixed(2)} (${lo?.toFixed(2)}–${hi?.toFixed(2)})`;
 
@@ -1376,7 +1373,6 @@ function CoefDetailPanel({
 // ── Compact SPSS-style Model Summary Table ──────────────────────────────────
 
 function ModelSummaryTable({ s }: { s: any }) {
-  const fmtP = (p: number) => p < 0.001 ? "<0.001" : p.toFixed(4);
   const cl = s.classification;
   const hl = s.hosmer_lemeshow;
   const om = s.omnibus;
@@ -1515,6 +1511,11 @@ export default function ModelsPanel() {
   const [model, setModel] = useState("linear");
   const [outcome, setOutcome] = useState(numCols[0] ?? "");
   const [predictors, setPredictors] = useState<string[]>([]);
+  // Pairwise interaction terms applied to linear / logistic / Cox / poisson.
+  // Stored as [colA, colB]; rendered as a small picker below the predictor list.
+  const [glmInteractions, setGlmInteractions] = useState<Array<[string, string]>>([]);
+  const [glmIxA, setGlmIxA] = useState<string>("");
+  const [glmIxB, setGlmIxB] = useState<string>("");
 
   // ── New feature state ─────────────────────────────────────────────────────
   const [selectedCoefIdx, setSelectedCoefIdx] = useState<number | null>(null);
@@ -1595,12 +1596,13 @@ export default function ModelsPanel() {
     try {
       let res: any;
       const sf = buildScaleFactors();
-      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
-      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE });
+      const interactions = glmInteractions.length > 0 ? glmInteractions : undefined;
+      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE, interactions });
+      else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE, interactions });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
-      else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation });
+      else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation, interactions });
       setResult(res.data);
     } catch (e: any) {
       const detail = e.response?.data?.detail;
@@ -1835,6 +1837,62 @@ export default function ModelsPanel() {
                 </div>
               </div>
             </>
+          )}
+          {/* Pairwise interactions — linear / logistic / cox accept them
+              server-side (Poisson + OR-table do not yet). Hidden until at
+              least 2 predictors are ticked. */}
+          {(model === "linear" || model === "logistic" || model === "cox") && predictors.length >= 2 && (
+            <div className="panel space-y-1.5">
+              <p className="text-xs text-gray-500 font-medium flex items-center gap-1">
+                Interactions
+                <Tip wide text="Add pairwise interaction terms (e.g. AGE × SEX). Numeric × numeric is the element-wise product; numeric × categorical expands across every dummy of the categorical; categorical × categorical multiplies every dummy pair. The output coefficient table reports each interaction as 'A:B' with its own effect estimate and p-value. Use sparingly — each extra term costs degrees of freedom." />
+                {glmInteractions.length > 0 && (
+                  <span className="ml-1 text-indigo-600 font-semibold">{glmInteractions.length} added</span>
+                )}
+              </p>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <select value={glmIxA}
+                  onChange={(e) => setGlmIxA(e.target.value)}
+                  className="select text-xs py-1">
+                  <option value="">First term…</option>
+                  {predictors.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <span className="text-gray-400 text-xs">×</span>
+                <select value={glmIxB}
+                  onChange={(e) => setGlmIxB(e.target.value)}
+                  className="select text-xs py-1">
+                  <option value="">Second term…</option>
+                  {predictors.filter((p) => p !== glmIxA).map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <button
+                  onClick={() => {
+                    if (!glmIxA || !glmIxB || glmIxA === glmIxB) return;
+                    const exists = glmInteractions.some(
+                      ([a, b]) => (a === glmIxA && b === glmIxB) || (a === glmIxB && b === glmIxA),
+                    );
+                    if (exists) return;
+                    setGlmInteractions([...glmInteractions, [glmIxA, glmIxB]]);
+                    setGlmIxA(""); setGlmIxB("");
+                  }}
+                  disabled={!glmIxA || !glmIxB || glmIxA === glmIxB}
+                  className="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 transition-colors"
+                >+ Add</button>
+              </div>
+              {glmInteractions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {glmInteractions.map(([a, b], i) => (
+                    <span key={`${a}:${b}:${i}`}
+                      className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded px-2 py-0.5">
+                      {a} × {b}
+                      <button onClick={() => setGlmInteractions(glmInteractions.filter((_, idx) => idx !== i))}
+                        className="text-amber-500 hover:text-red-500" title="Remove">×</button>
+                    </span>
+                  ))}
+                  <button onClick={() => setGlmInteractions([])}
+                    className="text-[10px] text-gray-400 hover:text-red-500 underline">clear all</button>
+                </div>
+              )}
+            </div>
           )}
           <MissingGuard
             sessionId={sid}

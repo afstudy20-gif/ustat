@@ -7,7 +7,7 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from services import store
 from services.impute import apply_imputation
 from services.rcs_basis import (
@@ -61,6 +61,11 @@ class LinearRequest(BaseModel):
     predictors: List[str]
     imputation: Optional[str] = "listwise"
     robust_se: Optional[bool] = False
+    # Optional pairwise interactions — same semantics as the Cox endpoint:
+    # each entry is [colA, colB]. Numeric × numeric is the element-wise
+    # product; categorical columns expand into one interaction per surviving
+    # dummy (e.g. SEX × AGE produces SEX_M:AGE).
+    interactions: Optional[List[List[str]]] = None
 
 
 @router.post("/linear")
@@ -69,8 +74,9 @@ def linear_regression(req: LinearRequest):
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
     n_excluded = n_total - len(df)
-    X = pd.get_dummies(df[req.predictors], drop_first=True)
-    X = sm.add_constant(X.astype(float))
+    X_enc = pd.get_dummies(df[req.predictors], drop_first=True).astype(float)
+    X_enc, ix_added = _add_pairwise_interactions(X_enc, req.interactions, req.predictors)
+    X = sm.add_constant(X_enc)
     y = df[req.outcome].astype(float)
     base = sm.OLS(y, X)
     model = base.fit(cov_type="HC3", use_t=True) if req.robust_se else base.fit()
@@ -153,6 +159,59 @@ def _linear_results_text(outcome, coefs, model):
     return " ".join(parts)
 
 
+def _add_pairwise_interactions(
+    enc: pd.DataFrame,
+    interactions: Optional[List[List[str]]],
+    requested_predictors: List[str],
+) -> Tuple[pd.DataFrame, List[str]]:
+    """Append pairwise interaction columns (A × B = element-wise product on
+    the dummy-coded design) to a design matrix. Numeric columns survive as
+    themselves; categorical columns expand into one column per surviving
+    dummy (so SEX × AGE on a 3-level SEX becomes SEX_M:AGE + SEX_O:AGE).
+
+    Returns (new_enc, list_of_added_column_names). Raises HTTPException on
+    invalid input.
+    """
+    if not interactions:
+        return enc, []
+
+    out = enc.copy()
+    added: List[str] = []
+
+    def _members(name: str) -> List[str]:
+        if name in out.columns:
+            return [name]
+        prefix = f"{name}_"
+        return [c for c in out.columns if c.startswith(prefix)]
+
+    requested_set = set(requested_predictors)
+    for pair in interactions:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise HTTPException(status_code=422, detail=f"Each interaction must be a [colA, colB] pair. Got: {pair}")
+        a_name, b_name = pair
+        for nm in (a_name, b_name):
+            if nm not in requested_set:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Interaction '{a_name} × {b_name}': '{nm}' must already be in the predictors list."
+                )
+        a_members = _members(a_name)
+        b_members = _members(b_name)
+        if not a_members or not b_members:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Interaction '{a_name} × {b_name}': one or both columns did not survive dummy encoding."
+            )
+        for a in a_members:
+            for b in b_members:
+                col = f"{a}:{b}"
+                if col in out.columns:
+                    continue  # avoid duplicate when user lists same pair twice
+                out[col] = out[a] * out[b]
+                added.append(col)
+    return out, added
+
+
 # ── Logistic Regression ───────────────────────────────────────────────────────
 
 class LogisticRequest(BaseModel):
@@ -163,6 +222,8 @@ class LogisticRequest(BaseModel):
     selection: Optional[str] = "all"
     imputation: Optional[str] = "listwise"
     robust_se: Optional[bool] = False
+    # Optional pairwise interactions — same semantics as the Cox endpoint.
+    interactions: Optional[List[List[str]]] = None
 
 
 def _apply_scaling(df: pd.DataFrame, predictors: List[str], scale_factors: Optional[dict]):
@@ -266,6 +327,7 @@ def logistic_regression(req: LogisticRequest):
     n_excluded = n_total - len(df)
     df, pred_list = _apply_scaling(df, req.predictors, req.scale_factors)
     X = pd.get_dummies(df[pred_list], drop_first=True).astype(float)
+    X, _ix_added = _add_pairwise_interactions(X, req.interactions, pred_list)
     X_const = sm.add_constant(X)
     y = df[req.outcome]  # outcome column not scaled
     if y.dtype == object:
@@ -3587,73 +3649,107 @@ def _run_psm(req: PSMRequest):
             if not out_vals <= {0, 1, 0.0, 1.0}:
                 outcome_result = {"error": f"Outcome must be binary 0/1 for matched analysis. Found: {sorted(out_vals)[:10]}"}
             else:
-                # Use GEE with matched-pair clustering for valid SEs
-                from statsmodels.genmod.generalized_estimating_equations import GEE
-                from statsmodels.genmod.families import Binomial
-                from statsmodels.genmod.cov_struct import Exchangeable
+                # Matched binary outcome → CONDITIONAL LOGISTIC REGRESSION
+                # (also known as clogit / Cox partial likelihood with
+                # stratified pairs). Each matched set is its own stratum so
+                # the intercept and any time-invariant pair-level effects
+                # are absorbed into the conditioning, leaving only the
+                # treatment effect and any within-pair covariates. For 1:1
+                # matching with no other covariates this reduces to
+                # McNemar's test on the discordant pairs.
+                from statsmodels.discrete.conditional_models import ConditionalLogit
 
                 df_out = df_matched[[req.treatment_col, req.outcome_col, "_match_id_"]].copy()
                 df_out[req.outcome_col] = y_out.astype(int)
-                df_out[req.treatment_col] = df_out[req.treatment_col].astype(float)
+                df_out[req.treatment_col] = pd.to_numeric(df_out[req.treatment_col], errors="coerce").astype(float)
+                df_out = df_out.dropna()
 
-                formula = f"Q('{req.outcome_col}') ~ Q('{req.treatment_col}')"
-                try:
-                    gee_model = GEE.from_formula(
-                        formula, groups="_match_id_", data=df_out,
-                        family=Binomial(), cov_struct=Exchangeable()
-                    )
-                    m_out = gee_model.fit()
-                    ci_out = m_out.conf_int()
-                    coefs_out = []
-                    for var in m_out.params.index:
-                        est = float(m_out.params[var])
-                        coefs_out.append({
-                            "variable": str(var),
-                            "estimate": round(est, 6),
-                            "or": round(float(np.exp(est)), 4),
-                            "se": round(float(m_out.bse[var]), 6),
-                            "z": round(float(m_out.tvalues[var]), 4),
-                            "p": round(float(m_out.pvalues[var]), 6),
-                            "ci_low":  round(float(ci_out.loc[var, 0]), 4),
-                            "ci_high": round(float(ci_out.loc[var, 1]), 4),
-                            "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
-                            "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
-                        })
+                # Drop matched sets that are uninformative for clogit:
+                # a stratum where every outcome is 0 or every outcome is 1
+                # contributes 0 to the conditional likelihood, so we count
+                # them but exclude from the fit.
+                grp_y = df_out.groupby("_match_id_")[req.outcome_col]
+                informative_ids = grp_y.nunique().loc[lambda s: s > 1].index
+                n_informative_pairs = int(len(informative_ids))
+                df_clogit = df_out[df_out["_match_id_"].isin(informative_ids)].copy()
+
+                if n_informative_pairs == 0:
                     outcome_result = {
-                        "type": "gee_matched",
-                        "model": "GEE Logistic (matched-pair clusters)",
-                        "n": int(len(df_matched)),
-                        "n_clusters": int(len(matched_treated)),
-                        "coefficients": coefs_out,
+                        "error": "No informative (discordant) matched sets — every pair has identical outcomes. Conditional logistic cannot fit.",
                     }
-                except Exception:
-                    # Fallback to standard logistic with robust SE
-                    X_out = sm.add_constant(df_out[[req.treatment_col]].astype(float))
-                    m_out = sm.Logit(y_out.astype(int).values, X_out).fit(disp=False, cov_type="HC1")
-                    ci_out = m_out.conf_int()
-                    coefs_out = []
-                    for var in m_out.params.index:
-                        est = float(m_out.params[var])
-                        coefs_out.append({
-                            "variable": str(var),
-                            "estimate": round(est, 6),
-                            "or": round(float(np.exp(est)), 4),
-                            "se": round(float(m_out.bse[var]), 6),
-                            "z": round(float(m_out.tvalues[var]), 4),
-                            "p": round(float(m_out.pvalues[var]), 6),
-                            "ci_low":  round(float(ci_out.loc[var, 0]), 4),
-                            "ci_high": round(float(ci_out.loc[var, 1]), 4),
-                            "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
-                            "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
-                        })
-                    outcome_result = {
-                        "type": "logistic_robust",
-                        "model": "Logistic Regression [Robust SE] (matched cohort)",
-                        "n": int(len(df_matched)),
-                        "coefficients": coefs_out,
-                        "aic": round(float(m_out.aic), 2),
-                        "bic": round(float(m_out.bic), 2),
-                    }
+                else:
+                    try:
+                        X_out = df_clogit[[req.treatment_col]].astype(float).values
+                        y_arr_out = df_clogit[req.outcome_col].astype(int).values
+                        grp_arr = df_clogit["_match_id_"].values
+                        mod_cl = ConditionalLogit(
+                            y_arr_out, X_out, groups=grp_arr,
+                        )
+                        res_cl = mod_cl.fit(disp=False)
+                        # ConditionalLogit exposes params in the same order
+                        # as the columns of X — single coefficient for the
+                        # treatment indicator here.
+                        coef = float(res_cl.params[0])
+                        se = float(res_cl.bse[0])
+                        p_val = float(res_cl.pvalues[0])
+                        ci_lo = coef - 1.959963984540054 * se
+                        ci_hi = coef + 1.959963984540054 * se
+                        coefs_out = [{
+                            "variable": req.treatment_col,
+                            "estimate": round(coef, 6),
+                            "or": round(float(np.exp(coef)), 4),
+                            "se": round(se, 6),
+                            "z": round(coef / se, 4) if se > 0 else None,
+                            "p": round(p_val, 6),
+                            "ci_low":  round(ci_lo, 4),
+                            "ci_high": round(ci_hi, 4),
+                            "or_low":  round(float(np.exp(ci_lo)), 4),
+                            "or_high": round(float(np.exp(ci_hi)), 4),
+                        }]
+                        outcome_result = {
+                            "type": "conditional_logistic",
+                            "model": "Conditional logistic regression (matched-set stratification)",
+                            "n": int(len(df_clogit)),
+                            "n_matched_sets": int(df_out["_match_id_"].nunique()),
+                            "n_informative_sets": n_informative_pairs,
+                            "n_uninformative_sets": int(df_out["_match_id_"].nunique()) - n_informative_pairs,
+                            "coefficients": coefs_out,
+                            "log_likelihood": round(float(res_cl.llf), 4),
+                            "method_note": (
+                                "Conditional likelihood treats each matched set as a stratum. "
+                                "Uninformative (concordant) sets contribute 0 to the likelihood and are dropped. "
+                                "For 1:1 matching with treatment as the only covariate this is equivalent to McNemar's test."
+                            ),
+                        }
+                    except Exception as cl_exc:
+                        # Fallback to standard logistic with HC1 — should be rare.
+                        X_out = sm.add_constant(df_out[[req.treatment_col]].astype(float))
+                        m_out = sm.Logit(df_out[req.outcome_col].astype(int).values, X_out).fit(disp=False, cov_type="HC1")
+                        ci_out = m_out.conf_int()
+                        coefs_out = []
+                        for var in m_out.params.index:
+                            est = float(m_out.params[var])
+                            coefs_out.append({
+                                "variable": str(var),
+                                "estimate": round(est, 6),
+                                "or": round(float(np.exp(est)), 4),
+                                "se": round(float(m_out.bse[var]), 6),
+                                "z": round(float(m_out.tvalues[var]), 4),
+                                "p": round(float(m_out.pvalues[var]), 6),
+                                "ci_low":  round(float(ci_out.loc[var, 0]), 4),
+                                "ci_high": round(float(ci_out.loc[var, 1]), 4),
+                                "or_low":  round(float(np.exp(ci_out.loc[var, 0])), 4),
+                                "or_high": round(float(np.exp(ci_out.loc[var, 1])), 4),
+                            })
+                        outcome_result = {
+                            "type": "logistic_robust",
+                            "model": "Logistic Regression [Robust SE] (matched cohort, clogit fallback)",
+                            "n": int(len(df_matched)),
+                            "coefficients": coefs_out,
+                            "aic": round(float(m_out.aic), 2),
+                            "bic": round(float(m_out.bic), 2),
+                            "method_note": f"Conditional logistic fit failed ({cl_exc}); fell back to logistic with robust SE.",
+                        }
         except Exception as ex:
             outcome_result = {"error": str(ex)}
 
