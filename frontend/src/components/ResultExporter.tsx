@@ -13,6 +13,7 @@
  */
 import { useState } from "react";
 import { Download } from "lucide-react";
+import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
 
 interface Props {
   title: string;
@@ -91,6 +92,26 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
   });
 }
 
+async function downloadTIFF(plotRef: React.RefObject<any>, filename: string) {
+  // Resolve the Plotly graph div the same way downloadPNG does.
+  const candidates: any[] = [];
+  const r = plotRef.current;
+  if (r) {
+    candidates.push(r.el);
+    candidates.push(r);
+    candidates.push(r.elRef?.current);
+    if (typeof r.querySelector === "function") {
+      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
+    }
+  }
+  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+  if (!el) {
+    throw new Error("plot is not mounted yet — wait for the chart to render and try again");
+  }
+  const blob = await plotlyToTiffBlob(el, { width: 1200, height: 700, dpi: 300 });
+  downloadBlob(blob, `${filename}.tiff`);
+}
+
 export default function ResultExporter({ title, headers, rows, plotRef, className = "" }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -99,7 +120,7 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
   const hasTable = headers && rows;
   const hasPlot = !!plotRef;
 
-  const handle = async (format: "csv" | "xlsx" | "png") => {
+  const handle = async (format: "csv" | "xlsx" | "png" | "tiff") => {
     if (busy) return;
     setBusy(format);
     setErr(null);
@@ -107,6 +128,7 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
       if (format === "csv" && hasTable) downloadCSV(safeTitle, headers, rows);
       if (format === "xlsx" && hasTable) await downloadXLSX(safeTitle, headers, rows);
       if (format === "png" && hasPlot) await downloadPNG(plotRef, safeTitle);
+      if (format === "tiff" && hasPlot) await downloadTIFF(plotRef, safeTitle);
     } catch (e) {
       console.error("Export error:", e);
       const msg = e instanceof Error ? e.message : String(e);
@@ -142,13 +164,23 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
         </>
       )}
       {hasPlot && (
-        <button
-          onClick={() => handle("png")}
-          disabled={!!busy}
-          className="px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 transition-colors"
-        >
-          {busy === "png" ? "…" : "PNG 300dpi"}
-        </button>
+        <>
+          <button
+            onClick={() => handle("png")}
+            disabled={!!busy}
+            className="px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+          >
+            {busy === "png" ? "…" : "PNG 300dpi"}
+          </button>
+          <button
+            onClick={() => handle("tiff")}
+            disabled={!!busy}
+            title="Baseline uncompressed RGB TIFF (journal-ready, larger file)"
+            className="px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+          >
+            {busy === "tiff" ? "…" : "TIFF 300dpi"}
+          </button>
+        </>
       )}
       {err && (
         <span

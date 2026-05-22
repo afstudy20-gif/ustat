@@ -4,6 +4,9 @@
  * top-level dependency on plotly.js (the chart component already loads it).
  */
 import { useState } from "react";
+import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
+
+type ExportFmt = "png" | "svg" | "tiff" | "jpeg";
 
 interface Props {
   plotRef: React.RefObject<any>;
@@ -15,7 +18,7 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
   const [open, setOpen]     = useState(false);
   const [width, setWidth]   = useState(1200);
   const [height, setHeight] = useState(700);
-  const [fmt, setFmt]       = useState<"png" | "svg">("png");
+  const [fmt, setFmt]       = useState<ExportFmt>("png");
   const [dpi, setDpi]       = useState(300);
   const [busy, setBusy]     = useState(false);
 
@@ -45,11 +48,18 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
     if (!el) return;
     setBusy(true);
     try {
-      // Lazy import: plotly is already in the bundle (loaded by chart components),
-      // so this resolves instantly from the module cache with no extra network cost.
-      const Plotly = (await import("plotly.js")).default;
-      const scale = fmt === "png" ? dpi / 72 : 1;  // SVG is vector, no DPI needed
-      await Plotly.downloadImage(el, { format: fmt, width, height, filename: safeTitle, ...(scale !== 1 ? { scale } : {}) } as any);
+      if (fmt === "tiff") {
+        // Plotly cannot emit TIFF natively — rasterise to PNG at the
+        // requested DPI, then encode an uncompressed baseline RGB TIFF.
+        const blob = await plotlyToTiffBlob(el, { width, height, dpi });
+        downloadBlob(blob, `${safeTitle}.tiff`);
+      } else {
+        // Lazy import: plotly is already in the bundle (loaded by chart components),
+        // so this resolves instantly from the module cache with no extra network cost.
+        const Plotly = (await import("plotly.js")).default;
+        const scale = (fmt === "png" || fmt === "jpeg") ? dpi / 72 : 1;  // SVG vector
+        await Plotly.downloadImage(el, { format: fmt, width, height, filename: safeTitle, ...(scale !== 1 ? { scale } : {}) } as any);
+      }
     } finally {
       setBusy(false);
       setOpen(false);
@@ -83,16 +93,16 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
             </div>
           </div>
 
-          <div className="flex rounded overflow-hidden border border-gray-200">
-            {(["png", "svg"] as const).map(f => (
+          <div className="grid grid-cols-4 gap-0 rounded overflow-hidden border border-gray-200">
+            {(["png", "tiff", "jpeg", "svg"] as const).map(f => (
               <button key={f} onClick={() => setFmt(f)}
-                className={`flex-1 text-xs py-1 transition-colors ${fmt === f ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
+                className={`text-xs py-1 transition-colors ${fmt === f ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"}`}>
                 {f.toUpperCase()}
               </button>
             ))}
           </div>
 
-          {fmt === "png" && (
+          {(fmt === "png" || fmt === "tiff" || fmt === "jpeg") && (
             <div>
               <label className="text-[10px] text-gray-400 block mb-0.5">DPI (resolution)</label>
               <div className="flex rounded overflow-hidden border border-gray-200">
@@ -103,6 +113,11 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
                   </button>
                 ))}
               </div>
+              {fmt === "tiff" && (
+                <p className="text-[9px] text-gray-400 mt-1 leading-tight">
+                  Uncompressed RGB baseline TIFF. Journal-ready; file sizes are larger than PNG.
+                </p>
+              )}
             </div>
           )}
 
