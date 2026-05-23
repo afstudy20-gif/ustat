@@ -45,6 +45,30 @@ def sid(synth):
 
 
 @pytest.fixture(scope="module")
+def sid_competing(synth):
+    """Augment `synth` with a 3-level competing-risks event column.
+
+    0 = censored, 1 = cause of interest, 2 = competing event.
+    Probabilities depend mildly on AGE / LDL / DM so the Fine-Gray
+    sHR regression has signal to pick up.
+    """
+    rng = np.random.default_rng(7)
+    n = len(synth)
+    base = synth.copy().reset_index(drop=True)
+    # Latent intensities for the two competing causes
+    lin_int = -3 + 0.03 * base["AGE"].values + 0.02 * base["DM"].values - 0.01 * base["LDL"].values
+    lin_comp = -3.5 + 0.02 * base["AGE"].values + 0.04 * base["HT"].values
+    p_int = 1 / (1 + np.exp(-lin_int))
+    p_comp = 1 / (1 + np.exp(-lin_comp))
+    u = rng.uniform(0, 1, n)
+    comp_event = np.zeros(n, dtype=int)
+    comp_event[u < p_int] = 1
+    comp_event[(u >= p_int) & (u < p_int + p_comp)] = 2
+    base["comp_event"] = comp_event
+    return make_session(base, "v2_competing_session")
+
+
+@pytest.fixture(scope="module")
 def sid_tv(synth):
     # Long-format 2 intervals per subject for Cox-TV
     rows = []
@@ -243,7 +267,32 @@ def test_iptw_estimands_and_outcomes(client, sid, estimand, outcome_type, trunc)
     assert len(out["coefficients"]) >= 1
 
 
-# 16. Method appendix DOCX
+# 16. Fine-Gray subdistribution-hazard regression (v2.1.1)
+def test_fine_gray_regression(client, sid_competing):
+    r = client.post("/api/survival_advanced/fine_gray", json={
+        "session_id": sid_competing,
+        "duration_col": "duration",
+        "event_col": "comp_event",
+        "event_of_interest": 1,
+        "predictors": ["AGE", "LDL", "DM"],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert "regression_result" in d and d["regression_result"]
+    reg = d["regression_result"]
+    assert reg["method"] == "fine_gray_regression"
+    assert reg["n_events_of_interest"] > 0
+    assert reg["n_competing"] > 0
+    coefs = reg["coefficients"]
+    names = {c["variable"] for c in coefs}
+    # Numeric predictors stay under their original names; DM is binary 0/1 and
+    # is treated as numeric by the encoder, so DM should be in the coef list.
+    assert {"AGE", "LDL", "DM"} <= names
+    for c in coefs:
+        assert "shr" in c and "p" in c and "ci_low" in c and "ci_high" in c
+
+
+# 17. Method appendix DOCX
 def test_method_appendix(client, sid):
     # First ensure SOME audit-loggable analysis has run
     client.post("/api/models/linear",

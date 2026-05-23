@@ -185,6 +185,188 @@ class FineGrayRequest(BaseModel):
     event_col: str
     event_of_interest: int = 1
     group_col: Optional[str] = None
+    # Subdistribution-hazard regression (Fine-Gray 1999) via the Geskus 2011
+    # IPCW-weighted Cox recipe. When non-empty the endpoint also returns a
+    # `regression_result` block with subdistribution hazard ratios (sHR).
+    predictors: Optional[List[str]] = None
+    imputation: Optional[str] = "listwise"
+
+
+def _fine_gray_fit(df: pd.DataFrame, duration: str, event: str,
+                   cause: int, predictors: List[str]) -> dict:
+    """Fit a Fine-Gray subdistribution hazard regression via Geskus's
+    (2011) IPCW-weighted Cox reformulation. Mathematically equivalent
+    to Fine & Gray (1999) and free of external dependencies beyond
+    lifelines.
+
+    Algorithm:
+      1. Estimate Ĝ(t) — Kaplan-Meier of the censoring distribution
+         (event = 1 iff e == 0).
+      2. Build an augmented long-format dataset:
+         • cause-of-interest subject  → (0, t_i, evt=1, w=1)
+         • competing-event subject    → pseudo-rows (0, s, evt=0,
+             w = Ĝ(s)/Ĝ(t_i)) at every cause-of-interest event time
+             s > t_i; weight is 0 once Ĝ(s) collapses to 0.
+         • censored subject           → (0, t_i, evt=0, w=1)
+      3. Fit lifelines.CoxPHFitter on this dataset with weights_col
+         and robust=True (Lin-Wei sandwich SE).
+    """
+    from lifelines import CoxPHFitter, KaplanMeierFitter
+
+    # Encode predictors: numeric stays numeric, categorical → dummies
+    # (drop_first=True). This matches the existing Cox endpoint in
+    # backend/routers/models.py so the user sees consistent dummy names.
+    pred_raw = df[predictors].copy()
+    numeric_pred: List[str] = []
+    cat_pred: List[str] = []
+    for c in predictors:
+        col = pred_raw[c]
+        if pd.api.types.is_numeric_dtype(col):
+            numeric_pred.append(c)
+        else:
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= 0.8 and len(coerced.dropna().unique()) > 2:
+                pred_raw[c] = coerced
+                numeric_pred.append(c)
+            else:
+                cat_pred.append(c)
+    num_part = pred_raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=pred_raw.index)
+    cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1).astype(float)
+
+    work = pd.concat(
+        [df[[duration, event]].reset_index(drop=True), enc.reset_index(drop=True)],
+        axis=1,
+    ).dropna()
+    if len(work) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows after dropping NA in predictors / duration / event (need ≥ 10, got {len(work)}).")
+
+    t = work[duration].values.astype(float)
+    e = work[event].values.astype(int)
+    cov_cols = list(enc.columns)
+    if not cov_cols:
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+
+    # Censoring KM Ĝ(t): event indicator is "censored" (e == 0).
+    kmf_c = KaplanMeierFitter()
+    kmf_c.fit(t, (e == 0).astype(int))
+    g_at = kmf_c.survival_function_.iloc[:, 0]  # Series indexed by time
+    g_times = g_at.index.values.astype(float)
+    g_vals = g_at.values.astype(float)
+
+    def _g(tau: float) -> float:
+        """Right-continuous Ĝ(tau): largest indexed time ≤ tau."""
+        idx = np.searchsorted(g_times, tau, side="right") - 1
+        if idx < 0:
+            return 1.0
+        return float(g_vals[idx])
+
+    cause_event_times = np.sort(np.unique(t[e == cause]))
+    if len(cause_event_times) == 0:
+        raise HTTPException(status_code=422, detail=f"No subjects experienced the event of interest (code {cause}).")
+
+    # Cap on augmented row count — defends against pathological inputs where
+    # N_competing × K_event_times explodes (e.g. ten thousand subjects all
+    # with a competing event and a thousand distinct cause-of-interest times).
+    n_competing = int(((e != cause) & (e != 0)).sum())
+    if n_competing * len(cause_event_times) > 500_000:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Augmented Fine-Gray dataset would exceed 500 000 rows "
+                f"({n_competing} competing-event subjects × "
+                f"{len(cause_event_times)} unique event times of interest). "
+                "Reduce the dataset (e.g. coarser duration units, fewer subjects) "
+                "or fit on a stratified subset."
+            ),
+        )
+
+    # Build augmented dataset
+    rows: List[dict] = []
+    cov_arr = work[cov_cols].values
+    for i in range(len(work)):
+        ti = float(t[i])
+        ei = int(e[i])
+        cov_i = cov_arr[i]
+        if ei == cause:
+            row = {"_stop_": ti, "_event_": 1, "_w_": 1.0}
+            for cj, name in enumerate(cov_cols):
+                row[name] = float(cov_i[cj])
+            rows.append(row)
+        elif ei == 0:
+            row = {"_stop_": ti, "_event_": 0, "_w_": 1.0}
+            for cj, name in enumerate(cov_cols):
+                row[name] = float(cov_i[cj])
+            rows.append(row)
+        else:
+            g_ti = _g(ti)
+            if g_ti <= 0:
+                continue
+            future_ev = cause_event_times[cause_event_times > ti]
+            for s in future_ev:
+                w_s = _g(float(s)) / g_ti
+                if w_s <= 0:
+                    break
+                row = {"_stop_": float(s), "_event_": 0, "_w_": float(w_s)}
+                for cj, name in enumerate(cov_cols):
+                    row[name] = float(cov_i[cj])
+                rows.append(row)
+
+    aug = pd.DataFrame(rows)
+    if aug["_event_"].sum() == 0:
+        raise HTTPException(status_code=422, detail="No cause-of-interest events present after building the augmented dataset.")
+
+    cph = CoxPHFitter()
+    cph.fit(aug, duration_col="_stop_", event_col="_event_",
+            weights_col="_w_", robust=True)
+
+    ci = cph.confidence_intervals_
+    coefs: List[dict] = []
+    for var in cph.params_.index:
+        beta = float(cph.params_[var])
+        se_v = float(cph.standard_errors_[var])
+        try:
+            p_v = float(cph.summary["p"].loc[var])
+        except Exception:
+            p_v = None
+        try:
+            lo = float(ci.loc[var, ci.columns[0]])
+            hi = float(ci.loc[var, ci.columns[1]])
+        except Exception:
+            lo = hi = float("nan")
+        coefs.append({
+            "variable": str(var),
+            "estimate": round(beta, 6),
+            "shr": round(float(np.exp(beta)), 4),
+            "se": round(se_v, 6),
+            "z": round(beta / se_v, 4) if se_v > 0 else None,
+            "p": round(p_v, 6) if p_v is not None else None,
+            "ci_low": round(lo, 4) if math.isfinite(lo) else None,
+            "ci_high": round(hi, 4) if math.isfinite(hi) else None,
+            "shr_low": round(float(np.exp(lo)), 4) if math.isfinite(lo) else None,
+            "shr_high": round(float(np.exp(hi)), 4) if math.isfinite(hi) else None,
+        })
+
+    return {
+        "method": "fine_gray_regression",
+        "model": "Fine-Gray subdistribution hazards (IPCW-weighted Cox, Lin-Wei robust SE)",
+        "n": int(len(work)),
+        "n_events_of_interest": int((e == cause).sum()),
+        "n_competing": int(((e != cause) & (e != 0)).sum()),
+        "n_censored": int((e == 0).sum()),
+        "n_augmented_rows": int(len(aug)),
+        "concordance": round(float(cph.concordance_index_), 4),
+        "coefficients": coefs,
+        "method_note": (
+            "Fine-Gray subdistribution hazard regression fit via the Geskus "
+            "(2011) IPCW-weighted Cox reformulation — mathematically equivalent "
+            "to Fine & Gray (1999). Competing-event subjects stay at risk past "
+            "their event time with weights Ĝ(s)/Ĝ(t_i) from the Kaplan-Meier "
+            "estimate of the censoring distribution. Lin-Wei sandwich estimator "
+            "for the standard errors. Output sHR = exp(β) is the subdistribution "
+            "hazard ratio for the cause of interest."
+        ),
+    }
 
 
 @router.post("/fine_gray")
@@ -333,6 +515,42 @@ def fine_gray(req: FineGrayRequest):
         f"summary(fg)"
     )
 
+    # ── Subdistribution hazard regression (Fine-Gray 1999 / Geskus 2011) ──
+    regression_result: Optional[dict] = None
+    if req.predictors:
+        missing_preds = [c for c in req.predictors if c not in df.columns]
+        if missing_preds:
+            raise HTTPException(status_code=422, detail=f"Predictor columns not found: {missing_preds}")
+        # Reuse the imputation infrastructure used by other survival endpoints
+        from services.impute import apply_imputation
+        cols_needed = [req.duration_col, req.event_col] + req.predictors
+        df_reg = apply_imputation(df[cols_needed], cols_needed, req.imputation or "listwise").reset_index(drop=True)
+        # Coerce duration/event numeric; event_of_interest match is integer.
+        df_reg[req.duration_col] = pd.to_numeric(df_reg[req.duration_col], errors="coerce")
+        df_reg[req.event_col] = pd.to_numeric(df_reg[req.event_col], errors="coerce")
+        regression_result = _fine_gray_fit(
+            df_reg, req.duration_col, req.event_col, int(req.event_of_interest), list(req.predictors),
+        )
+        if regression_result is not None:
+            result_text = (
+                result_text
+                + f" Fine-Gray subdistribution-hazard regression on {len(req.predictors)} "
+                  f"predictor(s) — see the sHR table for details."
+            )
+
+    # Audit
+    try:
+        store.log_action(req.session_id, "fine_gray", {
+            "duration_col": req.duration_col,
+            "event_col": req.event_col,
+            "event_of_interest": int(req.event_of_interest),
+            "group_col": req.group_col,
+            "n_predictors": len(req.predictors or []),
+            "ran_regression": regression_result is not None,
+        })
+    except Exception:
+        pass
+
     return {
         "test": "Fine-Gray Competing Risks",
         "n": n_total,
@@ -346,6 +564,7 @@ def fine_gray(req: FineGrayRequest):
         "result_text": result_text,
         "export_rows": export_rows,
         "r_code": r_code,
+        "regression_result": regression_result,
     }
 
 

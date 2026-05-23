@@ -175,6 +175,8 @@ export default function SurvivalAdvancedPanel() {
   const [fgEvent, setFgEvent] = useState("");
   const [fgInterest, setFgInterest] = useState(1);
   const [fgGroup, setFgGroup] = useState("");
+  const [fgPredictors, setFgPredictors] = useState<string[]>([]);
+  const [fgPredFilter, setFgPredFilter] = useState("");
   const [fgResult, setFgResult] = useState<any>(null);
   const [fgLoading, setFgLoading] = useState(false);
   const [fgError, setFgError] = useState<string | null>(null);
@@ -250,11 +252,14 @@ export default function SurvivalAdvancedPanel() {
       const res = await runFineGray({
         session_id: sid, duration_col: fgDuration, event_col: fgEvent,
         event_of_interest: fgInterest, group_col: fgGroup || undefined,
+        predictors: fgPredictors.length > 0 ? fgPredictors : undefined,
       });
       setFgResult(res.data);
     } catch (e: any) { setFgError(e?.response?.data?.detail ?? "Fine-Gray failed"); }
     finally { setFgLoading(false); }
   };
+  const fgToggleP = (c: string) =>
+    setFgPredictors((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
 
   // ── E-value handler
   const handleEValue = async () => {
@@ -289,7 +294,7 @@ export default function SurvivalAdvancedPanel() {
   // user perceives a re-Run as 'nothing happened' because the previous
   // result panel stays on screen even when the new fetch fails or returns
   // a near-identical table.
-  useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup]);
+  useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup, fgPredictors]);
   useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
   useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
   useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup, kmStratify]);
@@ -309,6 +314,41 @@ export default function SurvivalAdvancedPanel() {
           </label>
           <VarSelect label="Group (optional)" value={fgGroup} onChange={setFgGroup} columns={columns} kinds={["categorical"]} />
         </div>
+        {/* Predictors for subdistribution-hazard regression (Fine-Gray 1999) */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-gray-500 font-medium">
+              Predictors for subdistribution-hazard regression
+              <span className="ml-1 text-[10px] text-gray-400">(optional — leave empty for CIF curves only)</span>
+            </span>
+            {fgPredictors.length > 0 && (
+              <button onClick={() => setFgPredictors([])}
+                className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300">
+                Clear ({fgPredictors.length})
+              </button>
+            )}
+          </div>
+          <input type="text"
+            placeholder="Filter columns…"
+            value={fgPredFilter}
+            onChange={(e) => setFgPredFilter(e.target.value)}
+            className="w-full text-xs border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:border-indigo-400" />
+          <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-1 space-y-0.5">
+            {columns
+              .map((c: any) => c.name)
+              .filter((n: string) =>
+                n !== fgDuration && n !== fgEvent && n !== fgGroup
+                && n.toLowerCase().includes(fgPredFilter.toLowerCase()))
+              .slice(0, 100)
+              .map((n: string) => (
+                <label key={n} className="flex items-center gap-1.5 text-xs px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
+                  <input type="checkbox" className="accent-indigo-500"
+                    checked={fgPredictors.includes(n)} onChange={() => fgToggleP(n)} />
+                  <span className="text-gray-700 truncate">{n}</span>
+                </label>
+              ))}
+          </div>
+        </div>
         <div className="flex items-center gap-3">
           <RunButton onClick={handleFineGray} loading={fgLoading} label="Run Fine-Gray" />
           {fgError && <p className="text-xs text-red-500">{fgError}</p>}
@@ -317,6 +357,68 @@ export default function SurvivalAdvancedPanel() {
           <div className="relative" ref={fgPlotRef}>
             <Plot data={fgResult.plot.data} layout={{ ...fgResult.plot.layout, ...baseLayout, title: fgResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
             <PlotExporter plotRef={fgPlotRef} title="CIF" />
+          </div>
+        )}
+        {/* ── Subdistribution-hazard regression sub-card ── */}
+        {fgResult?.regression_result && (
+          <div className="border border-indigo-200 bg-indigo-50/30 rounded-lg p-3 space-y-2 mt-2">
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <h4 className="text-sm font-semibold text-gray-800">
+                Subdistribution Hazard Regression (Fine-Gray)
+              </h4>
+              <span className="text-[10px] text-indigo-700 bg-white border border-indigo-200 rounded-full px-2 py-0.5">
+                {fgResult.regression_result.model}
+              </span>
+            </div>
+            <div className="grid grid-cols-5 gap-2">
+              {[
+                ["n",                 fgResult.regression_result.n],
+                ["Events of interest", fgResult.regression_result.n_events_of_interest],
+                ["Competing",          fgResult.regression_result.n_competing],
+                ["Censored",           fgResult.regression_result.n_censored],
+                ["C-index",            fgResult.regression_result.concordance?.toFixed(3)],
+              ].map(([k, v]) => (
+                <div key={String(k)} className="bg-white border border-gray-200 rounded-lg p-2 text-center">
+                  <p className="text-[10px] text-gray-400">{k}</p>
+                  <p className="font-semibold text-gray-800 text-sm">{v}</p>
+                </div>
+              ))}
+            </div>
+            <div className="overflow-auto rounded-lg border border-gray-200 bg-white">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                    {["Variable", "sHR", "95% CI", "β", "SE", "z", "p"].map((h) => (
+                      <th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {fgResult.regression_result.coefficients.map((c: any) => (
+                    <tr key={c.variable} className={`border-b border-gray-100 ${c.p != null && c.p < 0.05 ? "hover:bg-indigo-50/30" : "hover:bg-gray-50"}`}>
+                      <td className="px-2 py-1.5 font-mono text-gray-800">{c.variable}</td>
+                      <td className={`px-2 py-1.5 font-mono font-semibold ${c.p != null && c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.shr?.toFixed(3)}</td>
+                      <td className="px-2 py-1.5 font-mono text-gray-500">
+                        {c.shr_low != null && c.shr_high != null
+                          ? `[${c.shr_low.toFixed(3)}, ${c.shr_high.toFixed(3)}]`
+                          : "—"}
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-gray-600">{c.estimate?.toFixed(4)}</td>
+                      <td className="px-2 py-1.5 font-mono text-gray-500">{c.se?.toFixed(4)}</td>
+                      <td className="px-2 py-1.5 font-mono text-gray-500">{c.z?.toFixed(3)}</td>
+                      <td className="px-2 py-1.5">
+                        <span className={`inline-block font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                          c.p != null && c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
+                        }`}>
+                          {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-gray-500 leading-relaxed">{fgResult.regression_result.method_note}</p>
           </div>
         )}
         <ResultBlock result={fgResult} />
