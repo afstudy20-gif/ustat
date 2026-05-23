@@ -292,7 +292,41 @@ def test_fine_gray_regression(client, sid_competing):
         assert "shr" in c and "p" in c and "ci_low" in c and "ci_high" in c
 
 
-# 17. Method appendix DOCX
+# 17. RMST — Restricted Mean Survival Time (v2.1.2)
+def test_rmst_single_group(client, sid):
+    r = client.post("/api/survival_advanced/rmst", json={
+        "session_id": sid,
+        "duration_col": "duration",
+        "event_col": "event",
+        "tau": 800,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["test"] == "Restricted Mean Survival Time"
+    assert d["rmst_by_group"]["All"]["rmst"] > 0
+    assert d["rmst_by_group"]["All"]["rmst"] <= 800
+
+
+def test_rmst_two_group_contrast(client, sid):
+    r = client.post("/api/survival_advanced/rmst", json={
+        "session_id": sid,
+        "duration_col": "duration",
+        "event_col": "event",
+        "tau": 800,
+        "group_col": "DM",
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    groups = d["rmst_by_group"]
+    assert len(groups) >= 2
+    contrasts = d["contrasts"]
+    assert len(contrasts) == 1
+    c0 = contrasts[0]
+    for k in ("delta_rmst", "se", "z", "p", "ci_low", "ci_high"):
+        assert k in c0
+
+
+# 18. Method appendix DOCX
 def test_method_appendix(client, sid):
     # First ensure SOME audit-loggable analysis has run
     client.post("/api/models/linear",

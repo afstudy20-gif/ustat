@@ -7,6 +7,7 @@ POST /mice              — MICE multiple imputation
 POST /fine_gray         — Fine-Gray competing risks (CIF curves)
 POST /evalue            — E-value for unmeasured confounding
 POST /landmark          — Landmark survival analysis
+POST /rmst              — Restricted Mean Survival Time (PH-free alternative)
 """
 
 from __future__ import annotations
@@ -881,6 +882,314 @@ def landmark_analysis(req: LandmarkRequest):
         "km_summaries": km_summaries,
         "logrank_p": logrank_p,
         "cox_results": cox_results,
+        "plot": plot,
+        "assumptions": assumptions,
+        "result_text": result_text,
+        "export_rows": export_rows,
+        "r_code": r_code,
+    }
+
+
+# ── 5. Restricted Mean Survival Time (RMST) ─────────────────────────────────
+#
+# Robust alternative to the hazard-ratio framework — does NOT require the
+# proportional-hazards assumption. RMST(τ) is the area under the survival
+# curve from 0 to τ, equal to the average event-free time over the horizon
+# (e.g. "average years alive in 0-5 years"). For two groups the difference
+# Δ = RMST_A(τ) − RMST_B(τ) is a clinically interpretable summary with a
+# proper SE (Royston & Parmar 2013) → z-test + 95 % CI + p.
+
+
+class RMSTRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    tau: float                                   # restriction time-horizon
+    group_col: Optional[str] = None
+    imputation: Optional[str] = "listwise"
+
+
+def _rmst_one_group(t: np.ndarray, e: np.ndarray, tau: float) -> Dict[str, float]:
+    """KM-based RMST estimator with Greenwood-style SE.
+
+    Algorithm:
+      1. Fit KaplanMeierFitter on (t, e).
+      2. Trapezoidal-rule integrate S(u) from 0 to τ.
+      3. SE via the integral of Greenwood's variance:
+           Var[RMST(τ)] = Σ_k  [∫_{t_k}^{min(t_{k+1}, τ)} S(u) du]^2  * d_k / (n_k (n_k - d_k))
+         which is the Klein & Moeschberger (2003) eqn 4.5.1 / Hosmer-Lemeshow form.
+      4. 95% CI = Wald on RMST.
+    """
+    from lifelines import KaplanMeierFitter
+    kmf = KaplanMeierFitter()
+    kmf.fit(t, e.astype(int))
+
+    # Step-function on the unique observed times. surv[k] = S(t_k+) for
+    # t in [t_k, t_{k+1}).
+    sf = kmf.survival_function_.iloc[:, 0]
+    times = np.concatenate(([0.0], sf.index.values.astype(float)))
+    surv = np.concatenate(([1.0], sf.values.astype(float)))
+
+    et = kmf.event_table  # columns: removed, observed, censored, entrance, at_risk
+    et_index = et.index.values.astype(float)
+    d_arr = et["observed"].values.astype(float)
+    n_arr = et["at_risk"].values.astype(float)
+
+    # Trapezoid pieces between consecutive step points, capped at tau.
+    pieces_t: List[float] = []  # left edges
+    pieces_h: List[float] = []  # heights (S at left edge)
+    pieces_w: List[float] = []  # widths (capped at tau)
+    for k in range(len(times) - 1):
+        a = times[k]
+        b = min(times[k + 1], tau)
+        if b <= a:
+            break
+        pieces_t.append(a)
+        pieces_h.append(surv[k])
+        pieces_w.append(b - a)
+    pieces_t_arr = np.array(pieces_t)
+    pieces_h_arr = np.array(pieces_h)
+    pieces_w_arr = np.array(pieces_w)
+    cum_area = np.concatenate(([0.0], np.cumsum(pieces_h_arr * pieces_w_arr)))
+    total_area = cum_area[-1] if len(cum_area) > 0 else 0.0
+    rmst = float(total_area)
+
+    # Greenwood-style SE: Var(RMST(τ)) = Σ_{j: t_j ≤ τ} A_j^2 * d_j / (n_j (n_j - d_j))
+    # with A_j = ∫_{t_j}^τ S(u) du.
+    se_var = 0.0
+    for j, tj in enumerate(et_index):
+        if tj > tau:
+            break
+        d_j = d_arr[j]
+        n_j = n_arr[j]
+        if d_j <= 0 or n_j - d_j <= 0:
+            continue
+        idx = np.searchsorted(pieces_t_arr, tj, side="right")
+        area_before = cum_area[idx] if idx < len(cum_area) else total_area
+        A_j = total_area - area_before
+        se_var += (A_j ** 2) * d_j / (n_j * (n_j - d_j))
+
+    se = float(np.sqrt(se_var)) if se_var > 0 else 0.0
+    n = int(len(t))
+    n_events = int(e.astype(int).sum())
+    z95 = 1.959963984540054
+    return {
+        "n": n,
+        "n_events": n_events,
+        "rmst": round(float(rmst), 4),
+        "se": round(se, 4),
+        "ci_low": round(float(rmst - z95 * se), 4),
+        "ci_high": round(float(rmst + z95 * se), 4),
+    }
+
+
+@router.post("/rmst")
+def rmst(req: RMSTRequest):
+    if req.tau is None or req.tau <= 0:
+        raise HTTPException(status_code=422, detail="tau must be > 0.")
+
+    df_full = _get_df(req.session_id)
+    for c in [req.duration_col, req.event_col]:
+        if c not in df_full.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if req.group_col and req.group_col not in df_full.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{req.group_col}' not found")
+
+    cols_needed = [req.duration_col, req.event_col] + ([req.group_col] if req.group_col else [])
+    from services.impute import apply_imputation
+    df = apply_imputation(df_full[cols_needed], cols_needed, req.imputation or "listwise").reset_index(drop=True)
+    df[req.duration_col] = pd.to_numeric(df[req.duration_col], errors="coerce")
+    df[req.event_col] = pd.to_numeric(df[req.event_col], errors="coerce")
+    df = df.dropna()
+    if len(df) < 5:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need ≥ 5, got {len(df)}).")
+
+    t_all = df[req.duration_col].values.astype(float)
+    if np.any(t_all < 0):
+        raise HTTPException(status_code=422, detail="Negative durations are not allowed.")
+    if req.tau > float(t_all.max()):
+        raise HTTPException(
+            status_code=422,
+            detail=f"tau = {req.tau} exceeds the maximum observed time ({t_all.max():.3f}). "
+                   "Pick a horizon within the observed follow-up.",
+        )
+    e_all = df[req.event_col].values.astype(int)
+    if set(np.unique(e_all)) - {0, 1}:
+        raise HTTPException(status_code=422, detail="Event column must be binary 0/1.")
+
+    groups: List[Any] = []
+    if req.group_col:
+        groups = sorted(df[req.group_col].dropna().unique().tolist(), key=lambda x: (isinstance(x, str), x))
+
+    rmst_by_group: Dict[str, dict] = {}
+    if not groups:
+        rmst_by_group["All"] = _rmst_one_group(t_all, e_all, float(req.tau))
+    else:
+        for g in groups:
+            mask = df[req.group_col] == g
+            rmst_by_group[str(g)] = _rmst_one_group(t_all[mask], e_all[mask], float(req.tau))
+
+    # Pairwise contrasts when groups present
+    contrasts: List[dict] = []
+    if len(groups) >= 2:
+        from scipy.stats import norm
+        z95 = 1.959963984540054
+        for i in range(len(groups)):
+            for j in range(i + 1, len(groups)):
+                a = rmst_by_group[str(groups[i])]
+                b = rmst_by_group[str(groups[j])]
+                diff = a["rmst"] - b["rmst"]
+                se = float(np.sqrt(a["se"] ** 2 + b["se"] ** 2))
+                if se <= 0:
+                    p = None
+                    lo = hi = diff
+                    z = None
+                else:
+                    z = diff / se
+                    p = float(2 * (1 - norm.cdf(abs(z))))
+                    lo = diff - z95 * se
+                    hi = diff + z95 * se
+                contrasts.append({
+                    "group_a": str(groups[i]),
+                    "group_b": str(groups[j]),
+                    "delta_rmst": round(diff, 4),
+                    "se": round(se, 4),
+                    "z": round(z, 4) if z is not None else None,
+                    "p": round(p, 6) if p is not None else None,
+                    "ci_low": round(lo, 4),
+                    "ci_high": round(hi, 4),
+                })
+
+    # Build plot (KM curves capped at tau, with shaded area = RMST per group)
+    from lifelines import KaplanMeierFitter
+    palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4"]
+    traces = []
+    if not groups:
+        kmf = KaplanMeierFitter()
+        kmf.fit(t_all, e_all)
+        sf = kmf.survival_function_.iloc[:, 0]
+        traces.append({
+            "x": [0] + [float(t) for t in sf.index.tolist()],
+            "y": [1.0] + [float(v) for v in sf.values.tolist()],
+            "type": "scatter", "mode": "lines",
+            "line": {"color": palette[0], "width": 2, "shape": "hv"},
+            "name": f"All (RMST = {rmst_by_group['All']['rmst']})",
+        })
+    else:
+        for gi, g in enumerate(groups):
+            mask = df[req.group_col] == g
+            kmf = KaplanMeierFitter()
+            kmf.fit(t_all[mask], e_all[mask])
+            sf = kmf.survival_function_.iloc[:, 0]
+            label = f"{g} (RMST = {rmst_by_group[str(g)]['rmst']})"
+            traces.append({
+                "x": [0] + [float(t) for t in sf.index.tolist()],
+                "y": [1.0] + [float(v) for v in sf.values.tolist()],
+                "type": "scatter", "mode": "lines",
+                "line": {"color": palette[gi % len(palette)], "width": 2, "shape": "hv"},
+                "name": label,
+            })
+
+    # Vertical line at tau
+    shapes = [{
+        "type": "line", "xref": "x", "yref": "paper",
+        "x0": float(req.tau), "x1": float(req.tau), "y0": 0, "y1": 1,
+        "line": {"color": "#9ca3af", "dash": "dash", "width": 1.5},
+    }]
+    annotations = [{
+        "xref": "x", "yref": "paper", "x": float(req.tau), "y": 1.0,
+        "xanchor": "left", "yanchor": "top",
+        "text": f" τ = {req.tau}",
+        "showarrow": False, "font": {"size": 11, "color": "#374151"},
+    }]
+
+    plot = {
+        "data": traces,
+        "layout": {
+            "title": f"Restricted Mean Survival Time (τ = {req.tau})",
+            "xaxis": {"title": req.duration_col, "gridcolor": "#e5e7eb"},
+            "yaxis": {"title": "Survival probability", "range": [0, 1.05], "gridcolor": "#e5e7eb"},
+            "paper_bgcolor": "transparent",
+            "plot_bgcolor": "#ffffff",
+            "font": {"color": "#374151", "size": 12},
+            "margin": {"t": 40, "r": 20, "b": 50, "l": 60},
+            "showlegend": True,
+            "legend": {"x": 0.02, "y": 0.05},
+            "shapes": shapes,
+            "annotations": annotations,
+        },
+    }
+
+    n_total = len(df)
+    if groups and len(groups) == 2 and contrasts:
+        c0 = contrasts[0]
+        result_text = (
+            f"Restricted mean survival time on n = {n_total} subjects at τ = {req.tau}. "
+            f"{c0['group_a']}: {rmst_by_group[c0['group_a']]['rmst']} "
+            f"(95% CI {rmst_by_group[c0['group_a']]['ci_low']}–{rmst_by_group[c0['group_a']]['ci_high']}). "
+            f"{c0['group_b']}: {rmst_by_group[c0['group_b']]['rmst']} "
+            f"(95% CI {rmst_by_group[c0['group_b']]['ci_low']}–{rmst_by_group[c0['group_b']]['ci_high']}). "
+            f"ΔRMST = {c0['delta_rmst']} (95% CI {c0['ci_low']}–{c0['ci_high']}), p = "
+            f"{'<0.001' if (c0['p'] is not None and c0['p'] < 0.001) else (round(c0['p'], 3) if c0['p'] is not None else 'N/A')}."
+        )
+    else:
+        result_text = (
+            f"Restricted mean survival time on n = {n_total} subjects at τ = {req.tau}. "
+            "RMST per group is reported below; the difference is interpretable as the "
+            "average event-free time lived during the first τ time units."
+        )
+
+    assumptions = [
+        {"name": "Censoring at random",      "met": True,
+         "detail": "RMST assumes censoring is independent of the event process within each group."},
+        {"name": "τ within observed range",  "met": True,
+         "detail": f"τ = {req.tau} is at or below the maximum observed time ({float(t_all.max()):.3f})."},
+        {"name": "No proportional-hazards required", "met": True,
+         "detail": "RMST is a robust alternative when the PH assumption fails (e.g. crossing curves, late effects)."},
+    ]
+
+    export_rows = [["Group", "n", "Events", "RMST (τ)", "SE", "95% CI low", "95% CI high"]]
+    for g_label, gv in rmst_by_group.items():
+        export_rows.append([
+            g_label, gv["n"], gv["n_events"], gv["rmst"], gv["se"], gv["ci_low"], gv["ci_high"],
+        ])
+    if contrasts:
+        export_rows.append([])
+        export_rows.append(["Group A", "Group B", "ΔRMST", "SE", "95% CI low", "95% CI high", "p"])
+        for c in contrasts:
+            export_rows.append([
+                c["group_a"], c["group_b"], c["delta_rmst"], c["se"], c["ci_low"], c["ci_high"], c["p"],
+            ])
+
+    r_code = (
+        "library(survRM2)\n"
+        f"# data: time={req.duration_col}, status={req.event_col}"
+        + (f", group={req.group_col}" if req.group_col else "")
+        + f", tau={req.tau}\n"
+        + (f"rmst2(time = data${req.duration_col}, status = data${req.event_col}, "
+           f"arm = data${req.group_col}, tau = {req.tau})\n"
+           if req.group_col else
+           f"library(survival)\nfit <- survfit(Surv({req.duration_col}, {req.event_col}) ~ 1, data = data)\n"
+           f"# RMST via integration of S(t) on [0, {req.tau}]\n")
+    )
+
+    try:
+        store.log_action(req.session_id, "rmst", {
+            "duration_col": req.duration_col,
+            "event_col": req.event_col,
+            "tau": float(req.tau),
+            "group_col": req.group_col,
+            "n_groups": len(groups) if groups else 1,
+        })
+    except Exception:
+        pass
+
+    return {
+        "test": "Restricted Mean Survival Time",
+        "n": n_total,
+        "tau": float(req.tau),
+        "rmst_by_group": rmst_by_group,
+        "contrasts": contrasts,
         "plot": plot,
         "assumptions": assumptions,
         "result_text": result_text,

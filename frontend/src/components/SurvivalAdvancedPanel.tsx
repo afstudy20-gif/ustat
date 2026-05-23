@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -232,6 +232,16 @@ export default function SurvivalAdvancedPanel() {
   const [coxScanResult, setCoxScanResult] = useState<any[]>([]);
   const [coxScanLoading, setCoxScanLoading] = useState(false);
 
+  // RMST state — Restricted Mean Survival Time (PH-free alternative)
+  const [rmstDuration, setRmstDuration] = useState("");
+  const [rmstEvent, setRmstEvent] = useState("");
+  const [rmstGroup, setRmstGroup] = useState("");
+  const [rmstTau, setRmstTau] = useState<string>("");
+  const [rmstResult, setRmstResult] = useState<any>(null);
+  const [rmstLoading, setRmstLoading] = useState(false);
+  const [rmstError, setRmstError] = useState<string | null>(null);
+  const rmstPlotRef = useRef<any>(null);
+
   // Landmark state
   const [lmDuration, setLmDuration] = useState("");
   const [lmEvent, setLmEvent] = useState("");
@@ -260,6 +270,22 @@ export default function SurvivalAdvancedPanel() {
   };
   const fgToggleP = (c: string) =>
     setFgPredictors((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
+
+  // ── RMST handler
+  const handleRMST = async () => {
+    if (!rmstDuration || !rmstEvent) { setRmstError("Select duration and event columns"); return; }
+    const tau = parseFloat(rmstTau);
+    if (!Number.isFinite(tau) || tau <= 0) { setRmstError("Enter a positive time horizon τ"); return; }
+    setRmstResult(null); setRmstError(null); setRmstLoading(true);
+    try {
+      const res = await runRMST({
+        session_id: sid, duration_col: rmstDuration, event_col: rmstEvent,
+        tau, group_col: rmstGroup || undefined,
+      });
+      setRmstResult(res.data);
+    } catch (e: any) { setRmstError(e?.response?.data?.detail ?? "RMST failed"); }
+    finally { setRmstLoading(false); }
+  };
 
   // ── E-value handler
   const handleEValue = async () => {
@@ -295,6 +321,7 @@ export default function SurvivalAdvancedPanel() {
   // result panel stays on screen even when the new fetch fails or returns
   // a near-identical table.
   useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup, fgPredictors]);
+  useEffect(() => { setRmstResult(null); setRmstError(null); }, [rmstDuration, rmstEvent, rmstGroup, rmstTau]);
   useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
   useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
   useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup, kmStratify]);
@@ -422,6 +449,93 @@ export default function SurvivalAdvancedPanel() {
           </div>
         )}
         <ResultBlock result={fgResult} />
+      </Section>
+
+      {/* ── RMST ── */}
+      <Section title="Restricted Mean Survival Time (RMST)"
+        description="Average event-free time over a fixed horizon τ — PH-free alternative to the hazard ratio. Robust when curves cross or the proportional-hazards assumption fails.">
+        <div className="grid grid-cols-4 gap-3">
+          <VarSelect label="Duration" value={rmstDuration} onChange={setRmstDuration} columns={columns} kinds={["numeric"]} />
+          <VarSelect label="Event (0/1)" value={rmstEvent} onChange={setRmstEvent} columns={columns} />
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 font-medium">τ (time horizon)</span>
+            <input type="number" min="0" step="any" value={rmstTau}
+              onChange={(e) => setRmstTau(e.target.value)}
+              placeholder="e.g. 1825"
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-400" />
+          </label>
+          <VarSelect label="Group (optional)" value={rmstGroup} onChange={setRmstGroup} columns={columns} kinds={["categorical"]} />
+        </div>
+        <div className="flex items-center gap-3">
+          <RunButton onClick={handleRMST} loading={rmstLoading} label="Run RMST" />
+          {rmstError && <p className="text-xs text-red-500">{rmstError}</p>}
+        </div>
+        {rmstResult?.plot && (
+          <div className="relative" ref={rmstPlotRef}>
+            <Plot data={rmstResult.plot.data}
+              layout={{ ...rmstResult.plot.layout, ...baseLayout, title: rmstResult.plot.layout.title }}
+              config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
+            <PlotExporter plotRef={rmstPlotRef} title="RMST" />
+          </div>
+        )}
+        {rmstResult?.rmst_by_group && (
+          <div className="overflow-auto rounded-lg border border-gray-200 mt-2">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                  {["Group", "n", "Events", `RMST (τ = ${rmstResult.tau})`, "SE", "95% CI"].map((h) => (
+                    <th key={h} className="px-2 py-2 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(rmstResult.rmst_by_group).map(([g, v]: any) => (
+                  <tr key={g} className="border-b border-gray-100 hover:bg-gray-50">
+                    <td className="px-2 py-1.5 font-mono text-gray-800">{g}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-600">{v.n}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-600">{v.n_events}</td>
+                    <td className="px-2 py-1.5 font-mono font-semibold text-indigo-700">{v.rmst}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-500">{v.se}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-500">[{v.ci_low}, {v.ci_high}]</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {rmstResult?.contrasts && rmstResult.contrasts.length > 0 && (
+          <div className="overflow-auto rounded-lg border border-indigo-200 bg-indigo-50/30 mt-2">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-white border-b border-indigo-200 text-gray-600">
+                  {["Group A", "Group B", "ΔRMST", "SE", "z", "95% CI", "p"].map((h) => (
+                    <th key={h} className="px-2 py-2 text-left font-semibold">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rmstResult.contrasts.map((c: any, i: number) => (
+                  <tr key={i} className={`border-b border-indigo-100 ${c.p != null && c.p < 0.05 ? "bg-indigo-50/60" : ""}`}>
+                    <td className="px-2 py-1.5 font-mono text-gray-800">{c.group_a}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-800">{c.group_b}</td>
+                    <td className={`px-2 py-1.5 font-mono font-semibold ${c.p != null && c.p < 0.05 ? "text-indigo-700" : "text-gray-700"}`}>{c.delta_rmst}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-500">{c.se}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-500">{c.z}</td>
+                    <td className="px-2 py-1.5 font-mono text-gray-500">[{c.ci_low}, {c.ci_high}]</td>
+                    <td className="px-2 py-1.5">
+                      <span className={`inline-block font-mono px-1.5 py-0.5 rounded text-[10px] ${
+                        c.p != null && c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
+                      }`}>
+                        {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <ResultBlock result={rmstResult} />
       </Section>
 
       {/* ── E-value ── */}
