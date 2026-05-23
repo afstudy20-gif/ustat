@@ -611,10 +611,28 @@ def export_journal_word(formatted: dict) -> bytes:
     n_rows = len(rows) + 1
     table = doc.add_table(rows=n_rows, cols=n_cols)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.style = 'Table Grid'
+    # Skip 'Table Grid' — it draws every internal/external line and Word
+    # ignores per-cell `none` overrides when a table style supplies its own
+    # borders. The default (no-style) table plus an explicit tblBorders=nil
+    # below leaves a clean canvas where only the AMA top / header-rule /
+    # bottom lines we set per-cell ever render.
 
     THICK = {'val': 'single', 'sz': 12, 'color': '000000'}
     THIN = {'val': 'single', 'sz': 4, 'color': '000000'}
+
+    # Belt-and-braces: also stamp w:tblBorders=none at the table level so
+    # nothing inherited from the default style ever draws.
+    tbl = table._element
+    tblPr = tbl.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = etree.SubElement(tbl, qn('w:tblPr'))
+    existing_tbl_borders = tblPr.find(qn('w:tblBorders'))
+    if existing_tbl_borders is not None:
+        tblPr.remove(existing_tbl_borders)
+    tbl_borders = etree.SubElement(tblPr, qn('w:tblBorders'))
+    for side in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        el = etree.SubElement(tbl_borders, qn(f'w:{side}'))
+        el.set(qn('w:val'), 'nil')
 
     def _set_border(cell, **kwargs):
         tc = cell._element
@@ -630,7 +648,10 @@ def export_journal_word(formatted: dict) -> bytes:
                 for k, v in spec.items():
                     el.set(qn(f'w:{k}'), str(v))
             else:
-                el.set(qn('w:val'), 'none')
+                # 'nil' beats 'none' for Word's table inheritance rules —
+                # Word treats `none` as "use whatever's inherited" but `nil`
+                # as "draw nothing".
+                el.set(qn('w:val'), 'nil')
 
     # Header
     for j, col_name in enumerate(columns):
