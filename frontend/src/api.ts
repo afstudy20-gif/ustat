@@ -50,6 +50,7 @@ export const runLinearDiag  = (data: object) => api.post("/api/models/linear_dia
 export const runMelt          = (data: object) => api.post("/api/models/melt", data);
 export const refreshSession   = (sessionId: string) => api.get(`/api/stats/${sessionId}/refresh`);
 export const runPSM           = (data: object) => api.post("/api/models/psm", data);
+export const runIPTW          = (data: object) => api.post("/api/models/iptw", data);
 
 export const getSparklines = (sessionId: string) =>
   api.get(`/api/stats/${sessionId}/sparklines`);

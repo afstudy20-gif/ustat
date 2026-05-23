@@ -452,6 +452,7 @@ _ACTION_HUMAN: Dict[str, str] = {
     "landmark": "Landmark survival analysis",
     "evalue": "E-value sensitivity analysis (VanderWeele 2017)",
     "psm": "Propensity score matching (Austin 2011 standards)",
+    "iptw": "Inverse probability of treatment weighting (IPTW; ATE / ATT / overlap weights with robust standard errors)",
     "mice": "Multivariate imputation by chained equations (MICE)",
     "stepwise": "Stepwise variable selection (AIC / BIC / p)",
     "power": "Power / sample-size calculation",

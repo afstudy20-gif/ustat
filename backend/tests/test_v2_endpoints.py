@@ -204,7 +204,46 @@ def test_stepwise(client, sid):
     assert "selected" in d and "final_aic" in d and "trace" in d
 
 
-# 14. Method appendix DOCX
+# 15. IPTW — Inverse Probability of Treatment Weighting (v2.1.0)
+@pytest.mark.parametrize("estimand,outcome_type,trunc", [
+    ("ate",     "binary",   "percentile"),
+    ("att",     "binary",   "hard"),
+    ("overlap", "binary",   "none"),
+    ("ate",     "survival", "percentile"),
+])
+def test_iptw_estimands_and_outcomes(client, sid, estimand, outcome_type, trunc):
+    body = {
+        "session_id": sid,
+        "treatment_col": "DM",  # binary 0/1 treatment
+        "covariates": ["AGE", "LDL", "SEX", "HT"],
+        "estimand": estimand,
+        "stabilize": True,
+        "weight_truncation": trunc,
+        "weight_truncation_max": 10,
+        "outcome_type": outcome_type,
+        "se_method": "robust",
+    }
+    if outcome_type == "binary":
+        body["outcome_col"] = "event"
+    else:
+        body["survival_duration_col"] = "duration"
+        body["survival_event_col"] = "event"
+    r = client.post("/api/models/iptw", json=body)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["method"] == "iptw"
+    assert d["estimand"] == estimand
+    assert "weight_summary" in d
+    assert "smd_after" in d and "smd_before" in d
+    assert d["outcome_result"] is not None
+    out = d["outcome_result"]
+    assert "error" not in out, out
+    expected_kind = "weighted_cox" if outcome_type == "survival" else "weighted_glm"
+    assert out["type"].startswith(expected_kind)
+    assert len(out["coefficients"]) >= 1
+
+
+# 16. Method appendix DOCX
 def test_method_appendix(client, sid):
     # First ensure SOME audit-loggable analysis has run
     client.post("/api/models/linear",
