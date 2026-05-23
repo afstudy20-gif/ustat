@@ -151,9 +151,9 @@ export async function plotlyToTiffBlob(
     format: "png",
     width: opts.width,
     height: opts.height,
-    // @ts-expect-error — runtime supports `scale` even if the types are stale.
+    // Runtime supports `scale` even if the published d.ts is missing it.
     scale,
-  });
+  } as Parameters<typeof Plotly.toImage>[1] & { scale: number });
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
@@ -182,7 +182,11 @@ export async function plotlyToTiffBlob(
     dpi: opts.dpi,
   });
 
-  return new Blob([tiff], { type: "image/tiff" });
+  // Copy into a fresh ArrayBuffer to satisfy DOM's BlobPart typing
+  // (Uint8Array<ArrayBufferLike> is not assignable to BlobPart in TS 5.7+).
+  const ab = new ArrayBuffer(tiff.byteLength);
+  new Uint8Array(ab).set(tiff);
+  return new Blob([ab], { type: "image/tiff" });
 }
 
 /**
