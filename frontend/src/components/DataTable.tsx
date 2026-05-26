@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { BookOpen, X } from "lucide-react";
 import { useStore } from "../store";
 import type { ColMeta, CaseCondition, CaseOperator } from "../store";
@@ -373,7 +373,6 @@ export default function DataTable() {
   const [editCell,       setEditCell]      = useState<{ rowIdx: number; col: string } | null>(null);
   const [editValue,      setEditValue]     = useState("");
   const [saving,         setSaving]        = useState(false);
-  const [showSaveMenu,   setShowSaveMenu]  = useState(false);
   const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [showSelectCases, setShowSelectCases] = useState(false);
   const [showDictionary,  setShowDictionary]  = useState(false);
@@ -424,18 +423,6 @@ export default function DataTable() {
   const rowCtxRef = useRef<HTMLDivElement>(null);
 
   const inputRef   = useRef<HTMLInputElement>(null);
-  const saveMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showSaveMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (saveMenuRef.current && !saveMenuRef.current.contains(e.target as Node)) {
-        setShowSaveMenu(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [showSaveMenu]);
 
   // Paste notification
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
@@ -857,78 +844,6 @@ export default function DataTable() {
     }
   };
 
-  const downloadAs = useCallback(async (fmt: "csv" | "tsv" | "xlsx" | "sav") => {
-    const base = (session.filename ?? "data").replace(/\.[^.]+$/, "");
-    // Iframe-based downloads silently swallowed any backend error (500, 413,
-    // 422) — the iframe loaded the error HTML in the hidden frame and the
-    // user saw nothing happen. Switching to fetch + blob + anchor click
-    // surfaces failures via the alert() catch path and avoids the X-Frame /
-    // CSP edge cases that come with iframe loads of API responses.
-    const colKinds = encodeURIComponent(JSON.stringify(Object.fromEntries(columns.map((c) => [c.name, c.kind]))));
-    const url = `/api/sessions/${session.session_id}/export?fmt=${fmt}&filename=${encodeURIComponent(base)}&col_kinds=${colKinds}`;
-    setShowSaveMenu(false);
-    try {
-      const res = await api.get(url, { responseType: "blob" });
-      // Backend may return a JSON error body with the same 200 envelope on
-      // some misconfigurations — sniff the content-type and bail if so.
-      const ct = (res.headers["content-type"] || "").toString();
-      if (ct.includes("application/json")) {
-        const txt = await (res.data as Blob).text();
-        throw new Error(`Server returned JSON instead of ${fmt.toUpperCase()}: ${txt.slice(0, 200)}`);
-      }
-      const ext = fmt;
-      const mime = fmt === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                 : fmt === "sav"  ? "application/x-spss-sav"
-                 : fmt === "tsv"  ? "text/tab-separated-values"
-                 : "text/csv";
-      const blob = new Blob([res.data], { type: mime });
-      const objectUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objectUrl;
-      a.download = `${base}.${ext}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    } catch (e: any) {
-      // Try to extract the server's detail message from a Blob-typed error body.
-      let detail = e?.message ?? String(e);
-      const blobBody = e?.response?.data;
-      if (blobBody instanceof Blob) {
-        try {
-          const txt = await blobBody.text();
-          const parsed = JSON.parse(txt);
-          detail = parsed?.detail ?? txt.slice(0, 200);
-        } catch {
-          // not JSON, leave detail as-is
-        }
-      }
-      console.error(`Export as ${fmt} failed:`, e);
-      alert(`Export as ${fmt.toUpperCase()} failed: ${detail}`);
-    }
-  }, [session.session_id, session.filename, columns]);
-
-  const downloadSession = useCallback(async () => {
-    try {
-      const res = await api.get(`/api/sessions/${session.session_id}/save_session`, { responseType: "blob" });
-      const blob = new Blob([res.data], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const base = (session.filename ?? "session").replace(/\.[^.]+$/, "");
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${base}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (e) {
-      console.error("Save session failed:", e);
-      alert(`Save session failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setShowSaveMenu(false);
-    }
-  }, [session.session_id, session.filename]);
-
   const activeFilters = Object.values(filters).filter(Boolean).length;
 
   return (
@@ -1109,64 +1024,6 @@ export default function DataTable() {
             )}
           </button>
 
-          {/* ── Save As ── */}
-          <div className="relative" ref={saveMenuRef}>
-            <button
-              onClick={() => setShowSaveMenu((v) => !v)}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors
-                ${showSaveMenu
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-                  : "text-gray-500 border-gray-300 hover:text-gray-700 hover:border-gray-400"}`}
-            >
-              ↓ Save As
-              <span className="text-gray-400 text-[10px]">{showSaveMenu ? "▲" : "▼"}</span>
-            </button>
-
-            {showSaveMenu && (
-              <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                  Export full dataset
-                </p>
-                {[
-                  { fmt: "csv",  label: "CSV",          desc: "Comma-separated",  icon: "📄" },
-                  { fmt: "xlsx", label: "Excel (.xlsx)", desc: "With value labels sheet",  icon: "📊" },
-                  { fmt: "sav",  label: "SPSS (.sav)",   desc: "Native value labels",  icon: "🔬" },
-                  { fmt: "tsv",  label: "TSV",           desc: "Tab-separated",    icon: "📋" },
-                ].map(({ fmt, label, desc, icon }) => (
-                  <button
-                    key={fmt}
-                    onClick={() => downloadAs(fmt as "csv" | "tsv" | "xlsx" | "sav")}
-                    className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
-                  >
-                    <span className="text-base">{icon}</span>
-                    <div>
-                      <p className="text-xs text-gray-700 font-medium">{label}</p>
-                      <p className="text-[10px] text-gray-400">{desc}</p>
-                    </div>
-                  </button>
-                ))}
-                <div className="border-t border-gray-100" />
-                <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
-                  Session
-                </p>
-                <button
-                  onClick={downloadSession}
-                  className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-base">💾</span>
-                  <div>
-                    <p className="text-xs text-gray-700 font-medium">Session (.json)</p>
-                    <p className="text-[10px] text-gray-400">Data + labels + filters + audit</p>
-                  </div>
-                </button>
-                <div className="border-t border-gray-100 px-3 py-2">
-                  <p className="text-[10px] text-gray-400 leading-tight">
-                    Exports the full dataset including all edits
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
       </div>
 

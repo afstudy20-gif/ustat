@@ -1,8 +1,9 @@
 import "./index.css";
-import { Component, useState, type ReactNode } from "react";
+import { Component, useState, useRef, useEffect, type ReactNode } from "react";
 import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
+import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
   state = { error: null };
@@ -248,6 +249,21 @@ export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  // Header Save-As dropdown (consolidates dataset export + session JSON
+  // — supersedes the dropdown previously hidden inside the DataTable
+  // toolbar). Closes on outside-click.
+  const [showHeaderSaveMenu, setShowHeaderSaveMenu] = useState(false);
+  const headerSaveMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!showHeaderSaveMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (headerSaveMenuRef.current && !headerSaveMenuRef.current.contains(e.target as Node)) {
+        setShowHeaderSaveMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showHeaderSaveMenu]);
   // Code tab is always visible; the panel itself handles the
   // "ENABLE_CODE_RUNNER not set" case with an in-page disabled banner.
   const visibleTabs = TABS;
@@ -333,20 +349,52 @@ export default function App() {
             >
               {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
             </button>
-            <button
-              onClick={async () => {
-                if (!session) return;
-                try { await triggerSessionDownload(session.session_id, session.filename); }
-                catch (e) {
-                  console.error("Save session failed:", e);
-                  alert(`Save session failed: ${e instanceof Error ? e.message : String(e)}`);
-                }
-              }}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
-              title="Save Session (JSON) — downloads only, keeps the session open"
-            >
-              <Save size={16} />
-            </button>
+            <div className="relative" ref={headerSaveMenuRef}>
+              <button
+                onClick={() => setShowHeaderSaveMenu(v => !v)}
+                className={`p-1.5 rounded-lg transition-colors ${showHeaderSaveMenu ? "text-emerald-600 bg-emerald-50" : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50"}`}
+                title="Save / Export dataset"
+              >
+                <Save size={16} />
+              </button>
+              {showHeaderSaveMenu && session && (
+                <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <p className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Export dataset
+                  </p>
+                  {([
+                    { fmt: "csv" as ExportFmt,  label: "CSV",          desc: "Comma-separated" },
+                    { fmt: "xlsx" as ExportFmt, label: "Excel (.xlsx)", desc: "With value labels sheet" },
+                    { fmt: "sav" as ExportFmt,  label: "SPSS (.sav)",  desc: "Native value labels" },
+                    { fmt: "tsv" as ExportFmt,  label: "TSV",          desc: "Tab-separated" },
+                  ]).map(({ fmt, label, desc }) => (
+                    <button
+                      key={fmt}
+                      onClick={() => { setShowHeaderSaveMenu(false); exportDataset(session, session.columns, fmt); }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                    >
+                      <div>
+                        <p className="text-xs text-gray-700 font-medium">{label}</p>
+                        <p className="text-[10px] text-gray-400">{desc}</p>
+                      </div>
+                    </button>
+                  ))}
+                  <div className="border-t border-gray-100" />
+                  <p className="px-3 pt-2 pb-1 text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                    Session
+                  </p>
+                  <button
+                    onClick={() => { setShowHeaderSaveMenu(false); downloadSessionJson(session); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <div>
+                      <p className="text-xs text-gray-700 font-medium">Session (.json)</p>
+                      <p className="text-[10px] text-gray-400">Data + labels + filters + audit</p>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={handleOpenNew}
               className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 transition-colors"
