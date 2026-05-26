@@ -123,7 +123,26 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
-  setSession: (s) => set({ session: s, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0, columnDecimals: {} }),
+  setSession: (s) => set((state) => {
+    // Preserve UI state (decimal formatting, table1, filters, undo/redo
+    // depth) across same-session refreshes (rename, dtype flip, refresh
+    // after compute). Only the *initial* load — when session_id flips —
+    // resets the per-column formatting to defaults.
+    const sameSession = !!(s && state.session && s.session_id === state.session.session_id);
+    if (sameSession) {
+      return { session: s };
+    }
+    return {
+      session: s,
+      activeTab: "data",
+      table1Result: null,
+      caseFilter: null,
+      panelCache: {},
+      undoDepth: 0,
+      redoDepth: 0,
+      columnDecimals: {},
+    };
+  }),
   setActiveTab: (t) => set({ activeTab: t }),
   setCaseFilter: (f) => set({ caseFilter: f }),
   toggleGrid: () => set((state) => {

@@ -795,6 +795,14 @@ export default function DataTable() {
         if (oldName in r) { r[newName] = r[oldName]; delete r[oldName]; }
         return r;
       });
+      // Remap per-column decimal formatting so the rename carries the user's
+      // formatting choice over to the new column name.
+      if (oldName in columnDecimals) {
+        const next: Record<string, number> = { ...columnDecimals };
+        next[newName] = next[oldName];
+        delete next[oldName];
+        useStore.setState({ columnDecimals: next });
+      }
       useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview }); bumpUndo();
     } catch { /* revert silently */ }
   };
