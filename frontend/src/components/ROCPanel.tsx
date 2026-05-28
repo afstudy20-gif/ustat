@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
+import ResultExporter from "./ResultExporter";
 import { useStore, PALETTES } from "../store";
 import { runROC, runROCCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
@@ -339,67 +340,75 @@ export default function ROCPanel() {
   };
 
   // ── Exports ──
-  const exportSingleCSV = () => {
-    if (!result) return;
-    const opt = result.optimal;
-    const rows = [
-      "ROC Analysis Export",
-      `Score,${scoreCol}`, `Outcome,${outcomeCol}`,
-      `n,${result.n}`, `Positives (1),${result.n_positive}`, `Negatives (0),${result.n_negative}`,
-      `AUC,${result.auc}`, `AUC interpretation,${aucLabel(result.auc)}`,
-      "",
-      "Optimal cutoff (Youden J)",
-      `Cutoff,${opt.cutoff}`,
-      `Sensitivity,${fmtPct(opt.sensitivity)}`, `Specificity,${fmtPct(opt.specificity)}`,
-      `PPV,${fmtPct(opt.ppv)}`, `NPV,${fmtPct(opt.npv)}`, `Accuracy,${fmtPct(opt.accuracy)}`,
-      `LR+,${opt.lr_pos ?? "—"}`, `LR-,${opt.lr_neg ?? "—"}`, `Youden J,${opt.youden_j}`,
-      `TP,${opt.tp}`, `TN,${opt.tn}`, `FP,${opt.fp}`, `FN,${opt.fn}`, "",
-      ...(result.manual ? [
-        "Manual cutoff", `Cutoff,${result.manual.cutoff}`,
-        `Sensitivity,${fmtPct(result.manual.sensitivity)}`, `Specificity,${fmtPct(result.manual.specificity)}`,
-        `PPV,${fmtPct(result.manual.ppv)}`, `NPV,${fmtPct(result.manual.npv)}`,
-        `Accuracy,${fmtPct(result.manual.accuracy)}`, "",
-      ] : []),
-      "ROC Curve", "FPR,TPR",
-      ...result.curve.map((p: any) => `${p.fpr.toFixed(6)},${p.tpr.toFixed(6)}`),
+  // Two-column "metric / value" table — round-trips cleanly through CSV /
+  // XLSX. ROC curve points (FPR, TPR per row) come after the summary block
+  // in the same sheet so the user gets one self-contained file.
+  const singleExport = useMemo(() => {
+    if (!result) return null;
+    const opt = result.optimal ?? {};
+    const headers = ["Metric", "Value"];
+    const rows: (string | number | null)[][] = [
+      ["Score column", scoreCol],
+      ["Outcome column", outcomeCol],
+      ["n", result.n],
+      ["Positives (1)", result.n_positive],
+      ["Negatives (0)", result.n_negative],
+      ["AUC", result.auc],
+      ["AUC interpretation", aucLabel(result.auc)],
+      ["95% CI lower", result.ci_lower ?? "—"],
+      ["95% CI upper", result.ci_upper ?? "—"],
+      ["", ""],
+      ["Optimal cutoff (Youden J)", ""],
+      ["Cutoff", opt.cutoff ?? "—"],
+      ["Sensitivity", fmtPct(opt.sensitivity)],
+      ["Specificity", fmtPct(opt.specificity)],
+      ["PPV", fmtPct(opt.ppv)],
+      ["NPV", fmtPct(opt.npv)],
+      ["Accuracy", fmtPct(opt.accuracy)],
+      ["LR+", opt.lr_pos ?? "—"],
+      ["LR-", opt.lr_neg ?? "—"],
+      ["Youden J", opt.youden_j ?? "—"],
+      ["TP", opt.tp ?? "—"],
+      ["TN", opt.tn ?? "—"],
+      ["FP", opt.fp ?? "—"],
+      ["FN", opt.fn ?? "—"],
     ];
-    downloadCSV(rows.join("\r\n"), `ROC_${scoreCol}_vs_${outcomeCol}.csv`);
-  };
+    if (result.manual) {
+      rows.push(["", ""], ["Manual cutoff", ""],
+        ["Cutoff", result.manual.cutoff],
+        ["Sensitivity", fmtPct(result.manual.sensitivity)],
+        ["Specificity", fmtPct(result.manual.specificity)],
+        ["PPV", fmtPct(result.manual.ppv)],
+        ["NPV", fmtPct(result.manual.npv)],
+        ["Accuracy", fmtPct(result.manual.accuracy)],
+      );
+    }
+    rows.push(["", ""], ["ROC Curve (FPR, TPR)", ""]);
+    for (const p of result.curve) {
+      rows.push([p.fpr.toFixed(6), p.tpr.toFixed(6)]);
+    }
+    return { headers, rows };
+  }, [result, scoreCol, outcomeCol]);
 
-  const exportMultiCSV = () => {
-    if (!multiResults.length) return;
-    const rows: string[] = [
-      `Multi-curve ROC Export`, `Outcome,${outcomeCol}`, "",
-      "Summary", "Variable,AUC,CI_Lower,CI_Upper",
-      ...multiResults.map((r) =>
-        `${r.col},${r.auc},${r.ci_lower ?? ""},${r.ci_upper ?? ""}`
-      ),
-    ];
+  const multiExport = useMemo(() => {
+    if (!multiResults.length) return null;
+    const headers = ["Variable", "AUC", "CI Lower", "CI Upper"];
+    const rows: (string | number | null)[][] = multiResults.map((r) =>
+      [r.col, r.auc, r.ci_lower ?? "", r.ci_upper ?? ""]
+    );
+    // Append each curve's FPR/TPR pairs after the summary so all data lands
+    // in one file — section header rows mark the boundary.
     multiResults.forEach((r) => {
       if (r.curve.length) {
-        rows.push("", `Curve — ${r.col}`, "FPR,TPR");
-        r.curve.forEach((p) => rows.push(`${p.fpr.toFixed(6)},${p.tpr.toFixed(6)}`));
+        rows.push(["", "", "", ""], [`Curve — ${r.col}`, "FPR", "TPR", ""]);
+        r.curve.forEach((p) => rows.push(["", p.fpr.toFixed(6), p.tpr.toFixed(6), ""]));
       }
     });
-    downloadCSV(rows.join("\r\n"), `ROC_multi_${outcomeCol}.csv`);
-  };
+    return { headers, rows };
+  }, [multiResults]);
 
-  const downloadCSV = (content: string, filename: string) => {
-    const blob = new Blob(["\uFEFF" + content], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = filename; a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const exportPNG = async (filename: string) => {
-    const el: HTMLElement | null = rocPlotRef.current?.el ?? rocPlotRef.current;
-    if (!el) return;
-    const Plotly = (await import("plotly.js")).default;
-    await (Plotly as any).downloadImage(el, {
-      format: "png", width: 1200, height: 700, scale: 3.125, filename,
-    });
-  };
+  // PNG / TIFF flow through ResultExporter \u2014 kept only for any legacy
+  // call site (none remain after this refactor).
 
   // ── Derived ──
   const activeMetrics = useManual && result?.manual
@@ -527,16 +536,14 @@ export default function ROCPanel() {
               <div className="panel space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">Results</h3>
-                  <div className="flex gap-1">
-                    <button onClick={exportSingleCSV}
-                      className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-300">
-                      ↓ CSV
-                    </button>
-                    <button onClick={() => exportPNG(`ROC_${scoreCol}_vs_${outcomeCol}`)}
-                      className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-300">
-                      ↓ PNG 300dpi
-                    </button>
-                  </div>
+                  {singleExport && (
+                    <ResultExporter
+                      title={`ROC_${scoreCol}_vs_${outcomeCol}`}
+                      headers={singleExport.headers}
+                      rows={singleExport.rows}
+                      plotRef={rocPlotRef}
+                    />
+                  )}
                 </div>
 
                 <div className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg py-3">
@@ -809,16 +816,14 @@ export default function ROCPanel() {
               <div className="panel space-y-2">
                 <div className="flex items-center justify-between">
                   <h3 className="text-sm font-semibold text-gray-700">AUC Summary</h3>
-                  <div className="flex gap-1">
-                    <button onClick={exportMultiCSV}
-                      className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-300">
-                      ↓ CSV
-                    </button>
-                    <button onClick={() => exportPNG(`ROC_multi_${outcomeCol}`)}
-                      className="px-2 py-1 rounded text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 border border-gray-300">
-                      ↓ PNG
-                    </button>
-                  </div>
+                  {multiExport && (
+                    <ResultExporter
+                      title={`ROC_multi_${outcomeCol}`}
+                      headers={multiExport.headers}
+                      rows={multiExport.rows}
+                      plotRef={rocPlotRef}
+                    />
+                  )}
                 </div>
                 {/* Combined model in summary */}
                 {showCombined && combinedResult && !combinedResult.error && (
