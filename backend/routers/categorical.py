@@ -593,3 +593,162 @@ def mantel_haenszel_test(req: MantelHaenszelRequest):
         ],
         "r_code": f"mantelhaen.test(table_array)",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 7. COCHRAN-ARMITAGE TREND TEST
+# ═══════════════════════════════════════════════════════════════════════════════
+# Tests for a linear trend in proportions across K ordered groups
+# (e.g. dose levels 0,1,2,3 vs adverse event 0/1). Standard reference:
+# Agresti, "Categorical Data Analysis" 3e §3.2.4. The test statistic is:
+#   Z = Σ_k w_k (n_{k1} - n_k p̂) / sqrt( p̂ (1-p̂) Σ_k n_k (w_k - w̄)² )
+# where w_k are the user-supplied scores (default = 0,1,…,K-1), n_{k1} is
+# the number of successes in row k, n_k is the row total, p̂ is the pooled
+# success proportion, and w̄ = Σ n_k w_k / N. Z is N(0,1) under H₀.
+
+class CochranArmitageRequest(BaseModel):
+    session_id: str
+    ordinal_col: str          # the ordered exposure / dose column
+    event_col: str            # binary 0/1 outcome column
+    scores: Optional[List[float]] = None  # custom scores per level; default = ranks 0..K-1
+    success_value: Optional[str] = None   # which value of event_col counts as "success"
+    alpha: float = 0.05
+
+
+@router.post("/cochran_armitage")
+def cochran_armitage(req: CochranArmitageRequest):
+    df = _get_df(req.session_id)
+    for c in (req.ordinal_col, req.event_col):
+        if c not in df.columns:
+            raise HTTPException(400, f"Column '{c}' not found.")
+
+    sub = df[[req.ordinal_col, req.event_col]].dropna()
+    if len(sub) < 5:
+        raise HTTPException(422, "Need at least 5 non-null rows.")
+
+    # Determine "success" coding. Default: 1 if binary 0/1, else most-frequent.
+    ev = sub[req.event_col]
+    if req.success_value is not None:
+        try:
+            success = type(ev.iloc[0])(req.success_value)  # best-effort cast
+        except Exception:
+            success = req.success_value
+    else:
+        unique_vals = ev.unique()
+        if set(unique_vals).issubset({0, 1, 0.0, 1.0, True, False}):
+            success = 1
+        else:
+            if len(unique_vals) != 2:
+                raise HTTPException(422,
+                    f"Event column must be binary; got {len(unique_vals)} unique values.")
+            success = ev.value_counts().idxmax()
+
+    ev_bin = (ev == success).astype(int)
+
+    # Build K-row contingency table ordered by the ordinal column.
+    levels = sorted(sub[req.ordinal_col].unique(), key=lambda x: (
+        # Numeric-ish keys sort by value; fall back to string.
+        (0, float(x)) if isinstance(x, (int, float, np.integer, np.floating))
+        or (isinstance(x, str) and x.replace(".", "", 1).replace("-", "", 1).isdigit())
+        else (1, str(x))
+    ))
+    K = len(levels)
+    if K < 3:
+        raise HTTPException(422,
+            "Cochran-Armitage requires at least 3 ordered groups; "
+            f"got {K}. Use a 2x2 chi-square / Fisher's test instead.")
+
+    n_k = np.array([int((sub[req.ordinal_col] == lev).sum()) for lev in levels], dtype=float)
+    s_k = np.array([int(ev_bin[sub[req.ordinal_col] == lev].sum()) for lev in levels], dtype=float)
+    if np.any(n_k == 0):
+        raise HTTPException(422, "At least one ordinal level has zero observations.")
+
+    # Scores: default = 0..K-1, but accept user-supplied (must match K).
+    if req.scores is not None:
+        if len(req.scores) != K:
+            raise HTTPException(422,
+                f"Custom scores must match the number of levels ({K}); got {len(req.scores)}.")
+        w = np.asarray(req.scores, dtype=float)
+    else:
+        w = np.arange(K, dtype=float)
+
+    N = float(n_k.sum())
+    p_hat = float(s_k.sum() / N)
+    if not (0.0 < p_hat < 1.0):
+        raise HTTPException(422,
+            "Cannot test trend: outcome is constant (all successes or all failures).")
+
+    w_bar = float(np.sum(n_k * w) / N)
+    numerator = float(np.sum(w * (s_k - n_k * p_hat)))
+    variance = float(p_hat * (1.0 - p_hat) * np.sum(n_k * (w - w_bar) ** 2))
+    if variance <= 0:
+        raise HTTPException(422, "Trend variance is zero; scores may all be equal.")
+
+    z = numerator / np.sqrt(variance)
+    p_two = 2.0 * (1.0 - sp.norm.cdf(abs(z)))  # two-sided z-test
+    sig = bool(p_two < req.alpha)
+    ps = _p_str(p_two)
+
+    # Direction: sign of Z indicates whether p̂_k increases (+) or decreases (-) with scores.
+    direction = "increasing" if z > 0 else "decreasing" if z < 0 else "flat"
+
+    # Per-level summary for the UI table.
+    level_rows = []
+    for lev, nk, sk, wk in zip(levels, n_k, s_k, w):
+        pk = float(sk / nk) if nk > 0 else float("nan")
+        level_rows.append({
+            "level": str(lev),
+            "score": float(wk),
+            "n": int(nk),
+            "successes": int(sk),
+            "proportion": round(pk, 4),
+        })
+
+    return {
+        "test": "Cochran-Armitage trend test",
+        "z": round(z, 4),
+        "statistic": round(z, 4),
+        "p": p_two,
+        "significant": sig,
+        "effect_sizes": [],
+        "assumptions": [
+            "Ordered (ordinal) exposure with ≥3 levels",
+            "Binary outcome",
+            "Independence between observations",
+        ],
+        "summary": {
+            "n": int(N),
+            "n_successes": int(s_k.sum()),
+            "pooled_proportion": round(p_hat, 4),
+            "n_levels": K,
+            "direction": direction,
+            "scores": list(w.astype(float)),
+            "levels": level_rows,
+        },
+        "interpretation": (
+            f"{'Significant' if sig else 'No significant'} linear trend in the "
+            f"proportion of {req.event_col} (success = {success}) across {K} "
+            f"ordered levels of {req.ordinal_col} "
+            f"(Z = {z:.3f}, p = {ps}; direction: {direction})."
+        ),
+        "result_text": (
+            f"A Cochran-Armitage trend test assessed whether the proportion of "
+            f"{req.event_col} = {success} changed linearly across {K} ordered "
+            f"levels of {req.ordinal_col} (n = {int(N)}). The trend was "
+            f"{'statistically significant' if sig else 'not statistically significant'} "
+            f"(Z = {z:.3f}, p = {ps}), with a {direction} trend in proportions."
+        ),
+        "export_rows": [
+            ["Statistic", "Value"],
+            ["Z", round(z, 4)],
+            ["p", round(p_two, 6)],
+            ["Levels", K],
+            ["Pooled proportion", round(p_hat, 4)],
+            ["Direction", direction],
+            ["Total n", int(N)],
+        ],
+        "r_code": (
+            f"# DescTools::CochranArmitageTest(table({req.ordinal_col}, {req.event_col}))\n"
+            f"prop.trend.test(c{tuple(int(s) for s in s_k)}, c{tuple(int(n) for n in n_k)})"
+        ),
+    }

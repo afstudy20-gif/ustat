@@ -509,6 +509,250 @@ def _logistic_results_text(outcome, coefs, chi2_val, df, chi2_p, nagelkerke, hl,
     return " ".join(p for p in parts if p)
 
 
+# ── Firth Penalized Logistic Regression ──────────────────────────────────────
+# Firth (1993) / Heinze & Schemper (2002) penalize the log-likelihood by the
+# Jeffreys prior |I(β)|^{1/2} to remove the small-sample / separation bias of
+# standard MLE logistic regression. Implemented with Newton-Raphson updates:
+#   β ← β + (X' W X)^{-1} X' (y - π + h (1/2 - π))
+# where π = expit(Xβ), W = diag(π(1-π)), H = W^{1/2} X (X' W X)^{-1} X' W^{1/2},
+# and h = diag(H) is the hat-matrix leverage. The penalized score adds
+# h (1/2 - π), which is the Jeffreys-prior correction. Wald CIs are reported;
+# profile-penalized-likelihood CIs are out of scope for v1.
+
+class FirthLogisticRequest(BaseModel):
+    session_id: str
+    outcome: str
+    predictors: List[str]
+    scale_factors: Optional[dict] = None
+    imputation: Optional[str] = "listwise"
+    max_iter: int = 50
+    tol: float = 1e-6
+    interactions: Optional[List[List[str]]] = None
+
+
+def _firth_fit(X: np.ndarray, y: np.ndarray, max_iter: int = 50, tol: float = 1e-6):
+    """Penalized MLE via Firth (Newton-Raphson). Returns (beta, vcov, llf, n_iter, converged).
+
+    X must already include a constant column. y must be 0/1 integer. The
+    penalized log-likelihood is l*(β) = l(β) + 0.5 log|I(β)|, whose score is
+    s* = X' (y - π) + X' diag(h)(1/2 - π) and observed information is X' W X
+    (the curvature of the penalty contributes O(1/n) and is dropped, following
+    Heinze 2002 — Wald inference uses the unpenalized Fisher information).
+    """
+    n, p = X.shape
+    beta = np.zeros(p, dtype=float)
+    converged = False
+    n_iter = 0
+    for n_iter in range(1, max_iter + 1):
+        eta = X @ beta
+        # Clip eta for numerical stability with separated data.
+        eta = np.clip(eta, -30, 30)
+        pi = 1.0 / (1.0 + np.exp(-eta))
+        W = pi * (1.0 - pi)
+        # Information matrix I = X' W X.
+        XtWX = (X.T * W) @ X
+        try:
+            XtWX_inv = np.linalg.inv(XtWX)
+        except np.linalg.LinAlgError:
+            # Ridge a tiny diagonal if the information is singular (collinear).
+            XtWX_inv = np.linalg.inv(XtWX + 1e-8 * np.eye(p))
+        # Hat-matrix diagonal h_i = w_i x_i' (X'WX)^{-1} x_i.
+        sqrtW = np.sqrt(W)
+        XW = X * sqrtW[:, None]
+        H = XW @ XtWX_inv @ XW.T
+        h = np.diag(H)
+        # Firth score: X' [(y - pi) + h (1/2 - pi)].
+        score = X.T @ ((y - pi) + h * (0.5 - pi))
+        step = XtWX_inv @ score
+        beta_new = beta + step
+        # Halving safeguards monotonic increase in penalized log-likelihood.
+        for _ in range(10):
+            eta_new = np.clip(X @ beta_new, -30, 30)
+            pi_new = 1.0 / (1.0 + np.exp(-eta_new))
+            ll_new = float(np.sum(y * eta_new - np.log1p(np.exp(eta_new))))
+            try:
+                sign, logdet = np.linalg.slogdet((X.T * (pi_new * (1.0 - pi_new))) @ X)
+                pen_ll_new = ll_new + 0.5 * logdet
+            except Exception:
+                pen_ll_new = ll_new
+            ll_old = float(np.sum(y * eta - np.log1p(np.exp(eta))))
+            try:
+                sign_o, logdet_o = np.linalg.slogdet(XtWX)
+                pen_ll_old = ll_old + 0.5 * logdet_o
+            except Exception:
+                pen_ll_old = ll_old
+            if pen_ll_new >= pen_ll_old - 1e-10 or np.linalg.norm(step) < tol:
+                break
+            step = step / 2.0
+            beta_new = beta + step
+        if np.max(np.abs(beta_new - beta)) < tol:
+            beta = beta_new
+            converged = True
+            break
+        beta = beta_new
+    # Final fit-quality summaries.
+    eta = np.clip(X @ beta, -30, 30)
+    pi = 1.0 / (1.0 + np.exp(-eta))
+    W = pi * (1.0 - pi)
+    XtWX = (X.T * W) @ X
+    try:
+        vcov = np.linalg.inv(XtWX)
+    except np.linalg.LinAlgError:
+        vcov = np.linalg.inv(XtWX + 1e-8 * np.eye(p))
+    ll = float(np.sum(y * eta - np.log1p(np.exp(eta))))
+    try:
+        sign, logdet = np.linalg.slogdet(XtWX)
+        penalized_ll = ll + 0.5 * logdet
+    except Exception:
+        penalized_ll = ll
+    return beta, vcov, ll, penalized_ll, n_iter, converged, pi
+
+
+@router.post("/firth_logistic")
+def firth_logistic_regression(req: FirthLogisticRequest):
+    """Penalized (Firth) logistic regression — bias-corrected MLE that handles
+    complete or quasi-complete separation and rare-event outcomes that crash
+    or produce infinite ORs in standard logistic regression.
+    """
+    from scipy.stats import chi2 as chi2_dist
+    from scipy.stats import norm as sp_norm
+    from sklearn.metrics import roc_auc_score, confusion_matrix
+
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    n_excluded = n_total - len(df)
+    df, pred_list = _apply_scaling(df, req.predictors, req.scale_factors)
+    X_df = pd.get_dummies(df[pred_list], drop_first=True).astype(float)
+    X_df, _ix_added = _add_pairwise_interactions(X_df, req.interactions, pred_list)
+    X_const_df = sm.add_constant(X_df, has_constant="add")
+    y = df[req.outcome]
+    if y.dtype == object:
+        le = LabelEncoder()
+        y = le.fit_transform(y)
+    else:
+        y = pd.to_numeric(y, errors="coerce")
+        unique_vals = sorted(y.dropna().unique())
+        if set(unique_vals) - {0, 1, 0.0, 1.0}:
+            raise HTTPException(status_code=422,
+                detail=f"Firth logistic requires a binary 0/1 outcome. Found values: {unique_vals[:10]}")
+        y = y.astype(int)
+    if len(set(y)) < 2:
+        raise HTTPException(status_code=422,
+            detail="Outcome column has only one unique value — logistic regression requires both 0 and 1.")
+
+    X = X_const_df.values.astype(float)
+    y_arr = np.asarray(y, dtype=int)
+
+    beta, vcov, ll, penalized_ll, n_iter, converged, pi = _firth_fit(
+        X, y_arr, max_iter=req.max_iter, tol=req.tol
+    )
+    se = np.sqrt(np.diag(vcov))
+
+    # Null model (intercept-only) for LR test under the penalized likelihood.
+    X_null = np.ones((len(y_arr), 1))
+    _, _, ll0, pen_ll0, _, _, _ = _firth_fit(X_null, y_arr, max_iter=req.max_iter, tol=req.tol)
+
+    # Wald CIs + p-values.
+    z = beta / np.where(se > 0, se, np.nan)
+    p_two = 2.0 * (1.0 - sp_norm.cdf(np.abs(z)))
+    ci_low = beta - 1.96 * se
+    ci_high = beta + 1.96 * se
+
+    coefs = []
+    for i, var in enumerate(X_const_df.columns):
+        coefs.append({
+            "variable": str(var),
+            "B": float(beta[i]),
+            "log_odds": float(beta[i]),
+            "se": float(se[i]),
+            "wald": round(float(z[i] ** 2), 4),
+            "df": 1,
+            "p": float(p_two[i]),
+            "odds_ratio": float(np.exp(beta[i])),
+            "z": float(z[i]),
+            "or_ci_low": float(np.exp(ci_low[i])),
+            "or_ci_high": float(np.exp(ci_high[i])),
+            "vif": None,
+        })
+
+    n = len(y_arr)
+    minus2ll = -2.0 * ll
+    # Penalized LR omnibus test (preferred under Firth).
+    omnibus_chi2 = float(2.0 * (penalized_ll - pen_ll0))
+    omnibus_df = X.shape[1] - 1
+    omnibus_p = float(1 - chi2_dist.cdf(omnibus_chi2, omnibus_df)) if omnibus_df > 0 else 1.0
+
+    # Pseudo-R² (Cox & Snell and Nagelkerke from unpenalized likelihoods).
+    cox_snell_r2 = float(1 - np.exp((2 / n) * (ll0 - ll))) if n > 0 else 0.0
+    max_r2 = float(1 - np.exp((2 / n) * ll0)) if n > 0 else 1.0
+    nagelkerke_r2 = float(cox_snell_r2 / max_r2) if max_r2 != 0 else 0.0
+
+    # AIC / BIC use the penalized log-likelihood per Heinze (2002).
+    k = X.shape[1]
+    aic = float(-2.0 * penalized_ll + 2 * k)
+    bic = float(-2.0 * penalized_ll + np.log(n) * k)
+
+    # Classification at the 0.5 threshold.
+    y_pred = (pi >= 0.5).astype(int)
+    try:
+        cm = confusion_matrix(y_arr, y_pred)
+        tn, fp, fn, tp = cm.ravel()
+        classification = {
+            "accuracy": round(float((tp + tn) / (tp + tn + fp + fn)), 4),
+            "sensitivity": round(float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0, 4),
+            "specificity": round(float(tn / (tn + fp)) if (tn + fp) > 0 else 0.0, 4),
+            "ppv": round(float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0, 4),
+            "npv": round(float(tn / (tn + fn)) if (tn + fn) > 0 else 0.0, 4),
+            "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn),
+        }
+    except Exception:
+        classification = None
+    try:
+        auc = float(roc_auc_score(y_arr, pi))
+    except Exception:
+        auc = None
+
+    return {
+        "model": "Firth Penalized Logistic Regression",
+        "outcome": req.outcome,
+        "n": int(n),
+        "n_events": int(y_arr.sum()),
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
+        "converged": bool(converged),
+        "iterations": int(n_iter),
+        "minus2ll": round(minus2ll, 4),
+        "penalized_ll": round(float(penalized_ll), 4),
+        "log_likelihood": float(ll),
+        "cox_snell_r2": round(cox_snell_r2, 4),
+        "nagelkerke_r2": round(nagelkerke_r2, 4),
+        "pseudo_r2": round(cox_snell_r2, 4),
+        "aic": round(aic, 4),
+        "bic": round(bic, 4),
+        "omnibus": {"chi2": round(omnibus_chi2, 4), "df": omnibus_df, "p": round(omnibus_p, 6)},
+        "auc": round(auc, 4) if auc is not None else None,
+        "classification": classification,
+        "coefficients": coefs,
+        "method_note": (
+            "Firth (1993) bias-corrected logistic regression with Jeffreys-prior "
+            "penalty; recommended for rare events or (quasi-)separated data. "
+            "Wald CIs are reported; profile-penalized-likelihood CIs are not "
+            "computed in this version. Reference: Heinze & Schemper, Stat Med 2002."
+        ),
+        "result_text": (
+            f"Firth penalized logistic regression was used to model {req.outcome} "
+            f"(n = {n}, events = {int(y_arr.sum())}). The model "
+            f"{'converged' if converged else 'did not fully converge'} in {n_iter} "
+            f"iterations. Omnibus penalized likelihood ratio χ² = {omnibus_chi2:.3f} "
+            f"on {omnibus_df} df, p = "
+            f"{'<0.001' if omnibus_p < 0.001 else f'{omnibus_p:.3f}'}. "
+            f"Nagelkerke R² = {nagelkerke_r2:.3f}"
+            + (f", AUC = {auc:.3f}." if auc is not None else ".")
+        ),
+    }
+
+
 # ── Poisson Regression ───────────────────────────────────────────────────────
 
 class PoissonRequest(BaseModel):

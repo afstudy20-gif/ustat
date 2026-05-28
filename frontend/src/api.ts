@@ -37,6 +37,7 @@ export const getBar = (data: object) => api.post("/api/charts/bar", data);
 export const runLinear   = (data: object) => api.post("/api/models/linear", data);
 export const runRCS      = (data: object) => api.post("/api/models/rcs", data);
 export const runLogistic = (data: object) => api.post("/api/models/logistic", data);
+export const runFirthLogistic = (data: object) => api.post("/api/models/firth_logistic", data);
 export const runLogisticTable = (data: object) => api.post("/api/models/logistic_table", data);
 export const runPoisson  = (data: object) => api.post("/api/models/poisson", data);
 export const runKM = (data: object) => api.post("/api/models/survival/km", data);
@@ -103,6 +104,7 @@ export const runTwoProportions = (data: object) => api.post("/api/categorical/tw
 export const runMcNemar      = (data: object) => api.post("/api/categorical/mcnemar", data);
 export const runCochranQ     = (data: object) => api.post("/api/categorical/cochran_q", data);
 export const runMantelHaenszel = (data: object) => api.post("/api/categorical/mantel_haenszel", data);
+export const runCochranArmitage = (data: object) => api.post("/api/categorical/cochran_armitage", data);
 
 // Agreement
 export const runBlandAltman  = (data: object) => api.post("/api/agreement/bland_altman", data);

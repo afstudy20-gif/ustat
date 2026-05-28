@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runLinear, runLogistic, runKM, runCox, runLogisticTable, runPoisson, getSparklines } from "../api";
+import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, getSparklines } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -1599,6 +1599,7 @@ export default function ModelsPanel() {
       const interactions = glmInteractions.length > 0 ? glmInteractions : undefined;
       if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE, interactions });
       else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE, interactions });
+      else if (model === "firth") res = await runFirthLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, interactions });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
@@ -1647,6 +1648,7 @@ export default function ModelsPanel() {
           {([
             ["linear",   "Linear Regression",       "Predict a continuous outcome (e.g. blood pressure) from one or more predictors. Output: β coefficients, R², p-values."],
             ["logistic", "Logistic Regression",      "Predict a binary outcome (0/1, yes/no) — outputs Odds Ratios showing how each predictor changes the odds of the event."],
+            ["firth",    "Firth Logistic (penalized)", "Bias-corrected logistic regression (Firth 1993). Use when standard logistic fails or returns infinite ORs from rare events / separation. Same output shape as Logistic but with Jeffreys-prior penalty."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
             ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
           ] as const).map(([v, l, desc]) => (
@@ -1667,7 +1669,7 @@ export default function ModelsPanel() {
               </span>
             </label>
           )}
-          {(model === "linear" || model === "logistic" || model === "ortable") && (
+          {(model === "linear" || model === "logistic" || model === "firth" || model === "ortable") && (
             <div className="mt-1 pt-2 border-t border-gray-100 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
               Need a non-linear continuous effect? Use the
               {" "}<span className="font-semibold">Restricted Cubic Spline</span> sub-tab —
@@ -1802,7 +1804,7 @@ export default function ModelsPanel() {
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {allCols.filter((c) => c !== outcome && c.toLowerCase().includes(predFilter.toLowerCase())).map((c) => {
                     const checked = predictors.includes(c);
-                    const showScale = checked && (model === "logistic" || model === "ortable");
+                    const showScale = checked && (model === "logistic" || model === "firth" || model === "ortable");
                     const spk = sparklines[c];
                     return (
                       <div key={c} className="space-y-0.5">
@@ -1841,7 +1843,7 @@ export default function ModelsPanel() {
           {/* Pairwise interactions — linear / logistic / cox accept them
               server-side (Poisson + OR-table do not yet). Hidden until at
               least 2 predictors are ticked. */}
-          {(model === "linear" || model === "logistic" || model === "cox") && predictors.length >= 2 && (
+          {(model === "linear" || model === "logistic" || model === "firth" || model === "cox") && predictors.length >= 2 && (
             <div className="panel space-y-1.5">
               <p className="text-xs text-gray-500 font-medium flex items-center gap-1">
                 Interactions
@@ -1994,9 +1996,9 @@ export default function ModelsPanel() {
               <div className="panel">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-semibold text-gray-900">
-                    {model === "cox" ? "Coefficients (Hazard Ratios)" : model === "logistic" ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
+                    {model === "cox" ? "Coefficients (Hazard Ratios)" : (model === "logistic" || model === "firth") ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
                     {model === "linear" && <Tip text="Each β coefficient shows how much the outcome changes for a 1-unit increase in that predictor, holding all others constant. Significant predictors (p < 0.05) are highlighted." wide />}
-                    {model === "logistic" && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
+                    {(model === "logistic" || model === "firth") && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
                     {model === "cox" && <Tip text="Hazard Ratio (HR) > 1 means a higher rate of the event over time; HR < 1 means a protective effect. E.g. HR = 1.5 means 50% higher event rate per unit increase." wide />}
                     {model === "poisson" && <Tip text="Incidence Rate Ratio (IRR) = eβ. IRR > 1 means higher event rate; IRR < 1 means lower rate. Use for count outcomes (hospital admissions, episodes, etc.)." wide />}
                   </h4>
@@ -2040,7 +2042,7 @@ export default function ModelsPanel() {
             )}
 
             {/* Forest plot — logistic or cox */}
-            {result.coefficients && (model === "logistic" || model === "cox") &&
+            {result.coefficients && (model === "logistic" || model === "firth" || model === "cox") &&
               result.coefficients.filter((c: any) => c.variable !== "const").length > 0 && (
               <div className="panel">
                 <h4 className="font-semibold text-gray-900 mb-2">

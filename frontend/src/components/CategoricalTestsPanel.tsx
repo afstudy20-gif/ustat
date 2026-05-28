@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel } from "../api";
+import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel, runCochranArmitage } from "../api";
 // ResultExporter available via ResultCard pattern
 
 const TESTS = [
@@ -10,6 +10,7 @@ const TESTS = [
   { id: "mcnemar",        label: "McNemar test",          group: "Paired" },
   { id: "cochran_q",      label: "Cochran's Q",           group: "Paired" },
   { id: "mantel_haenszel", label: "Mantel-Haenszel",      group: "Stratified" },
+  { id: "cochran_armitage", label: "Cochran-Armitage trend", group: "Trend" },
 ] as const;
 
 const GUIDANCE: Record<string, { when: string; reading: string }> = {
@@ -19,6 +20,7 @@ const GUIDANCE: Record<string, { when: string; reading: string }> = {
   mcnemar:   { when: "Test change in a binary outcome for paired data (e.g. before/after intervention on the same patients).", reading: "Tests whether discordant pairs (changed responses) are symmetric. OR of discordant pairs is the effect size." },
   cochran_q: { when: "Extension of McNemar for 3+ related binary measures. Tests whether proportions differ across conditions.", reading: "Significant Q means at least one proportion differs. Follow up with pairwise McNemar (Holm-corrected)." },
   mantel_haenszel: { when: "Test association between two binary variables while controlling for a stratifying variable (e.g. hospital site).", reading: "Common OR summarises the overall effect across strata. Homogeneity test checks whether the OR is consistent." },
+  cochran_armitage: { when: "Test for a monotone linear trend in the proportion of a binary outcome across 3+ ordered groups (e.g. dose levels 0/1/2/3 vs adverse event).", reading: "Significant Z = the proportion changes linearly across the ordered groups. Sign of Z indicates direction (positive = increasing, negative = decreasing)." },
 };
 
 function ResultCard({ result }: { result: any }) {
@@ -106,6 +108,7 @@ export default function CategoricalTestsPanel() {
   const isCochran = test === "cochran_q";
   const isMH = test === "mantel_haenszel";
   const isTwoProp = test === "two_prop";
+  const isCA = test === "cochran_armitage";
   const needsNull = test === "binomial" || test === "one_prop";
 
   const run = async () => {
@@ -119,6 +122,7 @@ export default function CategoricalTestsPanel() {
       else if (test === "mcnemar") res = await runMcNemar({ session_id: sid, col1: col, col2: col2 });
       else if (test === "cochran_q") res = await runCochranQ({ session_id: sid, columns: friedmanCols });
       else if (test === "mantel_haenszel") res = await runMantelHaenszel({ session_id: sid, row_col: col, col_col: col2, strata_col: strataCol });
+      else if (test === "cochran_armitage") res = await runCochranArmitage({ session_id: sid, ordinal_col: groupCol, event_col: col });
       setResult(res?.data);
     } catch (e: any) { setError(e.response?.data?.detail ?? "Error"); }
     finally { setLoading(false); }
@@ -129,7 +133,7 @@ export default function CategoricalTestsPanel() {
     <div className="flex gap-4">
       <div className="w-64 flex-shrink-0 space-y-4">
         <div className="panel space-y-1">
-          {["One-sample", "Two-sample", "Paired", "Stratified"].map((grp) => (
+          {["One-sample", "Two-sample", "Paired", "Stratified", "Trend"].map((grp) => (
             <div key={grp}>
               <p className="text-xs text-gray-400 uppercase tracking-wider mt-3 mb-1 first:mt-0">{grp}</p>
               {TESTS.filter((t) => t.group === grp).map(({ id, label }) => (
@@ -153,7 +157,7 @@ export default function CategoricalTestsPanel() {
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">{isMH ? "Row variable" : "Binary column"}</label>
+            <label className="text-xs text-gray-400 block mb-1">{isMH ? "Row variable" : isCA ? "Binary outcome (event)" : "Binary column"}</label>
             <select className="select w-full" value={col} onChange={(e) => setCol(e.target.value)}>
               {binCols.map((c) => <option key={c}>{c}</option>)}
             </select>
@@ -195,6 +199,15 @@ export default function CategoricalTestsPanel() {
                 onChange={(e) => setFriedmanCols(Array.from(e.target.selectedOptions, o => o.value))}>
                 {binCols.map((c) => <option key={c}>{c}</option>)}
               </select>
+            </div>
+          )}
+          {isCA && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Ordered exposure (3+ levels)</label>
+              <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
+                {[...catCols, ...numCols].map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">Scores default to 0,1,2,… (rank order). Custom scores not exposed in UI for v1.</p>
             </div>
           )}
           <button className="btn-primary w-full" onClick={run} disabled={loading || (isCochran && friedmanCols.length < 3)}>
