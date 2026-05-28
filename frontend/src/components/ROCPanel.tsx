@@ -510,17 +510,20 @@ export default function ROCPanel() {
   const updateMultiStyle = (i: number, patch: Partial<CurveStyle>) =>
     setMultiStyles((prev) => prev.map((s, j) => j === i ? { ...s, ...patch } : s));
 
-  // ── Multi-curve plot traces (combined model first, then individual, then reference) ──
+  // ── Multi-curve plot traces (reference first so it sits behind, then
+  // individual ROC step curves, then combined-model curve on top) ──
   const multiTraces = [
-    // Combined model — shown on top with thicker line
-    ...(showCombined && combinedResult && !combinedResult.error && combinedResult.curve.length > 0 ? [{
+    // Reference diagonal — rendered first so the data curves sit on top.
+    {
       type: "scatter", mode: "lines",
-      x: combinedResult.curve.map((p) => p.fpr),
-      y: combinedResult.curve.map((p) => p.tpr),
-      line: { color: combinedStyle.color, width: combinedStyle.width, dash: combinedStyle.dash },
-      name: `${combinedResult.col} AUC ${combinedResult.auc}`,
-    }] : []),
-    // Individual predictors
+      x: [0, 1], y: [0, 1],
+      line: { color: multiChance.color, width: multiChance.width, dash: multiChance.dash },
+      name: "Reference",
+      hoverinfo: "skip" as const,
+    },
+    // Individual predictors — step curves (`shape: hv`) to match the
+    // matplotlib reference aesthetic. Legend label is `name: AUC X.XX`
+    // (no embedded CI to keep the entry short and readable).
     ...multiResults
       .filter((r) => !r.error && r.curve.length > 0)
       .map((r, i) => {
@@ -529,17 +532,20 @@ export default function ROCPanel() {
           type: "scatter", mode: "lines",
           x: r.curve.map((p) => p.fpr),
           y: r.curve.map((p) => p.tpr),
-          line: { color: st.color, width: st.width, dash: st.dash },
-          name: `${r.col} ${fmtAUC(r.auc, r.ci_lower, r.ci_upper)}`,
+          line: { color: st.color, width: st.width, dash: st.dash, shape: "hv" as const },
+          name: `${r.col}: AUC ${Number(r.auc).toFixed(2)}`,
+          hovertemplate: `${r.col}<br>FPR: %{x:.3f}<br>TPR: %{y:.3f}<extra></extra>`,
         };
       }),
-    // Reference diagonal
-    {
+    // Combined model — drawn last so it sits visually on top of the predictors.
+    ...(showCombined && combinedResult && !combinedResult.error && combinedResult.curve.length > 0 ? [{
       type: "scatter", mode: "lines",
-      x: [0, 1], y: [0, 1],
-      line: { color: multiChance.color, width: multiChance.width, dash: multiChance.dash },
-      name: "Reference",
-    },
+      x: combinedResult.curve.map((p) => p.fpr),
+      y: combinedResult.curve.map((p) => p.tpr),
+      line: { color: combinedStyle.color, width: combinedStyle.width, dash: combinedStyle.dash, shape: "hv" as const },
+      name: `${combinedResult.col}: AUC ${Number(combinedResult.auc).toFixed(2)}`,
+      hovertemplate: `${combinedResult.col}<br>FPR: %{x:.3f}<br>TPR: %{y:.3f}<extra></extra>`,
+    }] : []),
   ];
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -1280,15 +1286,23 @@ export default function ROCPanel() {
               data={multiTraces as any}
               layout={{
                 ...PLOT_LAYOUT,
-                xaxis: { ...(PLOT_LAYOUT.xaxis as object), showgrid: showGrid },
-                yaxis: { ...(PLOT_LAYOUT.yaxis as object), showgrid: showGrid },
+                xaxis: {
+                  ...(PLOT_LAYOUT.xaxis as object), showgrid: showGrid,
+                  title: { text: "1 − Specificity (FPR)", font: { color: "#374151", size: 12 } },
+                  range: [0, 1], zeroline: false,
+                },
+                yaxis: {
+                  ...(PLOT_LAYOUT.yaxis as object), showgrid: showGrid,
+                  title: { text: "Sensitivity (TPR)", font: { color: "#374151", size: 12 } },
+                  range: [0, 1.05], zeroline: false,
+                },
                 autosize: true,
-                title: { text: `ROC Curves → ${outcomeCol}`, font: { color: "#374151", size: 13 } },
+                title: { text: `ROC comparison: ${outcomeCol}`, font: { color: "#374151", size: 13 } },
                 legend: {
                   font: { color: "#374151", size: 11 },
                   bgcolor: "rgba(249,250,251,0.95)",
-                  bordercolor: "#e5e7eb", borderwidth: 1,
-                  x: 0.5, y: 0.05, xanchor: "left" as const, yanchor: "bottom" as const,
+                  bordercolor: "#9ca3af", borderwidth: 1,
+                  x: 0.98, y: 0.04, xanchor: "right" as const, yanchor: "bottom" as const,
                 },
               }}
               onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; rocMultiRef.current = gd; }}
