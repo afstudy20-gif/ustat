@@ -145,10 +145,13 @@ export async function plotlyToTiffBlob(
   graphDiv: HTMLElement,
   opts: { width: number; height: number; dpi: number; filename?: string },
 ): Promise<Blob> {
-  // Use the UMD bundle (plotly.js/dist/plotly) — the package-root ESM
-  // entrypoint crashes in production with a tree-shaking-related
-  // "Cannot read properties of undefined (reading 'prototype')".
-  const Plotly = (await import("plotly.js/dist/plotly")).default;
+  // Prefer the Plotly instance react-plotly.js already attached to the
+  // gd (saves a dynamic import + side-steps the ESM tree-shake bug);
+  // fall back to plotly.js/dist/plotly only when _Plotly isn't present.
+  let Plotly: any = (graphDiv as any)._Plotly;
+  if (!Plotly?.toImage) {
+    Plotly = (await import("plotly.js/dist/plotly")).default;
+  }
   const scale = opts.dpi / 72;
   const dataUrl: string = await Plotly.toImage(graphDiv, {
     format: "png",

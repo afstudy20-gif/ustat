@@ -77,12 +77,15 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
   if (!el) {
     throw new Error("plot is not mounted yet — wait for the chart to render and try again");
   }
-  // Import the UMD bundle used by react-plotly.js itself; the package
-  // root ESM entrypoint crashes in production with "Cannot read
-  // properties of undefined (reading 'prototype')" because Vite/Rolldown
-  // tree-shake parts of the toImage / downloadImage chain.
-  const mod: any = await import("plotly.js/dist/plotly");
-  const Plotly: any = mod?.toImage ? mod : mod?.default;
+  // Prefer the Plotly instance react-plotly.js already attached to the
+  // gd — reuses the exact bundle that drew the chart and bypasses the
+  // ESM tree-shake bug entirely. Fall back to the dist subpath only when
+  // _Plotly isn't present.
+  let Plotly: any = (el as any)._Plotly;
+  if (!Plotly?.toImage) {
+    const mod: any = await import("plotly.js/dist/plotly");
+    Plotly = mod?.toImage ? mod : mod?.default;
+  }
   if (!Plotly?.toImage) {
     throw new Error("plotly.js toImage not available");
   }

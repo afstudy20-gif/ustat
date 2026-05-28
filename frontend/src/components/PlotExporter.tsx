@@ -65,8 +65,14 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
         // to an ESM build whose toImage / downloadImage chains were
         // tree-shaken in production and crash with "Cannot read properties
         // of undefined (reading 'prototype')".
-        const mod: any = await import("plotly.js/dist/plotly");
-        const Plotly: any = mod?.toImage ? mod : mod?.default;
+        // Prefer the Plotly instance react-plotly.js already attached to
+        // the gd — calling _Plotly.toImage reuses the exact bundle that
+        // rendered the chart and bypasses the ESM tree-shake bug entirely.
+        let Plotly: any = (el as any)._Plotly;
+        if (!Plotly?.toImage) {
+          const mod: any = await import("plotly.js/dist/plotly");
+          Plotly = mod?.toImage ? mod : mod?.default;
+        }
         if (!Plotly?.toImage) {
           throw new Error("plotly.js toImage not available");
         }
