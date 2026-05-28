@@ -28,6 +28,7 @@ export const runKruskal = (data: object) => api.post("/api/stats/kruskal", data)
 export const runJonckheereTerpstra = (data: object) => api.post("/api/stats/jonckheere_terpstra", data);
 export const runROC = (data: object) => api.post("/api/stats/roc", data);
 export const runROCCompare = (data: object) => api.post("/api/stats/roc_compare", data);
+export const runROCMultiCompare = (data: object) => api.post("/api/stats/roc_multi_compare", data);
 export const runROCCombined = (data: object) => api.post("/api/stats/roc_combined", data);
 
 export const getHistogram = (data: object) => api.post("/api/charts/histogram", data);

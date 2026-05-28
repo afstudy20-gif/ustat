@@ -978,6 +978,191 @@ def roc_compare(req: ROCCompareRequest):
     return _sanitize(result)
 
 
+# ── ROC Multi-Curve DeLong (K-way pairwise comparison) ───────────────────────
+
+
+class ROCMultiCompareRequest(BaseModel):
+    session_id: str
+    score_columns: List[str]
+    outcome_column: str
+    # One direction per score column ('auto' | 'higher' | 'lower'). When the
+    # list is shorter than score_columns, the remainder default to 'auto'.
+    directions: Optional[List[str]] = None
+    # Multiple-comparison adjustment over the K(K−1)/2 pairwise p-values.
+    # Default Holm — strong-FWER, more powerful than Bonferroni.
+    p_adjust: Optional[str] = "holm"
+
+
+@router.post("/roc_multi_compare")
+def roc_multi_compare(req: ROCMultiCompareRequest):
+    """K-curve DeLong pairwise AUC comparison.
+
+    Computes the per-column AUC with DeLong 95% CI plus every pairwise
+    ΔAUC / z / p across the K = len(score_columns) curves on the SAME
+    paired sample (rows with NaN in any score or the outcome are dropped
+    once, before any computation, so every pair is tested on identical
+    rows — required for the DeLong covariance to be valid).
+    """
+    from sklearn.metrics import roc_auc_score
+
+    if len(req.score_columns) < 2:
+        raise HTTPException(status_code=422,
+            detail="Need at least 2 score columns to compare.")
+    if len(req.score_columns) != len(set(req.score_columns)):
+        raise HTTPException(status_code=422,
+            detail="Duplicate entries in score_columns.")
+
+    df_full = _get_df(req.session_id)
+    for c in req.score_columns + [req.outcome_column]:
+        if c not in df_full.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+
+    # Single complete-case subset across every column — paired-sample
+    # assumption for the DeLong covariance.
+    df = df_full.dropna(subset=list(req.score_columns) + [req.outcome_column]).copy()
+    if len(df) < 10:
+        raise HTTPException(status_code=400,
+            detail=f"Not enough complete rows after dropping NaN (need ≥ 10, got {len(df)}).")
+    y_arr = df[req.outcome_column].astype(float).astype(int).values
+    unique = set(np.unique(y_arr).tolist())
+    if unique - {0, 1} or unique == {0} or unique == {1}:
+        raise HTTPException(status_code=422,
+            detail=f"Outcome must be binary 0/1 with both classes present (got {sorted(unique)}).")
+
+    # Resolve per-score direction (auto-flip when naive AUC < 0.5) — same
+    # convention as /roc and /roc_compare.
+    dirs_in = list(req.directions or [])
+    while len(dirs_in) < len(req.score_columns):
+        dirs_in.append("auto")
+    K = len(req.score_columns)
+    scores: List[np.ndarray] = []
+    scores_meta: List[dict] = []
+    for col, d_in in zip(req.score_columns, dirs_in):
+        d = (d_in or "auto").lower()
+        if d not in {"auto", "higher", "lower"}:
+            raise HTTPException(status_code=422,
+                detail=f"direction for '{col}' must be 'auto'|'higher'|'lower', got '{d_in}'.")
+        raw = df[col].astype(float).values
+        naive_auc = float(roc_auc_score(y_arr, raw))
+        flipped = (d == "lower") or (d == "auto" and naive_auc < 0.5)
+        scores.append(-raw if flipped else raw)
+        scores_meta.append({
+            "name": col,
+            "direction_requested": d,
+            "direction_used": "lower" if flipped else "higher",
+            "direction_flipped": bool(flipped),
+        })
+
+    # Pre-compute placement values per score (Hanley & McNeil / DeLong).
+    place: List[tuple] = [_delong_placement_values(y_arr, s) for s in scores]
+    n_pos = int((y_arr == 1).sum())
+    n_neg = int((y_arr == 0).sum())
+
+    # Per-curve AUC + DeLong SE / 95% CI.
+    z95 = 1.95996
+    per_score: List[dict] = []
+    aucs = np.zeros(K, dtype=float)
+    ses  = np.zeros(K, dtype=float)
+    for i, (V_pos, V_neg) in enumerate(place):
+        auc = float(np.mean(V_pos))
+        var = np.var(V_pos, ddof=1) / n_pos + np.var(V_neg, ddof=1) / n_neg
+        se  = float(np.sqrt(max(var, 1e-12)))
+        aucs[i] = auc
+        ses[i]  = se
+        ci_lo = max(0.0, auc - z95 * se)
+        ci_hi = min(1.0, auc + z95 * se)
+        from sklearn.metrics import roc_curve
+        fpr, tpr, _ = roc_curve(y_arr, scores[i])
+        curve_step = max(1, len(fpr) // 300)
+        curve_idx = list(range(0, len(fpr), curve_step))
+        if (len(fpr) - 1) not in curve_idx:
+            curve_idx.append(len(fpr) - 1)
+        per_score.append({
+            **scores_meta[i],
+            "auc": round(auc, 4),
+            "se": round(se, 6),
+            "ci_low":  round(ci_lo, 4),
+            "ci_high": round(ci_hi, 4),
+            "curve": [{"fpr": round(float(fpr[k]), 6), "tpr": round(float(tpr[k]), 6)} for k in curve_idx],
+        })
+
+    # Pairwise DeLong stats — share the precomputed placement values.
+    pairs: List[dict] = []
+    raw_ps: List[float] = []
+    for i in range(K):
+        Vpi, Vni = place[i]
+        for j in range(i + 1, K):
+            Vpj, Vnj = place[j]
+            cov = (
+                np.cov(Vpi, Vpj, ddof=1)[0, 1] / n_pos
+                + np.cov(Vni, Vnj, ddof=1)[0, 1] / n_neg
+            )
+            var_diff = max(ses[i] ** 2 + ses[j] ** 2 - 2 * float(cov), 1e-12)
+            se_diff  = float(np.sqrt(var_diff))
+            diff = float(aucs[i] - aucs[j])
+            z = diff / se_diff if se_diff > 0 else 0.0
+            p = float(2 * (1 - scipy_stats.norm.cdf(abs(z))))
+            ci_lo = float(diff - z95 * se_diff)
+            ci_hi = float(diff + z95 * se_diff)
+            pairs.append({
+                "a": req.score_columns[i],
+                "b": req.score_columns[j],
+                "auc_a": round(float(aucs[i]), 4),
+                "auc_b": round(float(aucs[j]), 4),
+                "delta_auc": round(diff, 4),
+                "se_diff":   round(se_diff, 6),
+                "ci_low":    round(ci_lo, 4),
+                "ci_high":   round(ci_hi, 4),
+                "z": round(float(z), 4),
+                "p_raw": round(p, 6),
+            })
+            raw_ps.append(p)
+
+    # Multiple-comparison adjustment over the K(K-1)/2 raw p-values.
+    method = (req.p_adjust or "holm").lower()
+    m = len(raw_ps)
+    if m == 0 or method == "none":
+        p_adj_list = list(raw_ps)
+    elif method == "bonferroni":
+        p_adj_list = [min(1.0, p * m) for p in raw_ps]
+    elif method == "holm":
+        # Holm 1979 step-down.
+        order = sorted(range(m), key=lambda k: raw_ps[k])
+        p_adj_arr = [0.0] * m
+        running = 0.0
+        for rank, idx in enumerate(order):
+            adj = (m - rank) * raw_ps[idx]
+            running = max(running, adj)
+            p_adj_arr[idx] = min(1.0, running)
+        p_adj_list = p_adj_arr
+    else:
+        raise HTTPException(status_code=422,
+            detail=f"p_adjust must be 'holm'|'bonferroni'|'none', got '{req.p_adjust}'.")
+
+    for pair, p_adj in zip(pairs, p_adj_list):
+        pair["p_adj"]      = round(float(p_adj), 6)
+        pair["significant"] = bool(p_adj < 0.05)
+
+    return _sanitize({
+        "test": "ROC Multi-Curve DeLong",
+        "n": int(len(y_arr)),
+        "n_positive": n_pos,
+        "n_negative": n_neg,
+        "outcome": req.outcome_column,
+        "scores": per_score,
+        "pairs": pairs,
+        "n_pairs": m,
+        "p_adjust": method,
+        "method_note": (
+            "Per-column AUC reported with DeLong (1988) 95% confidence interval. "
+            "Pairwise ΔAUC inference uses the same DeLong covariance machinery "
+            "(placement values + Mann-Whitney U variance), so every pair is tested "
+            "on the same paired sample (NaN-complete-case across every score and the "
+            f"outcome). Multiple-comparison adjustment: {method}."
+        ),
+    })
+
+
 # ── ROC Combined Model ─────────────────────────────────────────────────────────
 
 class ROCCombinedRequest(BaseModel):

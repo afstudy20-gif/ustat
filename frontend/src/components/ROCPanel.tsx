@@ -3,7 +3,7 @@ import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
 import { useStore, PALETTES } from "../store";
-import { runROC, runROCCompare, runROCCombined } from "../api";
+import { runROC, runROCCompare, runROCMultiCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { fmtP } from "../lib/format";
@@ -231,12 +231,45 @@ export default function ROCPanel() {
     if (result) { setSingleStyle({ color: _p0(), width: 2.5, dash: "solid" }); }
   }, [result?.auc, result?.n]);
 
+  // Re-run pairwise DeLong with the new adjustment when the user changes
+  // the dropdown — only valid when we already have per-curve results.
+  useEffect(() => {
+    if (!multiResults.length || !session?.session_id) return;
+    const successCols = multiResults.filter((r) => !r.error).map((r) => r.col);
+    if (successCols.length < 2) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const dl = await runROCMultiCompare({
+          session_id: session.session_id,
+          score_columns: successCols,
+          outcome_column: outcomeCol,
+          directions: successCols.map(() => scoreDirection),
+          p_adjust: multiPAdjust,
+        });
+        if (!cancelled) { setMultiDelong(dl.data); setMultiDelongErr(null); }
+      } catch (e: any) {
+        const detail = e?.response?.data?.detail;
+        const msg = Array.isArray(detail)
+          ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
+          : (typeof detail === "string" ? detail : (e?.message ?? "DeLong matrix failed"));
+        if (!cancelled) { setMultiDelong(null); setMultiDelongErr(msg); }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [multiPAdjust]);
+
   // ── Multi-curve state ──
   const [multiCols,    setMultiCols]    = useState<string[]>([]);
   const [multiResults, setMultiResults] = useState<MultiResult[]>([]);
   const [multiStyles,  setMultiStyles]  = useState<CurveStyle[]>([]);
   const [multiLoading, setMultiLoading] = useState(false);
   const [multiError,   setMultiError]   = useState<string | null>(null);
+  // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
+  const [multiDelong,    setMultiDelong]    = useState<any>(null);
+  const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
+  const [multiPAdjust,   setMultiPAdjust]   = useState<"holm" | "bonferroni" | "none">("holm");
   const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
 
   // ── Combined model state ──
@@ -281,13 +314,20 @@ export default function ROCPanel() {
   const runMulti = async () => {
     if (!multiCols.length || !outcomeCol) return;
     setMultiLoading(true); setMultiError(null); setMultiResults([]);
+    setMultiDelong(null); setMultiDelongErr(null);
     setMultiStyles(multiCols.map((_, i) => defaultStyle(i)));
     // Also run combined model if enabled
     if (showCombined && combinedCols.length > 0) runCombined();
     try {
       const settled = await Promise.allSettled(
         multiCols.map((col) =>
-          runROC({ session_id: session.session_id, score_column: col, outcome_column: outcomeCol })
+          runROC({
+            session_id: session.session_id,
+            score_column: col,
+            outcome_column: outcomeCol,
+            imputation,
+            direction: scoreDirection,
+          })
         )
       );
       const results: MultiResult[] = settled.map((s, i) => {
@@ -301,10 +341,43 @@ export default function ROCPanel() {
             curve: d.curve,
           };
         } else {
-          return { col: multiCols[i], auc: 0, curve: [], error: "Failed" };
+          // Capture backend detail so the user sees what went wrong instead
+          // of a generic "Failed" / "err" badge.
+          const reason: any = (s as PromiseRejectedResult).reason;
+          const detail = reason?.response?.data?.detail;
+          const msg = Array.isArray(detail)
+            ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
+            : (typeof detail === "string" ? detail : (reason?.message ?? "Failed"));
+          return { col: multiCols[i], auc: 0, curve: [], error: msg };
         }
       });
       setMultiResults(results);
+
+      // Pairwise DeLong matrix — only when at least 2 columns succeeded.
+      const successCols = results.filter((r) => !r.error).map((r) => r.col);
+      if (successCols.length >= 2) {
+        try {
+          const dl = await runROCMultiCompare({
+            session_id: session.session_id,
+            score_columns: successCols,
+            outcome_column: outcomeCol,
+            directions: successCols.map(() => scoreDirection),
+            p_adjust: multiPAdjust,
+          });
+          setMultiDelong(dl.data);
+          setMultiDelongErr(null);
+        } catch (e: any) {
+          const detail = e?.response?.data?.detail;
+          const msg = Array.isArray(detail)
+            ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
+            : (typeof detail === "string" ? detail : (e?.message ?? "DeLong matrix failed"));
+          setMultiDelong(null);
+          setMultiDelongErr(msg);
+        }
+      } else {
+        setMultiDelong(null);
+        setMultiDelongErr(null);
+      }
     } catch (e: any) {
       setMultiError(e.message ?? "Request failed");
     } finally { setMultiLoading(false); }
@@ -841,7 +914,7 @@ export default function ROCPanel() {
                           <span className="text-xs text-gray-600 truncate">{r.col}</span>
                         </div>
                         {r.error ? (
-                          <span className="text-red-500 text-xs">err</span>
+                          <span className="text-red-500 text-xs truncate max-w-[160px]" title={r.error}>{r.error}</span>
                         ) : (
                           <span className={`text-xs font-mono font-semibold flex-shrink-0 ${aucColor(r.auc)}`}>
                             {r.auc}
@@ -850,6 +923,69 @@ export default function ROCPanel() {
                       </div>
                     );
                   })}
+              </div>
+            )}
+
+            {/* ── Pairwise DeLong matrix ──────────────────────────────── */}
+            {multiDelongErr && (
+              <div className="mt-3 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-600">
+                DeLong: {multiDelongErr}
+              </div>
+            )}
+            {multiDelong && multiDelong.pairs?.length > 0 && (
+              <div className="mt-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                    Pairwise DeLong
+                    <Tip wide text="K-curve DeLong (1988) pairwise ΔAUC test on the same paired sample. Each row reports ΔAUC = AUC(A) − AUC(B), the DeLong 95% CI, the z-statistic, and both the raw p-value and the p-value adjusted for K(K−1)/2 pairwise comparisons." />
+                  </p>
+                  <select
+                    value={multiPAdjust}
+                    onChange={(e) => setMultiPAdjust(e.target.value as any)}
+                    className="text-[10px] border border-gray-300 rounded px-1.5 py-0.5 bg-white">
+                    <option value="holm">Holm</option>
+                    <option value="bonferroni">Bonferroni</option>
+                    <option value="none">No adjust</option>
+                  </select>
+                </div>
+                <div className="overflow-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-[11px] border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                        <th className="text-left px-1.5 py-1 font-medium">A</th>
+                        <th className="text-left px-1.5 py-1 font-medium">B</th>
+                        <th className="text-right px-1.5 py-1 font-medium">ΔAUC</th>
+                        <th className="text-right px-1.5 py-1 font-medium">95% CI</th>
+                        <th className="text-right px-1.5 py-1 font-medium">p</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {multiDelong.pairs.map((pr: any, i: number) => (
+                        <tr key={i} className={`border-b border-gray-100 ${pr.significant ? "bg-indigo-50/40" : ""}`}>
+                          <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.a}</td>
+                          <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.b}</td>
+                          <td className={`px-1.5 py-1 font-mono text-right ${pr.significant ? "text-indigo-700 font-semibold" : "text-gray-600"}`}>
+                            {pr.delta_auc >= 0 ? "+" : ""}{pr.delta_auc.toFixed(3)}
+                          </td>
+                          <td className="px-1.5 py-1 font-mono text-right text-gray-500 whitespace-nowrap">
+                            [{pr.ci_low.toFixed(2)}, {pr.ci_high.toFixed(2)}]
+                          </td>
+                          <td className="px-1.5 py-1 text-right">
+                            <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${
+                              pr.significant ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
+                            }`}
+                              title={`raw p = ${pr.p_raw}`}>
+                              {pr.p_adj < 0.001 ? "<0.001" : pr.p_adj.toFixed(3)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[9px] text-gray-400 leading-snug">
+                  n = {multiDelong.n} · K = {multiDelong.scores?.length ?? 0} curves · {multiDelong.n_pairs} pairs · p-adjust: {multiDelong.p_adjust}
+                </p>
               </div>
             )}
           </>
