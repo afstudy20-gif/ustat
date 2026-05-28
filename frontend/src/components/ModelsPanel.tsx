@@ -1601,6 +1601,7 @@ export default function ModelsPanel() {
       else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE, interactions });
       else if (model === "firth") res = await runFirthLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, interactions });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
+      else if (model === "firth_ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation, use_firth: true });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
       else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation, interactions });
@@ -1637,7 +1638,7 @@ export default function ModelsPanel() {
   };
 
   const isSurvival  = false;  // KM/Cox moved to Survival Advanced tab
-  const isORTable   = model === "ortable";
+  const isORTable   = model === "ortable" || model === "firth_ortable";
   const hasRobustSE = model === "linear" || model === "logistic" || model === "poisson";
 
   return (
@@ -1650,6 +1651,7 @@ export default function ModelsPanel() {
             ["logistic", "Logistic Regression",      "Predict a binary outcome (0/1, yes/no) — outputs Odds Ratios showing how each predictor changes the odds of the event."],
             ["firth",    "Firth Logistic (penalized)", "Bias-corrected logistic regression (Firth 1993). Use when standard logistic fails or returns infinite ORs from rare events / separation. Same output shape as Logistic but with Jeffreys-prior penalty."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
+            ["firth_ortable", "Firth OR Table (Uni + Multi)", "Same univariate + multivariate OR table as above but every cell is fitted via Firth's penalised likelihood — handles rare events and quasi-separation. Use for the LAR / albumin-style protective biomarker workflow when standard logistic returns ∞ or near-zero ORs."],
             ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
@@ -1669,7 +1671,7 @@ export default function ModelsPanel() {
               </span>
             </label>
           )}
-          {(model === "linear" || model === "logistic" || model === "firth" || model === "ortable") && (
+          {(model === "linear" || model === "logistic" || model === "firth" || model === "ortable" || model === "firth_ortable") && (
             <div className="mt-1 pt-2 border-t border-gray-100 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
               Need a non-linear continuous effect? Use the
               {" "}<span className="font-semibold">Restricted Cubic Spline</span> sub-tab —
@@ -1804,7 +1806,7 @@ export default function ModelsPanel() {
                 <div className="max-h-48 overflow-y-auto space-y-1">
                   {allCols.filter((c) => c !== outcome && c.toLowerCase().includes(predFilter.toLowerCase())).map((c) => {
                     const checked = predictors.includes(c);
-                    const showScale = checked && (model === "logistic" || model === "firth" || model === "ortable");
+                    const showScale = checked && (model === "logistic" || model === "firth" || model === "ortable" || model === "firth_ortable");
                     const spk = sparklines[c];
                     return (
                       <div key={c} className="space-y-0.5">

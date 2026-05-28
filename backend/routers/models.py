@@ -224,6 +224,12 @@ class LogisticRequest(BaseModel):
     robust_se: Optional[bool] = False
     # Optional pairwise interactions — same semantics as the Cox endpoint.
     interactions: Optional[List[List[str]]] = None
+    # When True the OR-table endpoint fits Firth's penalised logistic for
+    # each row instead of standard MLE — required for rare events / (quasi-)
+    # separated data where sm.Logit returns infinite ORs. Affects only the
+    # /logistic_table endpoint; the standalone /logistic endpoint already
+    # has its dedicated /firth_logistic peer.
+    use_firth: Optional[bool] = False
 
 
 def _apply_scaling(df: pd.DataFrame, predictors: List[str], scale_factors: Optional[dict]):
@@ -855,7 +861,14 @@ def logistic_or_table(req: LogisticRequest):
     if len(set(y)) < 2:
         raise HTTPException(status_code=422, detail="Outcome has only one unique value — needs both 0 and 1.")
 
-    # Helper: fit logit and extract first non-const row OR all predictor rows
+    # Helper: fit logit (MLE or Firth) and extract OR rows for every predictor
+    # (dummy-encoded categorical levels included). When use_firth=True the
+    # _firth_fit Newton-Raphson is run instead — same row shape comes out so
+    # both univariate and multivariate codepaths share their downstream
+    # rendering.
+    use_firth = bool(getattr(req, "use_firth", False))
+    from scipy.stats import norm as _sp_norm
+
     def _fit_row(X_df, variable_names, return_model=False):
         X_enc = pd.get_dummies(X_df, drop_first=True).astype(float)
         # Build a combined frame to drop NaN from both predictors and outcome together
@@ -869,10 +882,70 @@ def logistic_or_table(req: LogisticRequest):
         if len(set(y_clean)) < 2:
             raise HTTPException(status_code=422, detail="After NaN removal, outcome has only one unique value.")
         X_const = sm.add_constant(X_clean, has_constant="add")
+
+        if use_firth:
+            # ── Firth's penalised MLE branch ──
+            try:
+                X_arr = X_const.values.astype(float)
+                y_arr_in = y_clean.astype(int)
+                beta, vcov, ll, penalized_ll, n_iter, converged, pi = _firth_fit(X_arr, y_arr_in)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Firth fit failed: {exc}")
+            se = np.sqrt(np.diag(vcov))
+            z = beta / np.where(se > 0, se, np.nan)
+            p_two = 2.0 * (1.0 - _sp_norm.cdf(np.abs(z)))
+            ci_lo_arr = beta - 1.95996 * se
+            ci_hi_arr = beta + 1.95996 * se
+            rows = {}
+            for i, var in enumerate(X_const.columns):
+                if var == "const":
+                    continue
+                or_val = float(np.exp(beta[i]))
+                ci_lo = float(np.exp(ci_lo_arr[i]))
+                ci_hi = float(np.exp(ci_hi_arr[i]))
+                p_val = float(p_two[i])
+                if not np.isfinite(or_val): or_val = 9999.0
+                if not np.isfinite(ci_lo): ci_lo = 0.0
+                if not np.isfinite(ci_hi): ci_hi = 9999.0
+                rows[var] = {"or": or_val, "ci_low": ci_lo, "ci_high": ci_hi, "p": p_val}
+            if return_model:
+                # Build a minimal results bag the multivariable downstream
+                # code can read — mirrors the statsmodels Results attributes
+                # actually consulted below (nobs / llf / llnull / params /
+                # predict). Null log-likelihood comes from an intercept-only
+                # Firth fit so the omnibus LR test stays on the penalised
+                # likelihood scale.
+                X_null = np.ones((len(y_arr_in), 1))
+                _, _, ll0, _, _, _, _ = _firth_fit(X_null, y_arr_in)
+                class _FirthResults:
+                    def __init__(self, beta, vcov, ll, ll0, pi, X_const, n_params):
+                        self.params = pd.Series(beta, index=X_const.columns)
+                        self.bse = pd.Series(np.sqrt(np.diag(vcov)), index=X_const.columns)
+                        self.tvalues = self.params / self.bse.replace(0, np.nan)
+                        self.pvalues = pd.Series(p_two, index=X_const.columns)
+                        self.llf = float(ll)
+                        self.llnull = float(ll0)
+                        self.nobs = float(len(pi))
+                        self.aic = float(-2.0 * ll + 2 * n_params)
+                        self.bic = float(-2.0 * ll + np.log(self.nobs) * n_params)
+                        # McFadden's pseudo-R² so downstream model-summary
+                        # code can read `prsquared` the same way it does for
+                        # a real statsmodels Results object.
+                        self.prsquared = float(1.0 - ll / ll0) if ll0 != 0 else 0.0
+                        self._pi = pi
+                    def predict(self, _X):
+                        return self._pi
+                    def conf_int(self):
+                        return pd.DataFrame({0: ci_lo_arr, 1: ci_hi_arr}, index=X_const.columns)
+                m = _FirthResults(beta, vcov, ll, ll0, pi, X_const, X_arr.shape[1])
+                return rows, m, X_const, y_clean
+            return rows
+
+        # ── Standard MLE branch (statsmodels Logit) ──
         try:
             m = sm.Logit(y_clean, X_const).fit(disp=False, maxiter=200)
         except np.linalg.LinAlgError:
-            raise HTTPException(status_code=422, detail="Perfect separation detected — model cannot converge. Try removing collinear predictors.")
+            raise HTTPException(status_code=422, detail="Perfect separation detected — model cannot converge. Try removing collinear predictors or switch on Firth's penalised likelihood (use_firth=true).")
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Model convergence error: {exc}")
         rows = {}
@@ -1012,7 +1085,8 @@ def logistic_or_table(req: LogisticRequest):
         })
 
     return {
-        "model": "Logistic OR Table",
+        "model": ("Firth Penalised Logistic OR Table" if use_firth else "Logistic OR Table"),
+        "use_firth": bool(use_firth),
         "outcome": req.outcome,
         "n": len(df),
         "n_excluded": n_excluded,
