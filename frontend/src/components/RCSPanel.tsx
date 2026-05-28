@@ -811,6 +811,18 @@ export default function RCSPanel() {
 
                 const yTitle = `${eff.label} (reference = ${result.ref_value}${eff.abbr === "Δ" ? "" : `, ${eff.abbr} = ${eff.refValue.toFixed(1)}`})`;
 
+                // Clamp the x-axis to the spline's evaluated range. The curve
+                // is only fit over result.x_values (typically the inner
+                // percentile range); the rug ('Show Data Points') uses the raw
+                // observations which can extend well past the curve into a
+                // sparse tail, so without an explicit range Plotly autoscales
+                // to the rug and leaves a large empty strip on the right.
+                const xvCurve = (result.x_values as number[]) ?? [];
+                const xMinC = xvCurve.length ? Math.min(...xvCurve) : undefined;
+                const xMaxC = xvCurve.length ? Math.max(...xvCurve) : undefined;
+                const xPad = (xMinC != null && xMaxC != null) ? Math.max((xMaxC - xMinC) * 0.03, 1e-9) : 0;
+                const xRange = (xMinC != null && xMaxC != null) ? [xMinC - xPad, xMaxC + xPad] : undefined;
+
                 return (
                   <TitledPlot
                     plotRefOut={rcsPlotRef}
@@ -822,7 +834,7 @@ export default function RCSPanel() {
                     data={traces}
                     layout={{
                       ...PLOT_LAYOUT, autosize: true, height: 440,
-                      xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor }, zeroline: false },
+                      xaxis: { ...PLOT_LAYOUT.xaxis, showgrid: showGrid, title: { text: result.predictor }, zeroline: false, ...(xRange ? { range: xRange, autorange: false as const } : {}) },
                       yaxis: {
                         ...PLOT_LAYOUT.yaxis, showgrid: showGrid,
                         title: { text: yTitle }, zeroline: false,
