@@ -884,118 +884,10 @@ export default function ROCPanel() {
               )}
             </div>
 
-            {/* Multi results summary */}
-            {multiResults.length > 0 && (
-              <div className="panel space-y-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-700">AUC Summary</h3>
-                  {multiExport && (
-                    <ResultExporter
-                      title={`ROC_multi_${outcomeCol}`}
-                      headers={multiExport.headers}
-                      rows={multiExport.rows}
-                      plotRef={rocPlotRef}
-                    />
-                  )}
-                </div>
-                {/* Combined model in summary */}
-                {showCombined && combinedResult && !combinedResult.error && (
-                  <div className="flex items-center justify-between gap-2 border-b-2 border-gray-200 pb-1.5 mb-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <div className="w-3 h-0.5 rounded flex-shrink-0" style={{ background: combinedStyle.color, height: 3 }} />
-                      <span className="text-xs text-gray-700 font-semibold truncate">{combinedResult.col}</span>
-                    </div>
-                    <span className={`text-xs font-mono font-bold flex-shrink-0 ${aucColor(combinedResult.auc)}`}>
-                      {combinedResult.auc}
-                    </span>
-                  </div>
-                )}
-                {[...multiResults]
-                  .sort((a, b) => b.auc - a.auc)
-                  .map((r) => {
-                    const origIdx = multiResults.findIndex((x) => x.col === r.col);
-                    const st = multiStyles[origIdx] ?? defaultStyle(origIdx);
-                    return (
-                      <div key={r.col} className="flex items-center justify-between gap-2 border-b border-gray-100 pb-1">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: st.color }} />
-                          <span className="text-xs text-gray-600 truncate">{r.col}</span>
-                        </div>
-                        {r.error ? (
-                          <span className="text-red-500 text-xs truncate max-w-[160px]" title={r.error}>{r.error}</span>
-                        ) : (
-                          <span className={`text-xs font-mono font-semibold flex-shrink-0 ${aucColor(r.auc)}`}>
-                            {r.auc}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-
-            {/* ── Pairwise DeLong matrix ──────────────────────────────── */}
-            {multiDelongErr && (
-              <div className="mt-3 rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-600">
-                DeLong: {multiDelongErr}
-              </div>
-            )}
-            {multiDelong && multiDelong.pairs?.length > 0 && (
-              <div className="mt-3 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-                    Pairwise DeLong
-                    <Tip wide text="K-curve DeLong (1988) pairwise ΔAUC test on the same paired sample. Each row reports ΔAUC = AUC(A) − AUC(B), the DeLong 95% CI, the z-statistic, and both the raw p-value and the p-value adjusted for K(K−1)/2 pairwise comparisons." />
-                  </p>
-                  <select
-                    value={multiPAdjust}
-                    onChange={(e) => setMultiPAdjust(e.target.value as any)}
-                    className="text-[10px] border border-gray-300 rounded px-1.5 py-0.5 bg-white">
-                    <option value="holm">Holm</option>
-                    <option value="bonferroni">Bonferroni</option>
-                    <option value="none">No adjust</option>
-                  </select>
-                </div>
-                <div className="overflow-auto rounded-lg border border-gray-200">
-                  <table className="w-full text-[11px] border-collapse">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
-                        <th className="text-left px-1.5 py-1 font-medium">A</th>
-                        <th className="text-left px-1.5 py-1 font-medium">B</th>
-                        <th className="text-right px-1.5 py-1 font-medium">ΔAUC</th>
-                        <th className="text-right px-1.5 py-1 font-medium">95% CI</th>
-                        <th className="text-right px-1.5 py-1 font-medium">p</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {multiDelong.pairs.map((pr: any, i: number) => (
-                        <tr key={i} className={`border-b border-gray-100 ${pr.significant ? "bg-indigo-50/40" : ""}`}>
-                          <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.a}</td>
-                          <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.b}</td>
-                          <td className={`px-1.5 py-1 font-mono text-right ${pr.significant ? "text-indigo-700 font-semibold" : "text-gray-600"}`}>
-                            {pr.delta_auc >= 0 ? "+" : ""}{pr.delta_auc.toFixed(3)}
-                          </td>
-                          <td className="px-1.5 py-1 font-mono text-right text-gray-500 whitespace-nowrap">
-                            [{pr.ci_low.toFixed(2)}, {pr.ci_high.toFixed(2)}]
-                          </td>
-                          <td className="px-1.5 py-1 text-right">
-                            <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${
-                              pr.significant ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
-                            }`}
-                              title={`raw p = ${pr.p_raw}`}>
-                              {pr.p_adj < 0.001 ? "<0.001" : pr.p_adj.toFixed(3)}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <p className="text-[9px] text-gray-400 leading-snug">
-                  n = {multiDelong.n} · K = {multiDelong.scores?.length ?? 0} curves · {multiDelong.n_pairs} pairs · p-adjust: {multiDelong.p_adjust}
-                </p>
-              </div>
-            )}
+            {/* AUC Summary + pairwise DeLong matrix moved to the right
+                results column (see `mode === "multi"` block below) so the
+                multi-curve view gets the same 3-column controls / chart /
+                results layout as single mode. */}
           </>
         )}
       </div>
@@ -1003,22 +895,30 @@ export default function ROCPanel() {
       {/* ── Plot area (centre column) ───────────────────────────────────── */}
       <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto">
 
-        {/* ROC Guidance */}
+        {/* ROC Guidance — compact collapsible strip (collapsed by default to
+            keep the chart above the fold; expands to the 3-card detail). */}
         {(() => {
           const g = mode === "single" ? ROC_GUIDANCE.single : ROC_GUIDANCE.multi;
           return (
-            <div className="grid grid-cols-3 gap-3">
-              {[
-                { icon: "🎯", title: "Use when", text: g.use },
-                { icon: "✅", title: "Check", text: g.check },
-                { icon: "📖", title: "Interpret", text: g.interpret },
-              ].map(({ icon, title, text }) => (
-                <div key={title} className="panel bg-indigo-50 border-indigo-200 p-3">
-                  <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mb-1">{icon} {title}</p>
-                  <p className="text-xs text-indigo-800 leading-relaxed">{text}</p>
-                </div>
-              ))}
-            </div>
+            <details className="panel bg-indigo-50 border-indigo-200 py-1.5 px-3 group">
+              <summary className="flex items-center gap-2 cursor-pointer list-none text-[11px] text-indigo-800">
+                <span className="font-semibold">💡 Guidance</span>
+                <span className="text-indigo-400 truncate flex-1">{g.use}</span>
+                <span className="text-indigo-400 group-open:rotate-90 transition-transform">▸</span>
+              </summary>
+              <div className="grid grid-cols-3 gap-3 mt-2">
+                {[
+                  { icon: "🎯", title: "Use when", text: g.use },
+                  { icon: "✅", title: "Check", text: g.check },
+                  { icon: "📖", title: "Interpret", text: g.interpret },
+                ].map(({ icon, title, text }) => (
+                  <div key={title} className="rounded-lg bg-white/60 border border-indigo-100 p-2">
+                    <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mb-0.5">{icon} {title}</p>
+                    <p className="text-[11px] text-indigo-800 leading-snug">{text}</p>
+                  </div>
+                ))}
+              </div>
+            </details>
           );
         })()}
 
@@ -1044,11 +944,18 @@ export default function ROCPanel() {
         )}
 
         {mode === "multi" && multiResults.length > 0 && (
-          <div className="panel space-y-2 py-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-xs font-semibold text-gray-500">Curve styles</span>
-            </div>
-            <div className="space-y-1.5">
+          <details className="panel py-1.5 px-3 group">
+            <summary className="flex items-center gap-2 cursor-pointer list-none text-xs font-semibold text-gray-500">
+              <span>🎨 Curve styles</span>
+              <span className="flex items-center gap-1 flex-1 min-w-0">
+                {multiResults.filter((r) => !r.error).map((r, i) => {
+                  const st = multiStyles[multiResults.findIndex((x) => x.col === r.col)] ?? defaultStyle(i);
+                  return <span key={r.col} className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: st.color }} title={r.col} />;
+                })}
+              </span>
+              <span className="text-gray-400 group-open:rotate-90 transition-transform">▸</span>
+            </summary>
+            <div className="space-y-1.5 mt-2">
               {/* Combined model style row — shown first when enabled */}
               {showCombined && combinedResult && !combinedResult.error && (
                 <>
@@ -1084,7 +991,7 @@ export default function ROCPanel() {
                 />
               </div>
             </div>
-          </div>
+          </details>
         )}
 
         {/* Plot */}
@@ -1421,6 +1328,122 @@ export default function ROCPanel() {
 
           {/* DeLong comparison moved back to the left sidebar — find it next
               to the single-mode controls. */}
+        </div>
+      )}
+
+      {/* ── Right results column (multi mode) ───────────────────────────── */}
+      {mode === "multi" && multiResults.length > 0 && (
+        <div className="w-[380px] flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+          {/* AUC Summary */}
+          <div className="panel space-y-2">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-700">AUC Summary</h3>
+              {multiExport && (
+                <ResultExporter
+                  title={`ROC_multi_${outcomeCol}`}
+                  headers={multiExport.headers}
+                  rows={multiExport.rows}
+                  plotRef={rocPlotRef}
+                />
+              )}
+            </div>
+            {/* Combined model in summary */}
+            {showCombined && combinedResult && !combinedResult.error && (
+              <div className="flex items-center justify-between gap-2 border-b-2 border-gray-200 pb-1.5 mb-1">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="w-3 h-0.5 rounded flex-shrink-0" style={{ background: combinedStyle.color, height: 3 }} />
+                  <span className="text-xs text-gray-700 font-semibold truncate">{combinedResult.col}</span>
+                </div>
+                <span className={`text-xs font-mono font-bold flex-shrink-0 ${aucColor(combinedResult.auc)}`}>
+                  {combinedResult.auc}
+                </span>
+              </div>
+            )}
+            {[...multiResults]
+              .sort((a, b) => b.auc - a.auc)
+              .map((r) => {
+                const origIdx = multiResults.findIndex((x) => x.col === r.col);
+                const st = multiStyles[origIdx] ?? defaultStyle(origIdx);
+                return (
+                  <div key={r.col} className="flex items-center justify-between gap-2 border-b border-gray-100 pb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: st.color }} />
+                      <span className="text-xs text-gray-600 truncate">{r.col}</span>
+                    </div>
+                    {r.error ? (
+                      <span className="text-red-500 text-xs truncate max-w-[160px]" title={r.error}>{r.error}</span>
+                    ) : (
+                      <span className={`text-xs font-mono font-semibold flex-shrink-0 ${aucColor(r.auc)}`}>
+                        {r.auc}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+
+          {/* Pairwise DeLong matrix */}
+          {multiDelongErr && (
+            <div className="rounded border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-600">
+              DeLong: {multiDelongErr}
+            </div>
+          )}
+          {multiDelong && multiDelong.pairs?.length > 0 && (
+            <div className="panel space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+                  Pairwise DeLong
+                  <Tip wide text="K-curve DeLong (1988) pairwise ΔAUC test on the same paired sample. Each row reports ΔAUC = AUC(A) − AUC(B), the DeLong 95% CI, the z-statistic, and both the raw p-value and the p-value adjusted for K(K−1)/2 pairwise comparisons." />
+                </p>
+                <select
+                  value={multiPAdjust}
+                  onChange={(e) => setMultiPAdjust(e.target.value as any)}
+                  className="text-[10px] border border-gray-300 rounded px-1.5 py-0.5 bg-white">
+                  <option value="holm">Holm</option>
+                  <option value="bonferroni">Bonferroni</option>
+                  <option value="none">No adjust</option>
+                </select>
+              </div>
+              <div className="overflow-auto rounded-lg border border-gray-200">
+                <table className="w-full text-[11px] border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                      <th className="text-left px-1.5 py-1 font-medium">A</th>
+                      <th className="text-left px-1.5 py-1 font-medium">B</th>
+                      <th className="text-right px-1.5 py-1 font-medium">ΔAUC</th>
+                      <th className="text-right px-1.5 py-1 font-medium">95% CI</th>
+                      <th className="text-right px-1.5 py-1 font-medium">p</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {multiDelong.pairs.map((pr: any, i: number) => (
+                      <tr key={i} className={`border-b border-gray-100 ${pr.significant ? "bg-indigo-50/40" : ""}`}>
+                        <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.a}</td>
+                        <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.b}</td>
+                        <td className={`px-1.5 py-1 font-mono text-right ${pr.significant ? "text-indigo-700 font-semibold" : "text-gray-600"}`}>
+                          {pr.delta_auc >= 0 ? "+" : ""}{pr.delta_auc.toFixed(3)}
+                        </td>
+                        <td className="px-1.5 py-1 font-mono text-right text-gray-500 whitespace-nowrap">
+                          [{pr.ci_low.toFixed(2)}, {pr.ci_high.toFixed(2)}]
+                        </td>
+                        <td className="px-1.5 py-1 text-right">
+                          <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${
+                            pr.significant ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
+                          }`}
+                            title={`raw p = ${pr.p_raw}`}>
+                            {pr.p_adj < 0.001 ? "<0.001" : pr.p_adj.toFixed(3)}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[9px] text-gray-400 leading-snug">
+                n = {multiDelong.n} · K = {multiDelong.scores?.length ?? 0} curves · {multiDelong.n_pairs} pairs · p-adjust: {multiDelong.p_adjust}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>
