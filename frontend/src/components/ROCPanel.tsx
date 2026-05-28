@@ -231,8 +231,22 @@ export default function ROCPanel() {
     if (result) { setSingleStyle({ color: _p0(), width: 2.5, dash: "solid" }); }
   }, [result?.auc, result?.n]);
 
+  // ── Multi-curve state ──
+  const [multiCols,    setMultiCols]    = useState<string[]>([]);
+  const [multiResults, setMultiResults] = useState<MultiResult[]>([]);
+  const [multiStyles,  setMultiStyles]  = useState<CurveStyle[]>([]);
+  const [multiLoading, setMultiLoading] = useState(false);
+  const [multiError,   setMultiError]   = useState<string | null>(null);
+  // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
+  const [multiDelong,    setMultiDelong]    = useState<any>(null);
+  const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
+  const [multiPAdjust,   setMultiPAdjust]   = useState<"holm" | "bonferroni" | "none">("holm");
+  const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
+
   // Re-run pairwise DeLong with the new adjustment when the user changes
   // the dropdown — only valid when we already have per-curve results.
+  // Declared AFTER the multi-curve state it closes over to avoid a
+  // temporal-dead-zone ReferenceError on the dependency array.
   useEffect(() => {
     if (!multiResults.length || !session?.session_id) return;
     const successCols = multiResults.filter((r) => !r.error).map((r) => r.col);
@@ -259,18 +273,6 @@ export default function ROCPanel() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [multiPAdjust]);
-
-  // ── Multi-curve state ──
-  const [multiCols,    setMultiCols]    = useState<string[]>([]);
-  const [multiResults, setMultiResults] = useState<MultiResult[]>([]);
-  const [multiStyles,  setMultiStyles]  = useState<CurveStyle[]>([]);
-  const [multiLoading, setMultiLoading] = useState(false);
-  const [multiError,   setMultiError]   = useState<string | null>(null);
-  // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
-  const [multiDelong,    setMultiDelong]    = useState<any>(null);
-  const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
-  const [multiPAdjust,   setMultiPAdjust]   = useState<"holm" | "bonferroni" | "none">("holm");
-  const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
 
   // ── Combined model state ──
   const [showCombined,     setShowCombined]     = useState(false);
