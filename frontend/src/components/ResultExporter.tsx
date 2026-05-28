@@ -78,18 +78,29 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
     throw new Error("plot is not mounted yet — wait for the chart to render and try again");
   }
   const mod: any = await import("plotly.js");
-  const Plotly: any = mod?.downloadImage ? mod : mod?.default;
-  if (!Plotly?.downloadImage) {
-    throw new Error("plotly.js downloadImage not available");
+  const Plotly: any = mod?.toImage ? mod : mod?.default;
+  if (!Plotly?.toImage) {
+    throw new Error("plotly.js toImage not available");
   }
-  // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300)
-  await Plotly.downloadImage(el, {
+  // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300). Plotly.downloadImage
+  // crashes on plotly.js@3 in production builds (tree-shaking strips an
+  // internal dep) — use toImage + anchor-click instead.
+  const dataUrl: string = await Plotly.toImage(el, {
     format: "png",
     width: 1200,
     height: 700,
     scale: 3.125,
-    filename,
   });
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filename}.png`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function downloadTIFF(plotRef: React.RefObject<any>, filename: string) {

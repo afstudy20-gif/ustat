@@ -54,18 +54,37 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
         const blob = await plotlyToTiffBlob(el, { width, height, dpi });
         downloadBlob(blob, `${safeTitle}.tiff`);
       } else {
-        // Lazy import. The xlsx-style "named vs default" dual-export pattern
-        // shows up here too: in some Vite builds plotly.js publishes
-        // downloadImage at the module root, in others only on .default. Pick
-        // whichever shape is available so the ↓ button stops silently failing
-        // when the .default path is missing.
+        // Use Plotly.toImage instead of Plotly.downloadImage — the latter
+        // crashes on plotly.js@3 in production builds with "Cannot read
+        // properties of undefined (reading 'prototype')" because part of
+        // its internal download chain got tree-shaken away. toImage just
+        // returns a data URL / Blob, which we hand to an anchor click —
+        // the same trustworthy pattern the TIFF and dataset exporters use.
         const mod: any = await import("plotly.js");
-        const Plotly: any = mod?.downloadImage ? mod : mod?.default;
-        if (!Plotly?.downloadImage) {
-          throw new Error("plotly.js downloadImage not available");
+        const Plotly: any = mod?.toImage ? mod : mod?.default;
+        if (!Plotly?.toImage) {
+          throw new Error("plotly.js toImage not available");
         }
         const scale = (fmt === "png" || fmt === "jpeg") ? dpi / 72 : 1;  // SVG vector
-        await Plotly.downloadImage(el, { format: fmt, width, height, filename: safeTitle, ...(scale !== 1 ? { scale } : {}) } as any);
+        const dataUrl: string = await Plotly.toImage(el, {
+          format: fmt,
+          width,
+          height,
+          ...(scale !== 1 ? { scale } : {}),
+        });
+        // Data URL → Blob → anchor click. Direct anchor.href = dataUrl works
+        // for small charts but Safari truncates very large data URLs; round
+        // through a Blob so any chart size downloads cleanly.
+        const res = await fetch(dataUrl);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${safeTitle}.${fmt}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
     } catch (e: unknown) {
       console.error("PlotExporter download failed:", e);
