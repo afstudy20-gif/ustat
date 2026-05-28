@@ -473,12 +473,12 @@ export default function ROCPanel() {
   return (
     <div className="flex gap-4 h-full">
 
-      {/* ── Left sidebar (controls only) ────────────────────────────────────── */}
-      {/* Slim controls-only column on the left so the wider results column on
-          the right has room to breathe. Width restored to w-[300px] from the
-          previous w-[420px] now that the results panel migrated to its own
+      {/* ── Left sidebar (controls + DeLong) ────────────────────────────────── */}
+      {/* Holds the score / outcome / direction / manual-cutoff controls plus
+          the DeLong AUC-comparison card (single mode). The single-mode
+          result card (AUC tile + paragraph + metric table) lives in the
           right-hand column. */}
-      <div className="w-[300px] flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+      <div className="w-[340px] flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
 
         {/* Mode toggle */}
         <div className="flex rounded-lg overflow-hidden border border-gray-300">
@@ -573,9 +573,113 @@ export default function ROCPanel() {
               )}
             </div>
 
-            {/* Single results + DeLong comparison cards moved out of the
-                left sidebar into the dedicated results column on the right
-                (search for `singleResultsBlock` below). */}
+            {/* Single results card lives in the right-hand column; the
+                DeLong comparison card stays here in the left sidebar so
+                the workflow (pick two scores → compare) sits next to the
+                main score / outcome / direction controls instead of
+                getting pushed underneath the results column. */}
+            <div className="panel space-y-3">
+              <button className="flex items-center w-full" onClick={() => setShowCompare((v) => !v)}>
+                <span className="text-sm font-semibold text-gray-700">AUC Comparison (DeLong)</span>
+                <span className="ml-auto text-gray-400 text-xs">{showCompare ? "▲" : "▼"}</span>
+              </button>
+              {showCompare && (
+                <>
+                  <p className="text-xs text-gray-400">Non-parametric test comparing two score columns.</p>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Score 1</label>
+                    <p className="text-xs text-indigo-600 font-mono truncate bg-indigo-50 rounded px-2 py-1">{scoreCol || "—"}</p>
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 block mb-1">Score 2</label>
+                    <select className="select w-full text-xs" value={scoreCol2}
+                      onChange={(e) => { setScoreCol2(e.target.value); setCmpResult(null); }}>
+                      {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">
+                      Score 2 direction
+                      <Tip text="Auto-flip when AUC<0.5 (recommended for protective markers vs risk scores)." />
+                    </label>
+                    <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
+                      {(["auto", "higher", "lower"] as const).map((d) => (
+                        <button key={d}
+                          onClick={() => { setScoreDirection2(d); setCmpResult(null); }}
+                          className={`flex-1 text-[10px] py-1 transition-colors ${
+                            scoreDirection2 === d ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                          }`}>
+                          {d === "auto" ? "Auto" : d === "higher" ? "H" : "L"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {(cmpResult?.direction_1_flipped || cmpResult?.direction_2_flipped) && (
+                    <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 leading-tight">
+                      ⚙ DeLong recomputed with auto-flipped direction:
+                      {cmpResult.direction_1_flipped && (
+                        <> <span className="font-mono">{scoreCol}</span> (lower = event)</>
+                      )}
+                      {cmpResult.direction_1_flipped && cmpResult.direction_2_flipped && " · "}
+                      {cmpResult.direction_2_flipped && (
+                        <><span className="font-mono">{scoreCol2}</span> (lower = event)</>
+                      )}
+                    </div>
+                  )}
+                  <button className="btn-primary w-full" onClick={runCompare}
+                    disabled={cmpLoading || !scoreCol || !scoreCol2 || !outcomeCol || scoreCol === scoreCol2}>
+                    {cmpLoading ? "Testing…" : "Run DeLong Test"}
+                  </button>
+                  {cmpError && <p className="text-red-500 text-xs">{cmpError}</p>}
+                  {cmpResult && (
+                    <div className="space-y-2 mt-1">
+                      <div className={`text-xs px-2 py-1.5 rounded font-semibold border flex items-center gap-1.5
+                        ${cmpResult.significant ? "border-green-300 bg-green-50 text-green-700" : "border-gray-200 bg-gray-50 text-gray-500"}`}>
+                        {cmpResult.significant ? "✓ Significant difference (p < 0.05)" : "No significant difference (p ≥ 0.05)"}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1 text-center">
+                        <div className="bg-blue-50 rounded p-1.5">
+                          <p className="text-[9px] text-blue-400 uppercase tracking-wide font-semibold">Baseline AUC</p>
+                          <p className="text-sm font-bold font-mono text-blue-700">{cmpResult.auc_2.toFixed(3)}</p>
+                          <p className="text-[9px] text-blue-400">{cmpResult.ci_2_low.toFixed(3)}–{cmpResult.ci_2_high.toFixed(3)}</p>
+                        </div>
+                        <div className="bg-rose-50 rounded p-1.5">
+                          <p className="text-[9px] text-rose-400 uppercase tracking-wide font-semibold">New AUC</p>
+                          <p className="text-sm font-bold font-mono text-rose-700">{cmpResult.auc_1.toFixed(3)}</p>
+                          <p className="text-[9px] text-rose-400">{cmpResult.ci_1_low.toFixed(3)}–{cmpResult.ci_1_high.toFixed(3)}</p>
+                        </div>
+                        <div className={`rounded p-1.5 ${cmpResult.significant ? "bg-green-50" : "bg-gray-50"}`}>
+                          <p className="text-[9px] text-gray-400 uppercase tracking-wide font-semibold">ΔAUC</p>
+                          <p className={`text-sm font-bold font-mono ${cmpResult.significant ? "text-green-700" : "text-gray-600"}`}>
+                            {cmpResult.difference > 0 ? "+" : ""}{cmpResult.difference.toFixed(3)}
+                          </p>
+                          <p className="text-[9px] text-gray-400">
+                            {cmpResult.ci_diff_low.toFixed(3)} to {cmpResult.ci_diff_high.toFixed(3)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {[
+                        ["Z statistic", cmpResult.z.toFixed(3)],
+                        ["DeLong p-value", fmtP(cmpResult.p)],
+                        ["n (paired)", cmpResult.n],
+                      ].map(([k, v]: any) => (
+                        <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+                          <span className="text-gray-400">{k}</span>
+                          <span className={`font-mono ml-2 shrink-0 ${k === "DeLong p-value" && cmpResult.significant ? "text-green-700 font-semibold" : "text-gray-700"}`}>{v}</span>
+                        </div>
+                      ))}
+
+                      <div className="rounded bg-amber-50 border border-amber-200 px-2 py-2 text-[10px] text-amber-800 leading-relaxed">
+                        <p className="font-semibold mb-0.5">Publication format (Q1/Q2):</p>
+                        <p className="italic">{cmpResult.interpretation}</p>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </>
         )}
 
@@ -1115,109 +1219,8 @@ export default function ROCPanel() {
             </div>
           )}
 
-          {/* DeLong comparison */}
-          <div className="panel space-y-3">
-            <button className="flex items-center w-full" onClick={() => setShowCompare((v) => !v)}>
-              <span className="text-sm font-semibold text-gray-700">AUC Comparison (DeLong)</span>
-              <span className="ml-auto text-gray-400 text-xs">{showCompare ? "▲" : "▼"}</span>
-            </button>
-            {showCompare && (
-              <>
-                <p className="text-xs text-gray-400">Non-parametric test comparing two score columns.</p>
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Score 1</label>
-                  <p className="text-xs text-indigo-600 font-mono truncate bg-indigo-50 rounded px-2 py-1">{scoreCol || "—"}</p>
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400 block mb-1">Score 2</label>
-                  <select className="select w-full text-xs" value={scoreCol2}
-                    onChange={(e) => { setScoreCol2(e.target.value); setCmpResult(null); }}>
-                    {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 block mb-1">
-                    Score 2 direction
-                    <Tip text="Auto-flip when AUC<0.5 (recommended for protective markers vs risk scores)." />
-                  </label>
-                  <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
-                    {(["auto", "higher", "lower"] as const).map((d) => (
-                      <button key={d}
-                        onClick={() => { setScoreDirection2(d); setCmpResult(null); }}
-                        className={`flex-1 text-[10px] py-1 transition-colors ${
-                          scoreDirection2 === d ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
-                        }`}>
-                        {d === "auto" ? "Auto" : d === "higher" ? "H" : "L"}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {(cmpResult?.direction_1_flipped || cmpResult?.direction_2_flipped) && (
-                  <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 leading-tight">
-                    ⚙ DeLong recomputed with auto-flipped direction:
-                    {cmpResult.direction_1_flipped && (
-                      <> <span className="font-mono">{scoreCol}</span> (lower = event)</>
-                    )}
-                    {cmpResult.direction_1_flipped && cmpResult.direction_2_flipped && " · "}
-                    {cmpResult.direction_2_flipped && (
-                      <><span className="font-mono">{scoreCol2}</span> (lower = event)</>
-                    )}
-                  </div>
-                )}
-                <button className="btn-primary w-full" onClick={runCompare}
-                  disabled={cmpLoading || !scoreCol || !scoreCol2 || !outcomeCol || scoreCol === scoreCol2}>
-                  {cmpLoading ? "Testing…" : "Run DeLong Test"}
-                </button>
-                {cmpError && <p className="text-red-500 text-xs">{cmpError}</p>}
-                {cmpResult && (
-                  <div className="space-y-2 mt-1">
-                    <div className={`text-xs px-2 py-1.5 rounded font-semibold border flex items-center gap-1.5
-                      ${cmpResult.significant ? "border-green-300 bg-green-50 text-green-700" : "border-gray-200 bg-gray-50 text-gray-500"}`}>
-                      {cmpResult.significant ? "✓ Significant difference (p < 0.05)" : "No significant difference (p ≥ 0.05)"}
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1 text-center">
-                      <div className="bg-blue-50 rounded p-1.5">
-                        <p className="text-[9px] text-blue-400 uppercase tracking-wide font-semibold">Baseline AUC</p>
-                        <p className="text-sm font-bold font-mono text-blue-700">{cmpResult.auc_2.toFixed(3)}</p>
-                        <p className="text-[9px] text-blue-400">{cmpResult.ci_2_low.toFixed(3)}–{cmpResult.ci_2_high.toFixed(3)}</p>
-                      </div>
-                      <div className="bg-rose-50 rounded p-1.5">
-                        <p className="text-[9px] text-rose-400 uppercase tracking-wide font-semibold">New AUC</p>
-                        <p className="text-sm font-bold font-mono text-rose-700">{cmpResult.auc_1.toFixed(3)}</p>
-                        <p className="text-[9px] text-rose-400">{cmpResult.ci_1_low.toFixed(3)}–{cmpResult.ci_1_high.toFixed(3)}</p>
-                      </div>
-                      <div className={`rounded p-1.5 ${cmpResult.significant ? "bg-green-50" : "bg-gray-50"}`}>
-                        <p className="text-[9px] text-gray-400 uppercase tracking-wide font-semibold">ΔAUC</p>
-                        <p className={`text-sm font-bold font-mono ${cmpResult.significant ? "text-green-700" : "text-gray-600"}`}>
-                          {cmpResult.difference > 0 ? "+" : ""}{cmpResult.difference.toFixed(3)}
-                        </p>
-                        <p className="text-[9px] text-gray-400">
-                          {cmpResult.ci_diff_low.toFixed(3)} to {cmpResult.ci_diff_high.toFixed(3)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {[
-                      ["Z statistic", cmpResult.z.toFixed(3)],
-                      ["DeLong p-value", fmtP(cmpResult.p)],
-                      ["n (paired)", cmpResult.n],
-                    ].map(([k, v]: any) => (
-                      <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
-                        <span className="text-gray-400">{k}</span>
-                        <span className={`font-mono ml-2 shrink-0 ${k === "DeLong p-value" && cmpResult.significant ? "text-green-700 font-semibold" : "text-gray-700"}`}>{v}</span>
-                      </div>
-                    ))}
-
-                    <div className="rounded bg-amber-50 border border-amber-200 px-2 py-2 text-[10px] text-amber-800 leading-relaxed">
-                      <p className="font-semibold mb-0.5">Publication format (Q1/Q2):</p>
-                      <p className="italic">{cmpResult.interpretation}</p>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          {/* DeLong comparison moved back to the left sidebar — find it next
+              to the single-mode controls. */}
         </div>
       )}
     </div>
