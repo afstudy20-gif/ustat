@@ -1938,9 +1938,9 @@ export default function ModelsPanel() {
         )}
 
         {result ? (
-          <>
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start">
             {/* Summary cards */}
-            <div className="panel">
+            <div className="panel xl:col-start-2">
               <h4 className="font-semibold text-gray-900 mb-3">{result.model}</h4>
               <div className="grid grid-cols-3 gap-3">
                 {[
@@ -2001,7 +2001,7 @@ export default function ModelsPanel() {
 
             {/* Coefficients table + detail panel */}
             {result.coefficients && (
-              <div className="panel">
+              <div className="panel xl:col-start-2">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-semibold text-gray-900">
                     {model === "cox" ? "Coefficients (Hazard Ratios)" : (model === "logistic" || model === "firth") ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
@@ -2046,13 +2046,15 @@ export default function ModelsPanel() {
 
             {/* Prediction Panel — linear only */}
             {model === "linear" && result.predictor_info && Object.keys(result.predictor_info).length > 0 && (
-              <PredictionPanel result={result} />
+              <div className="xl:col-start-2">
+                <PredictionPanel result={result} />
+              </div>
             )}
 
             {/* Forest plot — logistic or cox */}
             {result.coefficients && (model === "logistic" || model === "firth" || model === "cox") &&
               result.coefficients.filter((c: any) => c.variable !== "const").length > 0 && (
-              <div className="panel">
+              <div className="panel xl:col-start-1">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot
                   <Tip text="Each row shows one predictor. The square is the point estimate (OR or HR); the horizontal line is the 95% Confidence Interval. If the CI crosses 1 (the vertical dashed line), the effect is not statistically significant. Larger squares = more precise estimate." wide />
@@ -2066,7 +2068,7 @@ export default function ModelsPanel() {
 
             {/* Results text for all regression models */}
             {result.result_text && !result.table && (
-              <div className="panel">
+              <div className="panel xl:col-start-2">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
                   <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
@@ -2077,7 +2079,7 @@ export default function ModelsPanel() {
 
             {/* OR Table (Uni + Multi) */}
             {result.table && (
-              <div className="panel">
+              <div className="panel xl:col-start-2">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Univariate &amp; Multivariate OR Table
                   <Tip text="Univariate: each predictor tested alone against the outcome. Multivariate: all selected predictors tested together, adjusting for each other. Compare both columns — a variable that is significant univariately but not multivariately may be confounded by another predictor." wide />
@@ -2094,7 +2096,7 @@ export default function ModelsPanel() {
 
             {/* SPSS-style model stats for OR Table multivariate model */}
             {result.model_stats && (
-              <div className="panel">
+              <div className="panel xl:col-start-2">
                 <h4 className="font-semibold text-gray-900 mb-2">Multivariate Model Summary</h4>
                 <ModelSummaryTable s={result.model_stats} />
               </div>
@@ -2102,7 +2104,7 @@ export default function ModelsPanel() {
 
             {/* Auto-generated results text */}
             {result.result_text && (
-              <div className="panel">
+              <div className="panel xl:col-start-2">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
                   <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
@@ -2113,7 +2115,7 @@ export default function ModelsPanel() {
 
             {/* Forest plot — OR table */}
             {result.table && result.table.length > 0 && (
-              <div className="panel">
+              <div className="panel xl:col-start-1">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot
                   <span className="ml-2 text-xs font-normal text-gray-400">
@@ -2257,7 +2259,7 @@ export default function ModelsPanel() {
               }] : [];
 
               return (
-                <div className="panel space-y-3">
+                <div className="panel space-y-3 xl:col-start-1">
 
                   {/* ── Header row ── */}
                   <div className="flex items-start justify-between gap-2">
@@ -2432,7 +2434,7 @@ export default function ModelsPanel() {
               };
 
               return (
-                <div className="panel space-y-3">
+                <div className="panel space-y-3 xl:col-start-1">
                   <div className="flex items-center justify-between">
                     <h4 className="font-semibold text-gray-900 text-sm">
                       Stratified by <span className="text-indigo-600">{result.stratify_col}</span>
@@ -2479,7 +2481,7 @@ export default function ModelsPanel() {
                 </div>
               );
             })()}
-          </>
+          </div>
         ) : (
           <div className="panel h-64 flex items-center justify-center text-gray-400">
             Configure and fit a model

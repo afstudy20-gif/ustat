@@ -166,8 +166,8 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
 
         {/* Result */}
         {result && (
-          <div className="flex-1 space-y-4">
-            <div className="panel space-y-3">
+          <div className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 auto-rows-min items-start">
+            <div className="panel space-y-3 xl:col-start-2">
               <h4 className="font-semibold text-gray-900">{result.model}</h4>
               <StatCards pairs={[
                 ["n", result.n, "Observations used"],
@@ -182,7 +182,7 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
 
             {/* Fitted curve plot */}
             {result.curve && (
-              <div className="panel relative">
+              <div className="panel relative xl:col-start-1">
                 <h4 className="font-semibold text-gray-900 mb-2">Fitted Curve (degree {result.degree})</h4>
                 <div className="relative">
                   <Plot

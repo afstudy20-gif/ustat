@@ -730,10 +730,10 @@ export default function PSMPanel() {
       <div className="flex-1 min-w-0 overflow-y-auto space-y-4">
 
         {result ? (
-          <>
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start">
             {/* ── Summary banner ── PSM and IPTW share the balance flag
                 semantics but report different cohort metrics. */}
-            <div className={`panel border-2 ${result.balance_achieved ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
+            <div className={`panel border-2 xl:col-start-2 ${result.balance_achieved ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
               <div className="flex items-start gap-3">
                 <span className="text-2xl flex-shrink-0">{result.balance_achieved ? "✅" : "⚠️"}</span>
                 <div className="flex-1">
@@ -807,7 +807,7 @@ export default function PSMPanel() {
 
             {/* ── IPTW weight distribution ── */}
             {result.method === "iptw" && result.weight_distribution && (
-              <div className="panel space-y-2">
+              <div className="panel space-y-2 xl:col-start-1">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="text-sm font-bold text-gray-800">Weight Distribution</h3>
@@ -849,7 +849,7 @@ export default function PSMPanel() {
             )}
 
             {/* ── Love Plot ── */}
-            <div className="panel space-y-3">
+            <div className="panel space-y-3 xl:col-start-1">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h3 className="text-sm font-bold text-gray-800">Love Plot: Covariate Balance</h3>
@@ -909,7 +909,7 @@ export default function PSMPanel() {
             </div>
 
             {/* ── SMD balance table ── */}
-            <div className="panel space-y-2">
+            <div className="panel space-y-2 xl:col-start-2">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700">
                   SMD Balance Table
@@ -993,7 +993,7 @@ export default function PSMPanel() {
 
             {/* ── PS Overlap ── */}
             {result.ps_distribution && (
-              <div className="panel space-y-2">
+              <div className="panel space-y-2 xl:col-start-1">
                 <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                   Propensity Score Overlap
                   <Tip wide text="The distributions must overlap substantially (common support) for PSM to be valid. If treated and control PS distributions barely overlap, matching cannot remove confounding — reconsider model specification." />
@@ -1013,7 +1013,7 @@ export default function PSMPanel() {
               const isWeightedGLM = t.startsWith("weighted_glm");
               const cohortLabel = result.method === "iptw" ? "Weighted Cohort" : "Matched Cohort";
               return (
-              <div className="panel space-y-3">
+              <div className="panel space-y-3 xl:col-start-2">
                 <h3 className="text-sm font-semibold text-gray-700">
                   Outcome Analysis — {cohortLabel}
                   <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
@@ -1115,14 +1115,14 @@ export default function PSMPanel() {
             })()}
 
             {result.outcome_result?.error && (
-              <div className="panel bg-red-50 border border-red-200 text-xs text-red-600">
+              <div className="panel bg-red-50 border border-red-200 text-xs text-red-600 xl:col-start-2">
                 Outcome analysis failed: {result.outcome_result.error}
               </div>
             )}
 
             {/* ── Rosenbaum bounds ── */}
             {result.rosenbaum && (
-              <div className="panel space-y-2">
+              <div className="panel space-y-2 xl:col-start-2">
                 <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                   Rosenbaum Bounds — Sensitivity to Hidden Bias
                   <Tip wide text="Critical Γ is the magnitude of unmeasured confounding that would just be enough to render the observed treatment-effect p-value non-significant. Γ = 1 means no hidden bias. Γ = 2 means a hidden confounder doubling the odds of treatment. Larger critical Γ ⇒ more robust finding." />
@@ -1179,11 +1179,11 @@ export default function PSMPanel() {
 
             {/* Matching method warning */}
             {result.matching_warning && (
-              <div className="panel bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              <div className="panel bg-amber-50 border border-amber-200 text-xs text-amber-800 xl:col-start-2">
                 {result.matching_warning}
               </div>
             )}
-          </>
+          </div>
         ) : (
           /* ── Empty state ── */
           <div className="space-y-4">
