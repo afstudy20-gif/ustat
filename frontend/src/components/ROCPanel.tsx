@@ -110,7 +110,7 @@ function MetricsBlock({ m, label }: { m: any; label: string }) {
         ["Accuracy",    m.accuracy  != null ? fmtPct(m.accuracy)  : "—"],
         ["LR+",         m.lr_pos    != null ? m.lr_pos.toFixed(2) : "—"],
         ["LR−",         m.lr_neg    != null ? m.lr_neg.toFixed(2) : "—"],
-        ["Youden J",    m.youden_j  != null ? m.youden_j.toFixed(4) : "—"],
+        ["Youden J",    m.youden_j  != null ? m.youden_j.toFixed(2) : "—"],
         ["TP", m.tp], ["TN", m.tn], ["FP", m.fp], ["FN", m.fn],
       ].map(([k, v]: any) => (
         <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
@@ -370,7 +370,7 @@ export default function ROCPanel() {
       ["Accuracy", fmtPct(opt.accuracy)],
       ["LR+", opt.lr_pos ?? "—"],
       ["LR-", opt.lr_neg ?? "—"],
-      ["Youden J", opt.youden_j ?? "—"],
+      ["Youden J", opt.youden_j != null ? Number(opt.youden_j).toFixed(2) : "—"],
       ["TP", opt.tp ?? "—"],
       ["TN", opt.tn ?? "—"],
       ["FP", opt.fp ?? "—"],
