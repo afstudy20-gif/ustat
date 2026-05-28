@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova } from "../api";
+import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra } from "../api";
 import ResultExporter from "./ResultExporter";
 
 const TESTS = [
@@ -9,6 +9,7 @@ const TESTS = [
   { id: "anova",          label: "One-way ANOVA",         group: "Parametric" },
   { id: "mannwhitney",    label: "Mann-Whitney U",        group: "Non-parametric" },
   { id: "kruskal",        label: "Kruskal-Wallis",        group: "Non-parametric" },
+  { id: "jonckheere",     label: "Jonckheere-Terpstra trend", group: "Non-parametric" },
   { id: "ancova",          label: "ANCOVA",                group: "Parametric" },
   { id: "two_way",        label: "Two-way ANOVA",         group: "Parametric" },
   { id: "chisquare",      label: "Chi-square",            group: "Categorical" },
@@ -39,7 +40,12 @@ const TEST_GUIDANCE: Record<string, { when: string; assumptions: string; reading
   kruskal: {
     when: "Non-parametric alternative to one-way ANOVA. Use when comparing 3+ groups with non-normal or ordinal data.",
     assumptions: "Groups are independent. Tests whether at least one group's distribution differs from the others (rank-based).",
-    reading: "p < 0.05 means at least one group differs in rank distribution. Follow up with pairwise Mann-Whitney tests (with Bonferroni correction).",
+    reading: "p < 0.05 means at least one group differs. Post-hoc Dunn's test with Holm/Bonferroni/FDR correction identifies pairwise differences.",
+  },
+  jonckheere: {
+    when: "Trend test for a continuous outcome across 3+ ordered groups (e.g. tertiles/quartiles of a biomarker vs. a downstream measure). Non-parametric analogue of Cochran-Armitage.",
+    assumptions: "Groups are ordered, observations independent. Tests monotone trend in medians (rank-based).",
+    reading: "p < 0.05 means a monotone increasing or decreasing trend across the ordered groups. Sign of Z indicates direction.",
   },
   chisquare: {
     when: "Test association between two categorical variables (e.g. treatment group vs. outcome category). Use when all expected cell counts are >= 5.",
@@ -256,6 +262,11 @@ export default function HypothesisPanel() {
   const [mu, setMu] = useState("0");
   const [covariates, setCovariates] = useState<string[]>([]);
   const [factor2, setFactor2] = useState(catCols[1] ?? catCols[0] ?? "");
+  // Dunn's post-hoc correction for Kruskal-Wallis. Bonferroni is the
+  // conventional reporting choice in clinical journals; Holm is the
+  // default because it strictly dominates Bonferroni while controlling
+  // the same family-wise error rate.
+  const [posthocCorrection, setPosthocCorrection] = useState<"holm" | "bonferroni" | "fdr" | "none">("holm");
   const cached = useStore((s) => s.panelCache.hypothesis);
   const setCache = useStore((s) => s.setPanelCache);
   const [result, _setResult] = useState<any>(cached?.result ?? null);
@@ -264,7 +275,8 @@ export default function HypothesisPanel() {
   const setResult = (r: any) => { _setResult(r); setCache("hypothesis", { result: r }); };
 
   const isCat = test === "chisquare" || test === "fisher";
-  const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "ancova"].includes(test);
+  const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "jonckheere", "ancova"].includes(test);
+  const isKruskal = test === "kruskal";
   const needsSecondCat = isCat;
   const isAncova = test === "ancova";
   const isTwoWay = test === "two_way";
@@ -278,7 +290,8 @@ export default function HypothesisPanel() {
       else if (test === "ttest_2sample") res = await runTTest({ session_id: sid, column: col, group_column: groupCol });
       else if (test === "anova")     res = await runAnova({ session_id: sid, column: col, group_column: groupCol });
       else if (test === "mannwhitney") res = await runMannWhitney({ session_id: sid, column: col, group_column: groupCol });
-      else if (test === "kruskal")   res = await runKruskal({ session_id: sid, column: col, group_column: groupCol });
+      else if (test === "kruskal")   res = await runKruskal({ session_id: sid, column: col, group_column: groupCol, posthoc_correction: posthocCorrection });
+      else if (test === "jonckheere") res = await runJonckheereTerpstra({ session_id: sid, column: col, group_column: groupCol });
       else if (test === "chisquare") res = await runChiSquare({ session_id: sid, row_column: col, col_column: col2 });
       else if (test === "fisher")    res = await runFisher({ session_id: sid, row_column: col, col_column: col2 });
       else if (test === "ancova")    res = await runAncova({ session_id: sid, outcome: col, group_col: groupCol, covariates });
@@ -345,6 +358,24 @@ export default function HypothesisPanel() {
               <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
                 {catCols.map((c) => <option key={c}>{c}</option>)}
               </select>
+            </div>
+          )}
+
+          {isKruskal && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Post-hoc Dunn correction</label>
+              <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
+                {(["holm", "bonferroni", "fdr", "none"] as const).map((m) => (
+                  <button key={m}
+                    onClick={() => setPosthocCorrection(m)}
+                    className={`flex-1 text-[10px] py-1 transition-colors ${
+                      posthocCorrection === m ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                    }`}>
+                    {m === "holm" ? "Holm" : m === "bonferroni" ? "Bonf." : m === "fdr" ? "FDR" : "None"}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">Bonferroni = most conservative; Holm dominates it.</p>
             </div>
           )}
 

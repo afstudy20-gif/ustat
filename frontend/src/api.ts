@@ -25,6 +25,7 @@ export const runAnova = (data: object) => api.post("/api/stats/anova", data);
 export const runMannWhitney = (data: object) => api.post("/api/stats/mannwhitney", data);
 export const runFisher = (data: object) => api.post("/api/stats/fisher", data);
 export const runKruskal = (data: object) => api.post("/api/stats/kruskal", data);
+export const runJonckheereTerpstra = (data: object) => api.post("/api/stats/jonckheere_terpstra", data);
 export const runROC = (data: object) => api.post("/api/stats/roc", data);
 export const runROCCompare = (data: object) => api.post("/api/stats/roc_compare", data);
 export const runROCCombined = (data: object) => api.post("/api/stats/roc_combined", data);

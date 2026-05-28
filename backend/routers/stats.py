@@ -361,6 +361,12 @@ class KruskalRequest(BaseModel):
     session_id: str
     column: str
     group_column: str
+    # Multiple-comparison correction for Dunn's post-hoc test. Accepts
+    # "holm" (default — uniformly more powerful than Bonferroni),
+    # "bonferroni", "fdr" (Benjamini-Hochberg), or "none". The clinical
+    # convention in most journals is Bonferroni; Holm matches its FWER
+    # control while being strictly less conservative.
+    posthoc_correction: Optional[str] = "holm"
 
 
 @router.post("/kruskal")
@@ -377,8 +383,14 @@ def kruskal(req: KruskalRequest):
     es = epsilon_squared(float(stat), n_total)
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
 
-    # Post-hoc: Dunn's test (only if significant and > 2 groups)
-    posthoc = dunn_test(grp_dict, correction="holm") if sig and len(grp_dict) > 2 else []
+    # Post-hoc: Dunn's test (only if significant and > 2 groups). Correction
+    # method selectable — Bonferroni is the most conservative and most
+    # widely-reported choice for tertile / quartile comparisons.
+    pc = (req.posthoc_correction or "holm").lower()
+    if pc not in {"holm", "bonferroni", "fdr", "none"}:
+        raise HTTPException(status_code=422,
+            detail=f"posthoc_correction must be holm | bonferroni | fdr | none, got '{req.posthoc_correction}'")
+    posthoc = dunn_test(grp_dict, correction=pc) if sig and len(grp_dict) > 2 else []
 
     group_stats = df.groupby(req.group_column)[req.column].agg(
         n="count", median="median",
@@ -391,7 +403,7 @@ def kruskal(req: KruskalRequest):
         "significant": sig,
         "effect_sizes": [es],
         "posthoc": posthoc,
-        "posthoc_method": "Dunn's test (Holm correction)" if posthoc else None,
+        "posthoc_method": f"Dunn's test ({pc.title() if pc != 'fdr' else 'FDR'} correction)" if posthoc else None,
         "groups": [
             {k: (float(v) if hasattr(v, '__float__') else str(v)) for k, v in row.items()}
             for row in group_stats.to_dict(orient="records")
@@ -402,6 +414,151 @@ def kruskal(req: KruskalRequest):
     }
     ret["result_text"] = results_kruskal(ret)
     return ret
+
+
+# ── Jonckheere-Terpstra trend test (ordered K-sample) ────────────────────────
+# Non-parametric trend test for a continuous outcome across ≥3 ordered groups
+# (e.g. tertiles or quartiles of a biomarker → continuous downstream measure).
+# Statistic: J = Σ_{i<j} U(group_i, group_j) where U is the Mann-Whitney U
+# (count of pairs (x_i, x_j) with x_j > x_i; ties count as 0.5). Under H₀ of
+# no trend (groups are exchangeable):
+#   E(J)   = (N² − Σ n_k²) / 4
+#   Var(J) = (N²(2N + 3) − Σ n_k²(2n_k + 3)) / 72
+# (Hollander & Wolfe 1973 §6.2). z = (J − E(J)) / √Var(J) is N(0,1) under H₀.
+# Standard reference for the trend-in-medians clinical workflow that mirrors
+# Cochran-Armitage on the categorical side.
+
+class JonckheereRequest(BaseModel):
+    session_id: str
+    column: str           # continuous outcome
+    group_column: str     # ordered (ordinal) exposure / group
+    scores: Optional[List[float]] = None  # optional explicit group ordering — falls back to natural sort
+    alpha: float = 0.05
+
+
+@router.post("/jonckheere_terpstra")
+def jonckheere_terpstra(req: JonckheereRequest):
+    df = _get_df(req.session_id)
+    for c in (req.column, req.group_column):
+        if c not in df.columns:
+            raise HTTPException(400, f"Column '{c}' not found.")
+    sub = df[[req.column, req.group_column]].dropna()
+    if len(sub) < 5:
+        raise HTTPException(422, "Need at least 5 non-null rows.")
+
+    # Determine ordered group sequence. Custom scores → user controls order;
+    # otherwise sort numerically when possible, else lexicographically.
+    levels = sorted(sub[req.group_column].unique(), key=lambda x: (
+        (0, float(x)) if isinstance(x, (int, float, np.integer, np.floating))
+        or (isinstance(x, str) and x.replace(".", "", 1).replace("-", "", 1).isdigit())
+        else (1, str(x))
+    ))
+    if req.scores is not None:
+        if len(req.scores) != len(levels):
+            raise HTTPException(422,
+                f"Custom scores must match the number of levels ({len(levels)}); got {len(req.scores)}.")
+        # Sort levels by user-supplied score so the resulting J is computed
+        # in the user's intended order.
+        levels = [lev for _, lev in sorted(zip(req.scores, levels), key=lambda t: t[0])]
+    K = len(levels)
+    if K < 3:
+        raise HTTPException(422,
+            f"Jonckheere-Terpstra requires ≥ 3 ordered groups; got {K}. "
+            "For 2 groups use Mann-Whitney; for unordered groups use Kruskal-Wallis.")
+
+    groups: list[np.ndarray] = []
+    for lev in levels:
+        vals = sub.loc[sub[req.group_column] == lev, req.column].astype(float).values
+        if len(vals) == 0:
+            raise HTTPException(422, f"Group '{lev}' has zero observations.")
+        groups.append(vals)
+    n_k = np.array([len(g) for g in groups], dtype=float)
+    N = float(n_k.sum())
+
+    # Compute J = Σ_{i<j} U(group_i, group_j). U counts pairs with x_j > x_i,
+    # adding 0.5 per tie — the standard mid-rank convention.
+    J = 0.0
+    for i in range(K):
+        for j in range(i + 1, K):
+            xi = groups[i][:, None]   # shape (n_i, 1)
+            xj = groups[j][None, :]   # shape (1, n_j)
+            J += float(np.sum(xj > xi) + 0.5 * np.sum(xj == xi))
+
+    sum_n2 = float(np.sum(n_k ** 2))
+    sum_n2_2n_p3 = float(np.sum(n_k ** 2 * (2 * n_k + 3)))
+    E_J = (N ** 2 - sum_n2) / 4.0
+    Var_J = (N ** 2 * (2 * N + 3) - sum_n2_2n_p3) / 72.0
+    if Var_J <= 0:
+        raise HTTPException(422, "Jonckheere-Terpstra variance is zero — group sizes degenerate.")
+    z = (J - E_J) / np.sqrt(Var_J)
+    p_two = 2.0 * (1.0 - scipy_stats.norm.cdf(abs(z)))
+    sig = bool(p_two < req.alpha)
+    p_str = "<0.001" if p_two < 0.001 else f"{p_two:.4f}"
+    direction = "increasing" if z > 0 else "decreasing" if z < 0 else "flat"
+
+    # Per-level medians for the UI table.
+    level_rows = []
+    for lev, g in zip(levels, groups):
+        level_rows.append({
+            "level": str(lev),
+            "n": int(len(g)),
+            "median": round(float(np.median(g)), 4),
+            "q1": round(float(np.percentile(g, 25)), 4),
+            "q3": round(float(np.percentile(g, 75)), 4),
+            "mean": round(float(np.mean(g)), 4),
+        })
+
+    return _sanitize({
+        "test": "Jonckheere-Terpstra trend test",
+        "J": round(J, 4),
+        "E_J": round(E_J, 4),
+        "Var_J": round(Var_J, 6),
+        "z": round(z, 4),
+        "statistic": round(z, 4),
+        "p": p_two,
+        "significant": sig,
+        "effect_sizes": [],
+        "assumptions": [
+            "Ordered (ordinal) exposure with ≥3 levels",
+            "Continuous (or at least ordinal) outcome",
+            "Independence between observations",
+        ],
+        "summary": {
+            "n": int(N),
+            "n_levels": K,
+            "direction": direction,
+            "levels": level_rows,
+        },
+        "interpretation": (
+            f"{'Significant' if sig else 'No significant'} monotone trend in "
+            f"{req.column} across {K} ordered levels of {req.group_column} "
+            f"(J = {J:.2f}, Z = {z:.3f}, p = {p_str}; direction: {direction})."
+        ),
+        "result_text": (
+            f"The Jonckheere-Terpstra non-parametric trend test was used to "
+            f"assess whether {req.column} changed monotonically across {K} "
+            f"ordered levels of {req.group_column} (n = {int(N)}). The trend "
+            f"was {'statistically significant' if sig else 'not statistically significant'} "
+            f"(J = {J:.2f}, standardised Z = {z:.3f}, two-sided p = {p_str}), "
+            f"with a {direction} trend in medians."
+        ),
+        "export_rows": [
+            ["Statistic", "Value"],
+            ["J", round(J, 4)],
+            ["E(J)", round(E_J, 4)],
+            ["Var(J)", round(Var_J, 6)],
+            ["Z", round(z, 4)],
+            ["p", round(p_two, 6)],
+            ["Levels", K],
+            ["Total n", int(N)],
+            ["Direction", direction],
+        ],
+        "r_code": (
+            "# DescTools::JonckheereTerpstraTest(value ~ ordinal_group, "
+            f"alternative='two.sided')   # column={req.column}, "
+            f"ordinal={req.group_column}"
+        ),
+    })
 
 
 # ── ROC Analysis ──────────────────────────────────────────────────────────────
