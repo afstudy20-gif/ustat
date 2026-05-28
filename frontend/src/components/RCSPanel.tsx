@@ -437,7 +437,7 @@ export default function RCSPanel() {
               )}
               <div>
                 <label className="text-xs text-gray-400 block mb-1">
-                  Knots <Tip text="3 knots → [10th, 50th, 90th] percentiles. 4 knots (clinical standard) → [5th, 35th, 65th, 95th]. 5 knots → [5th, 27.5th, 50th, 72.5th, 95th]." wide />
+                  Knots <Tip text="k knots ⇒ k−1 spline parameters (1 linear + k−2 non-linear). Budget by events-per-variable (EPV ≥ 10 ideal, ≥ 5 borderline). 17 events ⇒ 3 knots (2 params, EPV 8.5, safe); 4 knots (3 params, EPV 5.7, borderline); 5 knots (4 params, EPV 4.25, overfit risk). Harrell percentiles: 3→[10,50,90], 4→[5,35,65,95], 5→[5,27.5,50,72.5,95]." wide />
                 </label>
                 <div className="flex gap-2">
                   {[3, 4, 5].map((k) => (
@@ -446,6 +446,30 @@ export default function RCSPanel() {
                       {k}{k === 4 ? " ★" : ""}
                     </button>
                   ))}
+                </div>
+                {/* Knot-budgeting hint: each row maps a knot count to the
+                    parameter count, the EPV at n_events=17 (the sample
+                    size that drove this recommendation), and a safety
+                    label so the user can pick the right knot count for
+                    their actual event count. Selected row is highlighted. */}
+                <div className="mt-1.5 rounded border border-indigo-100 bg-indigo-50/40 text-[10px] text-gray-700 leading-tight">
+                  <div className="px-2 py-1 border-b border-indigo-100 text-[9px] font-semibold text-indigo-700 uppercase tracking-wider">
+                    Knot budgeting (EPV rule, n_events = 17 reference)
+                  </div>
+                  {[
+                    { k: 3, terms: 2, epv: "8.5",  label: "safe",       color: "text-emerald-700" },
+                    { k: 4, terms: 3, epv: "5.7",  label: "borderline", color: "text-amber-700" },
+                    { k: 5, terms: 4, epv: "4.25", label: "overfit risk", color: "text-rose-700" },
+                  ].map((r) => (
+                    <div key={r.k}
+                      className={`flex items-center justify-between px-2 py-0.5 ${rcsNKnots === r.k ? "bg-indigo-100/60 font-semibold" : ""}`}>
+                      <span><b>{r.k}</b> knots ⇒ <b>{r.terms}</b> params · EPV ≈ <span className="font-mono">{r.epv}</span></span>
+                      <span className={r.color}>{r.label}</span>
+                    </div>
+                  ))}
+                  <div className="px-2 py-1 border-t border-indigo-100 text-[9px] text-gray-500">
+                    Default placement: Harrell&apos;s 10th / 50th / 90th percentiles (3 knots).
+                  </div>
                 </div>
               </div>
               <div>
