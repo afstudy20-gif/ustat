@@ -1938,7 +1938,7 @@ export default function ModelsPanel() {
         )}
 
         {result ? (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
             {/* Summary cards */}
             <div className="panel xl:col-start-2">
               <h4 className="font-semibold text-gray-900 mb-3">{result.model}</h4>

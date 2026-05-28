@@ -730,7 +730,7 @@ export default function PSMPanel() {
       <div className="flex-1 min-w-0 overflow-y-auto space-y-4">
 
         {result ? (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
             {/* ── Summary banner ── PSM and IPTW share the balance flag
                 semantics but report different cohort metrics. */}
             <div className={`panel border-2 xl:col-start-2 ${result.balance_achieved ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>

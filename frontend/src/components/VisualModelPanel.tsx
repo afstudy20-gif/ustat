@@ -166,7 +166,7 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
 
         {/* Result */}
         {result && (
-          <div className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 auto-rows-min items-start">
+          <div className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
             <div className="panel space-y-3 xl:col-start-2">
               <h4 className="font-semibold text-gray-900">{result.model}</h4>
               <StatCards pairs={[
