@@ -60,7 +60,12 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
         // its internal download chain got tree-shaken away. toImage just
         // returns a data URL / Blob, which we hand to an anchor click —
         // the same trustworthy pattern the TIFF and dataset exporters use.
-        const mod: any = await import("plotly.js");
+        // Import the same UMD bundle that react-plotly.js uses
+        // (plotly.js/dist/plotly) — the package-root entrypoint resolves
+        // to an ESM build whose toImage / downloadImage chains were
+        // tree-shaken in production and crash with "Cannot read properties
+        // of undefined (reading 'prototype')".
+        const mod: any = await import("plotly.js/dist/plotly");
         const Plotly: any = mod?.toImage ? mod : mod?.default;
         if (!Plotly?.toImage) {
           throw new Error("plotly.js toImage not available");
