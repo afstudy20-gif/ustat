@@ -555,6 +555,34 @@ def roc_analysis(req: ROCRequest):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"ROC computation failed: {exc}")
 
+    # DeLong non-parametric SE → 95% CI for AUC + z-test against H₀: AUC = 0.5
+    # (i.e. the score has no discriminative ability). Reuses the same
+    # placement-value machinery as /roc_compare so the single-curve and
+    # paired-comparison endpoints stay on the same variance estimator.
+    try:
+        V_pos, V_neg = _delong_placement_values(y_arr.astype(int), scores_arr.astype(float))
+        n_pos_d, n_neg_d = len(V_pos), len(V_neg)
+        var_auc = float(
+            np.var(V_pos, ddof=1) / max(n_pos_d, 1)
+            + np.var(V_neg, ddof=1) / max(n_neg_d, 1)
+        )
+        var_auc = max(var_auc, 1e-12)
+        se_auc = float(np.sqrt(var_auc))
+        z95 = 1.95996  # scipy_stats.norm.ppf(0.975)
+        ci_low = max(0.0, auc - z95 * se_auc)
+        ci_high = min(1.0, auc + z95 * se_auc)
+        # Two-sided z-test, H₀: AUC = 0.5.
+        z_auc = (auc - 0.5) / se_auc
+        p_auc = float(2.0 * (1.0 - scipy_stats.norm.cdf(abs(z_auc))))
+    except Exception:
+        # Defensive: fall back to None so the frontend renders "—" rather
+        # than crashing if DeLong fails on a pathological input.
+        se_auc = None
+        ci_low = None
+        ci_high = None
+        z_auc = None
+        p_auc = None
+
     # Youden's J optimal cutoff
     j_scores = tpr - fpr
     best_idx = int(np.argmax(j_scores))
@@ -599,6 +627,13 @@ def roc_analysis(req: ROCRequest):
         "n_positive": int(y_arr.sum()),
         "n_negative": int((y_arr == 0).sum()),
         "auc": round(auc, 4),
+        # DeLong inference for the AUC point estimate.
+        "auc_se": round(se_auc, 6) if se_auc is not None else None,
+        "ci_lower": round(ci_low, 4) if ci_low is not None else None,
+        "ci_upper": round(ci_high, 4) if ci_high is not None else None,
+        "auc_z": round(z_auc, 4) if z_auc is not None else None,
+        "auc_p": round(p_auc, 6) if p_auc is not None else None,
+        "auc_test": "H0: AUC = 0.5 (DeLong two-sided z-test)",
         # Optimal (Youden's J) — kept at top level for backward compat
         "optimal_cutoff": optimal["cutoff"],
         "sensitivity": optimal["sensitivity"],

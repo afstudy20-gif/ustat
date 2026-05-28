@@ -355,8 +355,11 @@ export default function ROCPanel() {
       ["Negatives (0)", result.n_negative],
       ["AUC", result.auc],
       ["AUC interpretation", aucLabel(result.auc)],
+      ["AUC SE (DeLong)", result.auc_se ?? "—"],
       ["95% CI lower", result.ci_lower ?? "—"],
       ["95% CI upper", result.ci_upper ?? "—"],
+      ["AUC Z (vs 0.5)", result.auc_z ?? "—"],
+      ["AUC p (H₀: AUC = 0.5)", result.auc_p ?? "—"],
       ["", ""],
       ["Optimal cutoff (Youden J)", ""],
       ["Cutoff", opt.cutoff ?? "—"],
@@ -556,6 +559,17 @@ export default function ROCPanel() {
                   {result.ci_lower != null && (
                     <span className="text-[10px] text-gray-400 mt-0.5">
                       95% CI {result.ci_lower} – {result.ci_upper}
+                    </span>
+                  )}
+                  {result.auc_p != null && (
+                    <span className="text-[10px] text-gray-500 mt-0.5">
+                      H₀: AUC = 0.5{" "}
+                      <span className="text-gray-400">|</span>{" "}
+                      Z = {result.auc_z}{" "}
+                      <span className="text-gray-400">|</span>{" "}
+                      <span className={`font-mono ${result.auc_p < 0.05 ? "text-emerald-700 font-semibold" : "text-gray-500"}`}>
+                        p = {fmtP(result.auc_p)}
+                      </span>
                     </span>
                   )}
                 </div>
