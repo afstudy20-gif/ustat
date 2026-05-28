@@ -82,19 +82,22 @@ const defaultStyle = (i: number): CurveStyle => ({
 
 // ── Metrics block (single mode) ───────────────────────────────────────────────
 
+// Trimmed from full clinical explanations to one-line definitions so the
+// hover popovers don't sprawl across the screen. The full glossary is still
+// in the methods appendix for anyone who needs the full context.
 const METRIC_TIPS: Record<string, string> = {
-  "Cutoff":      "The threshold score above which a patient is classified as positive. Everything ≥ cutoff → predicted positive.",
-  "Sensitivity": "True Positive Rate — of all patients who actually have the condition, what % were correctly identified. High sensitivity minimises missed cases.",
-  "Specificity": "True Negative Rate — of all patients who do NOT have the condition, what % were correctly ruled out. High specificity minimises false alarms.",
-  "PPV":         "Positive Predictive Value — of all patients the test called positive, what % truly have the condition. Depends heavily on disease prevalence.",
-  "NPV":         "Negative Predictive Value — of all patients the test called negative, what % are truly disease-free.",
-  "Accuracy":    "Overall percentage of correct classifications (TP + TN) / total. Can be misleading with imbalanced classes.",
-  "LR+":         "Likelihood Ratio Positive — how much more likely a positive test result is in a diseased vs. healthy person. LR+ > 10 is strong evidence.",
-  "LR−":         "Likelihood Ratio Negative — how much more likely a negative test result is in a diseased person. LR− < 0.1 is strong evidence against disease.",
-  "Youden J":    "J = Sensitivity + Specificity − 1. Ranges 0–1; the optimal cutoff maximises J, giving the best overall balance between sensitivity and specificity.",
-  "TP": "True Positives — correctly identified disease cases.", "TN": "True Negatives — correctly identified healthy cases.",
-  "FP": "False Positives — healthy cases wrongly flagged as disease (Type I error).",
-  "FN": "False Negatives — disease cases missed by the test (Type II error).",
+  "Cutoff":      "Threshold for predicting positive (score ≥ cutoff).",
+  "Sensitivity": "TP rate — % of true cases correctly identified.",
+  "Specificity": "TN rate — % of true non-cases correctly ruled out.",
+  "PPV":         "Of predicted positives, % truly diseased. Depends on prevalence.",
+  "NPV":         "Of predicted negatives, % truly healthy.",
+  "Accuracy":    "(TP + TN) / total. Misleading when classes are imbalanced.",
+  "LR+":         "Likelihood Ratio +: post-test odds ↑. >10 = strong evidence.",
+  "LR−":         "Likelihood Ratio −: post-test odds ↓. <0.1 = strong evidence.",
+  "Youden J":    "Sens + Spec − 1. Optimal cutoff maximises J.",
+  "TP": "True Positives.", "TN": "True Negatives.",
+  "FP": "False Positives (Type I error).",
+  "FN": "False Negatives (Type II error).",
 };
 
 function MetricsBlock({ m, label }: { m: any; label: string }) {
@@ -471,7 +474,11 @@ export default function ROCPanel() {
     <div className="flex gap-4 h-full">
 
       {/* ── Left sidebar ─────────────────────────────────────────────────────── */}
-      <div className="w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+      {/* Widened from w-72 → w-[420px] so the AUC tile, CI / p-value line,
+          results paragraph, and the optimal-cutoff metric table breathe
+          instead of stacking into a single narrow column. The plot column
+          still flex-grows but no longer dominates the viewport. */}
+      <div className="w-[420px] flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
 
         {/* Mode toggle */}
         <div className="flex rounded-lg overflow-hidden border border-gray-300">
@@ -514,7 +521,7 @@ export default function ROCPanel() {
               <div>
                 <label className="text-[10px] text-gray-400 flex items-center mb-1">
                   Direction
-                  <Tip text="Which direction of the score predicts the event. Auto: flip the score sign when the naive AUC < 0.5 so protective biomarkers (albumin, eGFR, haemoglobin) report ~0.69 instead of the inverted ~0.31. Higher = high values predict the event (default for risk scores). Lower = low values predict the event (force, e.g. for known protective markers)." wide />
+                  <Tip text="Auto: flip score when AUC<0.5 (protective markers). Higher: risk score. Lower: protective." />
                 </label>
                 <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
                   {(["auto", "higher", "lower"] as const).map((d) => (
@@ -584,7 +591,7 @@ export default function ROCPanel() {
                 <div className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg py-3">
                   <span className="text-xs text-gray-400 mb-0.5 flex items-center">
                     AUC
-                    <Tip text="Area Under the ROC Curve — probability that the model ranks a randomly chosen positive case higher than a randomly chosen negative. 0.5 = no better than chance; 1.0 = perfect. ≥0.9 Excellent · ≥0.8 Good · ≥0.7 Fair · <0.7 Poor." wide />
+                    <Tip text="P(score₊ > score₋). 0.5 = chance, 1.0 = perfect. ≥0.9 Excellent · ≥0.8 Good · ≥0.7 Fair." />
                   </span>
                   <span className={`text-2xl font-bold font-mono ${aucColor(result.auc)}`}>{result.auc}</span>
                   <span className={`text-xs mt-0.5 ${aucColor(result.auc)}`}>{aucLabel(result.auc)}</span>
@@ -605,10 +612,10 @@ export default function ROCPanel() {
                     </span>
                   )}
                 </div>
-                <InfoBanner>
-                  AUC = {result.auc} — {aucLabel(result.auc)} discrimination.{" "}
-                  {result.auc >= 0.9 ? "This predictor is excellent at separating positives from negatives." : result.auc >= 0.8 ? "Good discriminative ability — suitable for clinical use with appropriate cutoff." : result.auc >= 0.7 ? "Fair discrimination — useful as a screening tool but not definitive alone." : "Poor discrimination — the predictor barely outperforms random chance."}
-                </InfoBanner>
+                {/* InfoBanner removed — its content (AUC + quality label +
+                    one-liner clinical interpretation) duplicates what the
+                    AUC tile and the Results Paragraph already show, and
+                    just ate vertical space in the now-wider sidebar. */}
 
                 {result.result_text && (
                   <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
@@ -638,7 +645,7 @@ export default function ROCPanel() {
                       className={`flex-1 text-xs py-1 transition-colors ${!useManual ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-100"}`}
                       onClick={() => setUseManual(false)}>
                       Youden J
-                      {!useManual && <Tip text="Optimal cutoff that maximises Sensitivity + Specificity − 1 (Youden's J index). Gives the best overall balance between catching true positives and avoiding false positives." wide />}
+                      {!useManual && <Tip text="Maximises Sens + Spec − 1 (Youden J)." />}
                     </button>
                     <button
                       className={`flex-1 text-xs py-1 transition-colors ${useManual ? "bg-indigo-600 text-white" : "text-gray-500 hover:bg-gray-100"}`}
@@ -676,7 +683,7 @@ export default function ROCPanel() {
                   <div>
                     <label className="text-[10px] text-gray-400 block mb-1">
                       Score 2 direction
-                      <Tip text="Direction handling for the second score. Auto = flip when AUC < 0.5 (recommended). Use this when comparing a protective biomarker (e.g. albumin) against a risk score (e.g. LAR) so DeLong's ΔAUC reflects the true gain, not a 1 − AUC mirror." wide />
+                      <Tip text="Auto-flip when AUC<0.5 (recommended for protective markers vs risk scores)." />
                     </label>
                     <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
                       {(["auto", "higher", "lower"] as const).map((d) => (
@@ -940,7 +947,9 @@ export default function ROCPanel() {
       </div>
 
       {/* ── Plot area ────────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto">
+      {/* max-w cap keeps the chart from ballooning on ultra-wide displays
+          and giving the results column the impression of being squeezed. */}
+      <div className="flex-1 flex flex-col gap-3 min-h-0 overflow-y-auto max-w-[1100px]">
 
         {/* ROC Guidance */}
         {(() => {
