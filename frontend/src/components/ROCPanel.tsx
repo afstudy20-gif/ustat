@@ -203,6 +203,12 @@ export default function ROCPanel() {
   // ── Single-curve state ──
   const [scoreCol,     setScoreCol]     = useState(numCols[0] ?? "");
   const [manualCutoff, setManualCutoff] = useState("");
+  // Score direction for ROC. "auto" flips the score sign when the naive
+  // AUC < 0.5 so protective biomarkers (albumin, eGFR, Hb) report the
+  // correct ~0.69 instead of the inverted ~0.31 — see Heinze (2002) and
+  // pROC's `direction="auto"` for the same convention.
+  const [scoreDirection, setScoreDirection]   = useState<"auto" | "higher" | "lower">("auto");
+  const [scoreDirection2, setScoreDirection2] = useState<"auto" | "higher" | "lower">("auto");
   const [useManual,    setUseManual]    = useState(false);
   const [result,       setResult]       = useState<any>(null);
   const [error,        setError]        = useState<string | null>(null);
@@ -313,6 +319,7 @@ export default function ROCPanel() {
         score_column: scoreCol,
         outcome_column: outcomeCol,
         imputation,
+        direction: scoreDirection,
         ...(mc != null && !isNaN(mc) ? { manual_cutoff: mc } : {}),
       });
       setResult(res.data);
@@ -331,6 +338,8 @@ export default function ROCPanel() {
         score_column_1: scoreCol,
         score_column_2: scoreCol2,
         outcome_column: outcomeCol,
+        direction_1: scoreDirection,
+        direction_2: scoreDirection2,
       });
       setCmpResult(res.data);
     } catch (e: any) {
@@ -503,6 +512,29 @@ export default function ROCPanel() {
               </select>
 
               <div>
+                <label className="text-[10px] text-gray-400 flex items-center mb-1">
+                  Direction
+                  <Tip text="Which direction of the score predicts the event. Auto: flip the score sign when the naive AUC < 0.5 so protective biomarkers (albumin, eGFR, haemoglobin) report ~0.69 instead of the inverted ~0.31. Higher = high values predict the event (default for risk scores). Lower = low values predict the event (force, e.g. for known protective markers)." wide />
+                </label>
+                <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
+                  {(["auto", "higher", "lower"] as const).map((d) => (
+                    <button key={d}
+                      onClick={() => { setScoreDirection(d); setResult(null); setCmpResult(null); }}
+                      className={`flex-1 text-[10px] py-1 transition-colors ${
+                        scoreDirection === d ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                      }`}>
+                      {d === "auto" ? "Auto" : d === "higher" ? "Higher = event" : "Lower = event"}
+                    </button>
+                  ))}
+                </div>
+                {result?.direction_flipped && (
+                  <p className="text-[10px] text-emerald-700 mt-1">
+                    ⚙ Auto-flipped: low values of <span className="font-mono">{scoreCol}</span> predict the event (AUC describes the protective direction).
+                  </p>
+                )}
+              </div>
+
+              <div>
                 <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer mb-1">
                   <input type="checkbox" className="accent-indigo-500" checked={useManual}
                     onChange={(e) => { setUseManual(e.target.checked); if (!e.target.checked) setManualCutoff(""); }} />
@@ -641,6 +673,35 @@ export default function ROCPanel() {
                       {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 block mb-1">
+                      Score 2 direction
+                      <Tip text="Direction handling for the second score. Auto = flip when AUC < 0.5 (recommended). Use this when comparing a protective biomarker (e.g. albumin) against a risk score (e.g. LAR) so DeLong's ΔAUC reflects the true gain, not a 1 − AUC mirror." wide />
+                    </label>
+                    <div className="flex gap-0 rounded overflow-hidden border border-gray-200">
+                      {(["auto", "higher", "lower"] as const).map((d) => (
+                        <button key={d}
+                          onClick={() => { setScoreDirection2(d); setCmpResult(null); }}
+                          className={`flex-1 text-[10px] py-1 transition-colors ${
+                            scoreDirection2 === d ? "bg-indigo-600 text-white" : "bg-white text-gray-600 hover:bg-gray-50"
+                          }`}>
+                          {d === "auto" ? "Auto" : d === "higher" ? "H" : "L"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {(cmpResult?.direction_1_flipped || cmpResult?.direction_2_flipped) && (
+                    <div className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 leading-tight">
+                      ⚙ DeLong recomputed with auto-flipped direction:
+                      {cmpResult.direction_1_flipped && (
+                        <> <span className="font-mono">{scoreCol}</span> (lower = event)</>
+                      )}
+                      {cmpResult.direction_1_flipped && cmpResult.direction_2_flipped && " · "}
+                      {cmpResult.direction_2_flipped && (
+                        <><span className="font-mono">{scoreCol2}</span> (lower = event)</>
+                      )}
+                    </div>
+                  )}
                   <button className="btn-primary w-full" onClick={runCompare}
                     disabled={cmpLoading || !scoreCol || !scoreCol2 || !outcomeCol || scoreCol === scoreCol2}>
                     {cmpLoading ? "Testing…" : "Run DeLong Test"}

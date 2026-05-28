@@ -412,6 +412,13 @@ class ROCRequest(BaseModel):
     outcome_column: str
     manual_cutoff: Optional[float] = None
     imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
+    # Score direction:
+    #   "auto"   — flip when the naïve AUC < 0.5 (e.g. albumin, where low
+    #              values predict the event) so the reported AUC and curve
+    #              describe the protective biomarker correctly
+    #   "higher" — higher score predicts the event (legacy default)
+    #   "lower"  — lower  score predicts the event
+    direction: Optional[str] = "auto"
 
 
 def _roc_metrics_at_cutoff(scores: np.ndarray, y: np.ndarray, threshold: float) -> dict:
@@ -555,6 +562,23 @@ def roc_analysis(req: ROCRequest):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"ROC computation failed: {exc}")
 
+    # Resolve score direction. "auto" flips the score sign when the naive AUC
+    # is below 0.5 so the curve, AUC, optimal cutoff, and DeLong inference
+    # all describe the biomarker in its true (protective) sense — i.e.
+    # albumin, eGFR, haemoglobin etc. don't get pinned at AUC ≈ 0.31.
+    direction_req = (req.direction or "auto").lower()
+    if direction_req not in {"auto", "higher", "lower"}:
+        raise HTTPException(status_code=422,
+            detail=f"direction must be 'auto' | 'higher' | 'lower', got '{req.direction}'")
+    flipped = False
+    if direction_req == "lower" or (direction_req == "auto" and auc < 0.5):
+        scores_arr = -scores_arr
+        fpr, tpr, thresholds = roc_curve(y_arr, scores_arr)
+        auc = float(roc_auc_score(y_arr, scores_arr))
+        flipped = True
+    # The reported direction (what the *returned* AUC describes).
+    direction_used = "lower" if flipped else "higher"
+
     # DeLong non-parametric SE → 95% CI for AUC + z-test against H₀: AUC = 0.5
     # (i.e. the score has no discriminative ability). Reuses the same
     # placement-value machinery as /roc_compare so the single-curve and
@@ -583,16 +607,31 @@ def roc_analysis(req: ROCRequest):
         z_auc = None
         p_auc = None
 
+    # When flipped, the user supplies / sees thresholds in the original score
+    # scale; internally we work on -score. Convert in and out of the user
+    # scale so report values stay readable (e.g. "albumin ≤ 3.2 → death"
+    # rather than "−albumin ≥ −3.2 → death").
+    def _to_user(t: float) -> float:
+        return -t if flipped else t
+
+    def _from_user(t: float) -> float:
+        return -t if flipped else t
+
     # Youden's J optimal cutoff
     j_scores = tpr - fpr
     best_idx = int(np.argmax(j_scores))
     best_thresh = float(thresholds[best_idx])
     optimal = _roc_metrics_at_cutoff(scores_arr, y_arr, best_thresh)
+    if flipped:
+        optimal["cutoff"] = round(_to_user(best_thresh), 6)
 
-    # Manual cutoff (if provided)
+    # Manual cutoff (if provided) — user supplies the value in original units
     manual = None
     if req.manual_cutoff is not None:
-        manual = _roc_metrics_at_cutoff(scores_arr, y_arr, req.manual_cutoff)
+        thr_internal = _from_user(float(req.manual_cutoff))
+        manual = _roc_metrics_at_cutoff(scores_arr, y_arr, thr_internal)
+        if flipped:
+            manual["cutoff"] = round(float(req.manual_cutoff), 6)
 
     # Downsample curve to 300 points for response size
     n_pts = len(fpr)
@@ -611,7 +650,10 @@ def roc_analysis(req: ROCRequest):
         curve.append({
             "fpr": round(float(fpr[i]), 6),
             "tpr": round(float(tpr[i]), 6),
-            "threshold": round(thr, 6),
+            # Always report thresholds in the *user* (original) score scale
+            # so an interactive threshold table renders the values the user
+            # recognises, regardless of internal sign flip.
+            "threshold": round(_to_user(thr), 6),
             "sensitivity": m["sensitivity"],
             "specificity": m["specificity"],
             "ppv": m["ppv"],
@@ -634,6 +676,14 @@ def roc_analysis(req: ROCRequest):
         "auc_z": round(z_auc, 4) if z_auc is not None else None,
         "auc_p": round(p_auc, 6) if p_auc is not None else None,
         "auc_test": "H0: AUC = 0.5 (DeLong two-sided z-test)",
+        # Score direction used for the reported AUC + curve. When the request
+        # asked for "auto" and the naive AUC was < 0.5, the score sign was
+        # flipped before computing everything below so the curve, optimal
+        # cutoff, and DeLong inference all describe the biomarker in its
+        # true (protective) direction — i.e. "low albumin → death".
+        "direction_requested": direction_req,
+        "direction_used": direction_used,
+        "direction_flipped": flipped,
         # Optimal (Youden's J) — kept at top level for backward compat
         "optimal_cutoff": optimal["cutoff"],
         "sensitivity": optimal["sensitivity"],
@@ -656,8 +706,10 @@ def roc_analysis(req: ROCRequest):
                f"{'<0.001' if (p_auc is not None and p_auc < 0.001) else f'{p_auc:.3f}' if p_auc is not None else 'n/a'})"
                if ci_low is not None and ci_high is not None else "")
             + ", indicating "
-            f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination. "
-            f"At the optimal cutoff ({optimal['cutoff']:.2f}, Youden's J), sensitivity was {optimal['sensitivity']*100:.1f}% "
+            f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination "
+            + ("(lower values predict the event — score sign auto-flipped from the request default). "
+               if flipped else "(higher values predict the event). ")
+            + f"At the optimal cutoff ({optimal['cutoff']:.2f}, Youden's J), sensitivity was {optimal['sensitivity']*100:.1f}% "
             f"and specificity was {optimal['specificity']*100:.1f}%."
         ),
     })
@@ -670,6 +722,12 @@ class ROCCompareRequest(BaseModel):
     score_column_1: str
     score_column_2: str
     outcome_column: str
+    # Per-score direction: same semantics as ROCRequest.direction. Default
+    # "auto" flips a score's sign when its naive AUC < 0.5 so DeLong is
+    # always run on protective-direction-corrected curves — otherwise the
+    # ΔAUC vs an inverted biomarker (e.g. albumin) is meaningless.
+    direction_1: Optional[str] = "auto"
+    direction_2: Optional[str] = "auto"
 
 
 @router.post("/roc_compare")
@@ -689,7 +747,29 @@ def roc_compare(req: ROCCompareRequest):
         s1_arr = df_clean[req.score_column_1].astype(float).values
         s2_arr = df_clean[req.score_column_2].astype(float).values
 
+    # Per-score direction: same auto-flip logic as the single-curve endpoint.
+    # Critical for DeLong because comparing a protective biomarker (albumin,
+    # AUC ≈ 0.31) against a risk biomarker (LAR, AUC ≈ 0.73) without flipping
+    # the protective side reports a ΔAUC of 0.42 instead of the true ~0.04.
+    def _resolve_direction(scores: np.ndarray, y: np.ndarray, req_dir: str):
+        d = (req_dir or "auto").lower()
+        if d not in {"auto", "higher", "lower"}:
+            raise HTTPException(status_code=422,
+                detail=f"direction must be 'auto' | 'higher' | 'lower', got '{req_dir}'")
+        naive_auc = float(roc_auc_score(y, scores))
+        flipped = (d == "lower") or (d == "auto" and naive_auc < 0.5)
+        return (-scores if flipped else scores), flipped, d
+
+    s1_arr, flipped_1, dir_req_1 = _resolve_direction(s1_arr, y_arr, req.direction_1 or "auto")
+    s2_arr, flipped_2, dir_req_2 = _resolve_direction(s2_arr, y_arr, req.direction_2 or "auto")
+
     result = _delong_compare(y_arr, s1_arr, s2_arr)
+    result["direction_1_requested"] = dir_req_1
+    result["direction_2_requested"] = dir_req_2
+    result["direction_1_used"] = "lower" if flipped_1 else "higher"
+    result["direction_2_used"] = "lower" if flipped_2 else "higher"
+    result["direction_1_flipped"] = bool(flipped_1)
+    result["direction_2_flipped"] = bool(flipped_2)
     result["score_1"] = req.score_column_1
     result["score_2"] = req.score_column_2
     result["n"] = int(len(y_arr))
