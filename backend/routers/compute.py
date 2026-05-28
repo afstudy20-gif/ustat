@@ -1118,6 +1118,9 @@ def rename_column(session_id: str, req: RenameRequest):
         raise HTTPException(status_code=422, detail=f"Column '{new}' already exists")
     df = df.rename(columns={req.old_name: new})
     store.save(session_id, df)
+    # Keep server-side decimal-places override in sync with the rename so the
+    # save_session export carries the formatting choice over to the new name.
+    store.rename_decimal_key(session_id, req.old_name, new)
     store.log_action(session_id, "rename_column", {"old": req.old_name, "new": new})
     return {"old_name": req.old_name, "new_name": new}
 

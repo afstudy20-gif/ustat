@@ -347,12 +347,13 @@ async def save_session(session_id: str):
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
 
     payload = {
-        "version": "1.1",
+        "version": "1.2",
         "filename": f"session_{session_id[:8]}.json",
         "created": time.time(),
         "columns": columns,
         "col_metadata": store.get_metadata(session_id),
         "kind_overrides": kind_overrides,
+        "decimals_overrides": store.get_decimals(session_id),
         "case_filter": store.get_filter(session_id),
         "audit": store.get_audit(session_id),
         "data": json.loads(
@@ -406,6 +407,11 @@ async def load_session(file: UploadFile = File(...)):
         kind_overrides = {c["name"]: c["kind"] for c in payload["columns"] if c.get("name") and c.get("kind")}
     if kind_overrides:
         store.set_kind_overrides(new_session_id, kind_overrides)
+
+    # Restore per-column decimal-places overrides (v1.2+ session files).
+    decimals_overrides = payload.get("decimals_overrides") or {}
+    if decimals_overrides:
+        store.save_decimals(new_session_id, decimals_overrides)
 
     # Build columns info — overrides win over auto-detection.
     from routers.upload import _detect_kind
@@ -530,3 +536,36 @@ async def set_column_kind(session_id: str, body: KindOverrideRequest):
     store.save_kind_overrides(session_id, {body.column: body.kind})
     store.log_action(session_id, "kind_override", {"column": body.column, "kind": body.kind})
     return {"status": "ok", "column": body.column, "kind": body.kind}
+
+
+# ── Decimal-places override ──────────────────────────────────────────────────
+# Per-column display precision the user picks via the data-tab context menu.
+# Persisted so save_session round-trips the formatting choice.
+
+class DecimalRequest(BaseModel):
+    column: str
+    decimals: Optional[int] = None  # None ⇒ clear the override
+
+
+@router.post("/{session_id}/decimals")
+async def set_column_decimals(session_id: str, body: DecimalRequest):
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if body.column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{body.column}' not in session")
+    if body.decimals is None:
+        store.clear_decimal(session_id, body.column)
+        return {"status": "ok", "column": body.column, "decimals": None}
+    if not (0 <= int(body.decimals) <= 10):
+        raise HTTPException(status_code=422, detail="decimals must be between 0 and 10")
+    store.set_decimal(session_id, body.column, int(body.decimals))
+    return {"status": "ok", "column": body.column, "decimals": int(body.decimals)}
+
+
+@router.get("/{session_id}/decimals")
+async def get_column_decimals(session_id: str):
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return store.get_decimals(session_id)

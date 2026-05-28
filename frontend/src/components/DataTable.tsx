@@ -365,6 +365,7 @@ export default function DataTable() {
   const redoLen          = useStore((s) => s.redoDepth);
   const columnDecimals   = useStore((s) => s.columnDecimals);
   const setColumnDecimals = useStore((s) => s.setColumnDecimals);
+  const clearColumnDecimals = useStore((s) => s.clearColumnDecimals);
 
   const [sortCol,     setSortCol]     = useState<string | null>(null);
   const [sortDir,     setSortDir]     = useState<SortDir>("asc");
@@ -1347,8 +1348,7 @@ export default function DataTable() {
                 <button key={String(d)}
                   onClick={() => {
                     if (d === "auto") {
-                      const next = { ...columnDecimals }; delete next[ctxMenu.col];
-                      useStore.setState({ columnDecimals: next });
+                      clearColumnDecimals(ctxMenu.col);
                     } else {
                       setColumnDecimals(ctxMenu.col, d as number);
                     }

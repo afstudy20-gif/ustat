@@ -41,11 +41,24 @@ export default function UploadZone() {
     setError(null);
     try {
       // Session JSON files → load_session endpoint
-      if (file.name.endsWith(".json")) {
+      const isSessionJson = file.name.endsWith(".json");
+      if (isSessionJson) {
         const form = new FormData();
         form.append("file", file);
         const res = await api.post("/api/sessions/load_session", form);
         setSession(res.data);
+        // Restored sessions carry server-side decimal overrides — pull them
+        // into the store so the table renders with the user's formatting.
+        // The setSession call above reset columnDecimals because session_id
+        // flipped; this re-hydrates it from the backend snapshot.
+        try {
+          const { getColumnDecimalsApi } = await import("../api");
+          const dres = await getColumnDecimalsApi(res.data.session_id);
+          if (dres.data && Object.keys(dres.data).length > 0) {
+            const { useStore: store } = await import("../store");
+            store.setState({ columnDecimals: dres.data });
+          }
+        } catch { /* non-fatal — fall back to defaults */ }
       } else {
         const res = await uploadFile(file);
         setSession(res.data);

@@ -9,6 +9,7 @@ _filters: Dict[str, List[dict]] = {}
 _audit: Dict[str, list] = {}
 _metadata: Dict[str, dict] = {}
 _kinds: Dict[str, Dict[str, str]] = {}  # {session_id: {col: "numeric"|"categorical"|...}}
+_decimals: Dict[str, Dict[str, int]] = {}  # {session_id: {col: decimal_places}} for cell-format overrides
 _undo: Dict[str, list] = {}   # {session_id: [DataFrame snapshots]}
 _redo: Dict[str, list] = {}
 _lock = Lock()
@@ -276,3 +277,36 @@ def get_kind_overrides(session_id: str) -> Dict[str, str]:
 def clear_kind_override(session_id: str, column: str) -> None:
     if session_id in _kinds:
         _kinds[session_id].pop(column, None)
+
+
+# ── Column decimal-places overrides ──────────────────────────────────────────
+# Per-cell display precision the user picks via the right-click context menu
+# in the data table. Persisted server-side so save_session round-trips the
+# choice — the previous frontend-only implementation forgot decimals on every
+# JSON export.
+
+def save_decimals(session_id: str, decimals: Dict[str, int]) -> None:
+    """Replace the decimal-places map wholesale."""
+    _decimals[session_id] = {k: int(v) for k, v in (decimals or {}).items()}
+
+
+def get_decimals(session_id: str) -> Dict[str, int]:
+    return _decimals.get(session_id, {})
+
+
+def set_decimal(session_id: str, column: str, decimals: int) -> None:
+    """Set the decimal-places override for a single column."""
+    cur = _decimals.get(session_id, {})
+    cur[column] = int(decimals)
+    _decimals[session_id] = cur
+
+
+def clear_decimal(session_id: str, column: str) -> None:
+    if session_id in _decimals:
+        _decimals[session_id].pop(column, None)
+
+
+def rename_decimal_key(session_id: str, old: str, new: str) -> None:
+    """Move the decimal entry to a new column name (called on rename)."""
+    if session_id in _decimals and old in _decimals[session_id]:
+        _decimals[session_id][new] = _decimals[session_id].pop(old)

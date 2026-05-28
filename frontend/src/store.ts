@@ -97,6 +97,7 @@ interface AppState {
   // Column decimal formatting
   columnDecimals: Record<string, number>;  // col name → decimal places
   setColumnDecimals: (col: string, decimals: number) => void;
+  clearColumnDecimals: (col: string) => void;
   // Undo / Redo (backend-driven)
   undoDepth: number;
   redoDepth: number;
@@ -234,7 +235,32 @@ export const useStore = create<AppState>((set) => ({
   }),
   // Column decimal formatting
   columnDecimals: {},
-  setColumnDecimals: (col, decimals) => set((state) => ({ columnDecimals: { ...state.columnDecimals, [col]: decimals } })),
+  setColumnDecimals: (col, decimals) => set((state) => {
+    // Fire-and-forget persistence so save_session captures the formatting.
+    // Lazy import avoids the circular api.ts → store cycle.
+    if (state.session) {
+      const sid = state.session.session_id;
+      import("./api").then(({ setColumnDecimalsApi }) => {
+        setColumnDecimalsApi(sid, col, decimals).catch(() => {
+          /* UI state remains the source of truth for the current session;
+             a transient sync error will be re-tried on next change. */
+        });
+      });
+    }
+    return { columnDecimals: { ...state.columnDecimals, [col]: decimals } };
+  }),
+  clearColumnDecimals: (col) => set((state) => {
+    // Fire-and-forget clear so save_session reflects the "auto" reset.
+    if (state.session) {
+      const sid = state.session.session_id;
+      import("./api").then(({ setColumnDecimalsApi }) => {
+        setColumnDecimalsApi(sid, col, null).catch(() => { /* non-fatal */ });
+      });
+    }
+    const next = { ...state.columnDecimals };
+    delete next[col];
+    return { columnDecimals: next };
+  }),
   // Undo / Redo — backend-driven (DataFrame snapshots on server)
   undoDepth: 0,
   redoDepth: 0,
