@@ -624,9 +624,16 @@ export default function DataTable() {
   const addColumn = async (position?: number) => {
     if (!session) return;
     const name = prompt("New column name:");
-    if (!name?.trim()) return;
+    const trimmed = name?.trim();
+    if (!trimmed) return;
+    // Client-side duplicate guard so the user sees the conflict before the
+    // round-trip; backend also validates as a safety net.
+    if (session.columns.some((c) => c.name === trimmed)) {
+      alert(`Column "${trimmed}" already exists. Pick a different name.`);
+      return;
+    }
     try {
-      await api.post(`/api/compute/${session.session_id}/add_column`, { name: name.trim(), position: position ?? -1 });
+      await api.post(`/api/compute/${session.session_id}/add_column`, { name: trimmed, position: position ?? -1 });
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
       useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
     } catch (e: any) {
@@ -768,9 +775,22 @@ export default function DataTable() {
     if (!renameCol || !session) return;
     const oldName = renameCol;  // capture before clearing state
     const newName = renameVal.trim();
-    setRenameCol(null);
-    if (!newName || newName === oldName) return;
+    if (!newName || newName === oldName) {
+      setRenameCol(null);
+      return;
+    }
 
+    // Client-side duplicate-name guard. Keeps editor open so the user can
+    // adjust the name instead of losing the input on a silent revert.
+    const existingNames = new Set(session.columns.map((c) => c.name));
+    if (existingNames.has(newName)) {
+      alert(`Column "${newName}" already exists. Pick a different name.`);
+      // Keep the input open with the rejected name selected for quick re-edit.
+      setTimeout(() => renameRef.current?.select(), 0);
+      return;
+    }
+
+    setRenameCol(null);
     try {
       await renameColumn(session.session_id, oldName, newName);
       // Update local state
@@ -791,7 +811,14 @@ export default function DataTable() {
         useStore.setState({ columnDecimals: next });
       }
       useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview }); bumpUndo();
-    } catch { /* revert silently */ }
+    } catch (e: unknown) {
+      // Surface backend errors (422 duplicate, network, etc.) instead of
+      // silently dropping the rename. Falls back to a generic message.
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? (e instanceof Error ? e.message : String(e));
+      alert(`Rename failed: ${detail}`);
+    }
   };
 
   const toggleSort = (colName: string) => {
