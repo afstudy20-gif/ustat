@@ -15,12 +15,15 @@ interface Props {
 }
 
 export default function PlotExporter({ plotRef, title = "chart", className = "" }: Props) {
-  const [open, setOpen]     = useState(false);
-  const [width, setWidth]   = useState(1200);
-  const [height, setHeight] = useState(700);
-  const [fmt, setFmt]       = useState<ExportFmt>("png");
-  const [dpi, setDpi]       = useState(300);
-  const [busy, setBusy]     = useState(false);
+  const [open, setOpen]       = useState(false);
+  const [width, setWidth]     = useState(1200);
+  const [height, setHeight]   = useState(700);
+  const [fmt, setFmt]         = useState<ExportFmt>("png");
+  const [dpi, setDpi]         = useState(300);
+  const [busy, setBusy]       = useState(false);
+  // "Copied to clipboard" pill is shown for ~1.5s on success so the user
+  // doesn't have to guess whether the click did anything.
+  const [copyToast, setCopyToast] = useState<string | null>(null);
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40) || "chart";
   const getEl = (): HTMLElement | null => {
@@ -41,6 +44,46 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
       return ref;
     }
     return null;
+  };
+
+  /** Render the chart to a PNG blob at the current width/height/dpi. */
+  const renderPngBlob = async (): Promise<Blob | null> => {
+    const el = getEl();
+    if (!el) return null;
+    // Reuse the gd's own Plotly instance — same fix as downloadImage.
+    let Plotly: any = (el as any)._Plotly;
+    if (!Plotly?.toImage) {
+      const mod: any = await import("plotly.js/dist/plotly");
+      Plotly = mod?.toImage ? mod : mod?.default;
+    }
+    if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
+    const scale = dpi / 72;
+    const dataUrl: string = await Plotly.toImage(el, { format: "png", width, height, scale });
+    const res = await fetch(dataUrl);
+    return await res.blob();
+  };
+
+  /** Copy the rendered chart to the system clipboard as a PNG image. */
+  const copyImage = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const blob = await renderPngBlob();
+      if (!blob) throw new Error("plot is not mounted yet");
+      // ClipboardItem + write is supported in modern Chromium, Safari 13.4+,
+      // and Firefox 127+. The user click is the gesture required by Safari.
+      if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+        throw new Error("Clipboard API not available in this browser");
+      }
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      setCopyToast("Copied to clipboard");
+      setTimeout(() => setCopyToast(null), 1500);
+    } catch (e: unknown) {
+      console.error("PlotExporter copy failed:", e);
+      alert(`Copy chart failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const downloadImage = async () => {
@@ -107,7 +150,15 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
   };
 
   return (
-    <div className={`absolute top-2 right-2 z-10 ${className}`}>
+    <div className={`absolute top-2 right-2 z-10 flex gap-1 ${className}`}>
+      <button
+        onClick={copyImage}
+        disabled={busy}
+        className="p-1.5 rounded-lg bg-white/80 border border-gray-200 shadow-sm text-gray-500 hover:text-emerald-600 hover:bg-white hover:border-emerald-200 transition-colors text-xs disabled:opacity-50"
+        title="Copy chart to clipboard as PNG"
+      >
+        ⧉
+      </button>
       <button
         onClick={() => setOpen(o => !o)}
         className="p-1.5 rounded-lg bg-white/80 border border-gray-200 shadow-sm text-gray-500 hover:text-indigo-600 hover:bg-white hover:border-indigo-200 transition-colors text-xs"
@@ -115,6 +166,11 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
       >
         ↓
       </button>
+      {copyToast && (
+        <span className="absolute -bottom-7 right-0 text-[10px] font-medium px-2 py-1 rounded bg-emerald-600 text-white shadow whitespace-nowrap">
+          {copyToast}
+        </span>
+      )}
 
       {open && (
         <div className="absolute right-0 top-8 bg-white border border-gray-200 rounded-xl shadow-xl p-4 w-52 space-y-3 z-20">

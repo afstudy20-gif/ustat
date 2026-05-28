@@ -130,15 +130,70 @@ async function downloadTIFF(plotRef: React.RefObject<any>, filename: string) {
   downloadBlob(blob, `${filename}.tiff`);
 }
 
+/** Render the chart to a PNG blob — shared by copy + download paths. */
+async function renderPlotPngBlob(plotRef: React.RefObject<any>): Promise<Blob> {
+  const candidates: any[] = [];
+  const r = plotRef.current;
+  if (r) {
+    candidates.push(r.el);
+    candidates.push(r);
+    candidates.push(r.elRef?.current);
+    if (typeof r.querySelector === "function") {
+      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
+    }
+  }
+  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+  if (!el) throw new Error("plot is not mounted yet — wait for the chart to render and try again");
+  let Plotly: any = (el as any)._Plotly;
+  if (!Plotly?.toImage) {
+    const mod: any = await import("plotly.js/dist/plotly");
+    Plotly = mod?.toImage ? mod : mod?.default;
+  }
+  if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
+  const dataUrl: string = await Plotly.toImage(el, {
+    format: "png",
+    width: 1200,
+    height: 700,
+    scale: 3.125,
+  });
+  const res = await fetch(dataUrl);
+  return await res.blob();
+}
+
+/** Copy the chart to the clipboard as PNG (system clipboard). */
+async function copyPlotToClipboard(plotRef: React.RefObject<any>) {
+  if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
+    throw new Error("Clipboard API not available in this browser");
+  }
+  const blob = await renderPlotPngBlob(plotRef);
+  await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+}
+
+/** Copy the table to the clipboard as TSV (pastes into Excel / Word / Sheets). */
+async function copyTableToClipboard(headers: string[], rows: (string | number | null | undefined)[][]) {
+  if (!navigator.clipboard?.writeText) {
+    throw new Error("Clipboard API not available in this browser");
+  }
+  const esc = (v: string | number | null | undefined) => {
+    const s = String(v ?? "");
+    // Tabs / newlines inside a cell break TSV — wrap the cell in quotes.
+    return /[\t\n\r"]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const tsv = [headers, ...rows].map((r) => r.map(esc).join("\t")).join("\n");
+  await navigator.clipboard.writeText(tsv);
+}
+
 export default function ResultExporter({ title, headers, rows, plotRef, className = "" }: Props) {
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // "Copied" pill flashes for ~1.5 s on a successful copy.
+  const [copyToast, setCopyToast] = useState<string | null>(null);
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 50) || "export";
   const hasTable = headers && rows;
   const hasPlot = !!plotRef;
 
-  const handle = async (format: "csv" | "xlsx" | "png" | "tiff") => {
+  const handle = async (format: "csv" | "xlsx" | "png" | "tiff" | "copy-table" | "copy-plot") => {
     if (busy) return;
     setBusy(format);
     setErr(null);
@@ -147,6 +202,16 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
       if (format === "xlsx" && hasTable) await downloadXLSX(safeTitle, headers, rows);
       if (format === "png" && hasPlot) await downloadPNG(plotRef, safeTitle);
       if (format === "tiff" && hasPlot) await downloadTIFF(plotRef, safeTitle);
+      if (format === "copy-table" && hasTable) {
+        await copyTableToClipboard(headers, rows);
+        setCopyToast("Table copied — paste into Excel / Word");
+        setTimeout(() => setCopyToast(null), 1500);
+      }
+      if (format === "copy-plot" && hasPlot) {
+        await copyPlotToClipboard(plotRef);
+        setCopyToast("Chart copied to clipboard");
+        setTimeout(() => setCopyToast(null), 1500);
+      }
     } catch (e) {
       console.error("Export error:", e);
       const msg = e instanceof Error ? e.message : String(e);
@@ -179,6 +244,14 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
           >
             {busy === "xlsx" ? "…" : "XLSX"}
           </button>
+          <button
+            onClick={() => handle("copy-table")}
+            disabled={!!busy}
+            title="Copy table to clipboard as TSV — paste into Excel / Word / Google Sheets"
+            className="px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 disabled:opacity-40 transition-colors"
+          >
+            {busy === "copy-table" ? "…" : "⧉ Copy"}
+          </button>
         </>
       )}
       {hasPlot && (
@@ -198,7 +271,20 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
           >
             {busy === "tiff" ? "…" : "TIFF 300dpi"}
           </button>
+          <button
+            onClick={() => handle("copy-plot")}
+            disabled={!!busy}
+            title="Copy chart to clipboard as PNG — paste into PowerPoint / Word / Slack"
+            className="px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 disabled:opacity-40 transition-colors"
+          >
+            {busy === "copy-plot" ? "…" : "⧉ Copy chart"}
+          </button>
         </>
+      )}
+      {copyToast && (
+        <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-emerald-600 text-white shadow ml-1 whitespace-nowrap">
+          {copyToast}
+        </span>
       )}
       {err && (
         <span
