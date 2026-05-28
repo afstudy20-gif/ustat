@@ -947,7 +947,59 @@ export default function ROCPanel() {
         <div className="flex-1 panel min-h-0" style={{ minHeight: 380 }}>
 
           {/* ── Single plot ── */}
-          {mode === "single" && result && (
+          {mode === "single" && result && (() => {
+            // Pick the cutoff point to highlight: optimal (Youden J) unless the
+            // user clicked "Manual" with a cutoff in scope.
+            const cutoffPoint = result.manual
+              ? { x: 1 - result.manual.specificity, y: result.manual.sensitivity,
+                  cutoff: Number(result.manual.cutoff), se: result.manual.sensitivity,
+                  sp: result.manual.specificity, label: "Manual cutoff", color: "#f59e0b" }
+              : result.optimal
+                ? { x: 1 - result.optimal.specificity, y: result.optimal.sensitivity,
+                    cutoff: Number(result.optimal.cutoff), se: result.optimal.sensitivity,
+                    sp: result.optimal.specificity, label: "Optimal cutoff", color: "#ef4444" }
+                : result.sensitivity != null
+                  ? { x: 1 - result.specificity, y: result.sensitivity,
+                      cutoff: Number(result.optimal_cutoff), se: result.sensitivity,
+                      sp: result.specificity, label: "Optimal cutoff", color: "#ef4444" }
+                  : null;
+
+            // AUC box: line 1 = AUC + 95% CI, line 2 = p.
+            const aucCI = result.ci_lower != null && result.ci_upper != null
+              ? `AUC = ${result.auc.toFixed(2)} (95% CI ${result.ci_lower.toFixed(2)}–${result.ci_upper.toFixed(2)})`
+              : `AUC = ${result.auc.toFixed(2)}`;
+            const aucP = result.auc_p != null
+              ? (result.auc_p < 0.001 ? "p < 0.001" : `p = ${result.auc_p.toFixed(3)}`)
+              : null;
+            const aucBoxText = aucP ? `${aucCI}<br>${aucP}` : aucCI;
+
+            const annotations: any[] = [
+              {
+                x: 0.98, y: 0.04, xref: "paper" as const, yref: "paper" as const,
+                text: aucBoxText,
+                showarrow: false,
+                font: { color: "#374151", size: 13 },
+                align: "right" as const,
+                bgcolor: "rgba(249,250,251,0.92)", bordercolor: "#9ca3af", borderwidth: 1, borderpad: 6,
+                xanchor: "right" as const, yanchor: "bottom" as const,
+              },
+            ];
+            if (cutoffPoint) {
+              // Arrow from text label to the cutoff dot, like matplotlib annotate().
+              annotations.push({
+                x: cutoffPoint.x, y: cutoffPoint.y, xref: "x" as const, yref: "y" as const,
+                ax: 50, ay: 70, axref: "pixel" as const, ayref: "pixel" as const,
+                text: `${cutoffPoint.label} = ${cutoffPoint.cutoff.toFixed(2)}<br>(Se ${(cutoffPoint.se * 100).toFixed(1)}%, Sp ${(cutoffPoint.sp * 100).toFixed(1)}%)`,
+                showarrow: true,
+                arrowhead: 0, arrowsize: 1, arrowwidth: 1.2, arrowcolor: "#6b7280",
+                font: { color: "#374151", size: 11 },
+                align: "left" as const,
+                bgcolor: "rgba(255,255,255,0)", borderpad: 0,
+                xanchor: "left" as const, yanchor: "top" as const,
+              });
+            }
+
+            return (
             <div className="relative" style={{ width: "100%", height: "100%" }}>
             <PlotExporter plotRef={rocSingleRef} title="ROC_Curve" />
             <Plot
@@ -956,52 +1008,47 @@ export default function ROCPanel() {
                   type: "scatter", mode: "lines",
                   x: result.curve.map((p: any) => p.fpr),
                   y: result.curve.map((p: any) => p.tpr),
-                  line: { color: singleStyle.color, width: singleStyle.width, dash: singleStyle.dash },
+                  line: { color: singleStyle.color, width: singleStyle.width, dash: singleStyle.dash, shape: "hv" as const },
                   name: fmtAUC(result.auc, result.ci_lower, result.ci_upper),
                   fill: "tozeroy",
-                  fillcolor: `${singleStyle.color}14`,
+                  fillcolor: `${singleStyle.color}22`,
+                  showlegend: false,
+                  hovertemplate: "FPR: %{x:.3f}<br>TPR: %{y:.3f}<extra></extra>",
                 },
                 {
                   type: "scatter", mode: "lines",
                   x: [0, 1], y: [0, 1],
                   line: { color: chanceStyle.color, width: chanceStyle.width, dash: chanceStyle.dash },
                   name: "Reference",
+                  showlegend: false,
+                  hoverinfo: "skip" as const,
                 },
-                ...(result.optimal ? [{
-                  type: "scatter", mode: "markers",
-                  x: [1 - result.optimal.specificity], y: [result.optimal.sensitivity],
-                  marker: { color: "#ef4444", size: 10, symbol: "circle" },
-                  name: `Optimal cutoff = ${Number(result.optimal.cutoff).toFixed(2)}`,
-                }] : result.sensitivity != null ? [{
-                  type: "scatter", mode: "markers",
-                  x: [1 - result.specificity], y: [result.sensitivity],
-                  marker: { color: "#ef4444", size: 10, symbol: "circle" },
-                  name: `Cutoff = ${Number(result.optimal_cutoff).toFixed(2)}`,
-                }] : []),
-                ...(result.manual ? [{
-                  type: "scatter", mode: "markers",
-                  x: [1 - result.manual.specificity], y: [result.manual.sensitivity],
-                  marker: { color: "#f59e0b", size: 10, symbol: "diamond" },
-                  name: `Manual cutoff = ${Number(result.manual.cutoff).toFixed(2)}`,
+                ...(cutoffPoint ? [{
+                  type: "scatter" as const, mode: "markers" as const,
+                  x: [cutoffPoint.x], y: [cutoffPoint.y],
+                  marker: { color: cutoffPoint.color, size: 12, symbol: "circle" as const,
+                            line: { color: "#ffffff", width: 1.5 } },
+                  name: `${cutoffPoint.label} = ${cutoffPoint.cutoff.toFixed(2)}`,
+                  showlegend: false,
+                  hovertemplate: `${cutoffPoint.label} = ${cutoffPoint.cutoff.toFixed(2)}<br>Se: ${(cutoffPoint.se * 100).toFixed(1)}%<br>Sp: ${(cutoffPoint.sp * 100).toFixed(1)}%<extra></extra>`,
                 }] : []),
               ]}
               layout={{
                 ...PLOT_LAYOUT,
-                xaxis: { ...(PLOT_LAYOUT.xaxis as object), showgrid: showGrid },
-                yaxis: { ...(PLOT_LAYOUT.yaxis as object), showgrid: showGrid },
+                xaxis: {
+                  ...(PLOT_LAYOUT.xaxis as object), showgrid: showGrid,
+                  title: { text: "1 − Specificity (FPR)", font: { color: "#374151", size: 12 } },
+                  range: [0, 1], zeroline: false,
+                },
+                yaxis: {
+                  ...(PLOT_LAYOUT.yaxis as object), showgrid: showGrid,
+                  title: { text: "Sensitivity (TPR)", font: { color: "#374151", size: 12 } },
+                  range: [0, 1.05], zeroline: false,
+                },
                 autosize: true,
-                title: { text: `ROC — ${scoreCol} → ${outcomeCol}`, font: { color: "#374151", size: 13 } },
-                legend: { font: { color: "#374151", size: 11 }, bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
-                annotations: [{
-                  x: 0.98, y: 0.06, xref: "paper" as const, yref: "paper" as const,
-                  text: result.auc_p != null
-                    ? `AUC = ${result.auc.toFixed(2)} · p = ${result.auc_p < 0.001 ? "<0.001" : result.auc_p.toFixed(3)}`
-                    : `AUC = ${result.auc.toFixed(2)}`,
-                  showarrow: false,
-                  font: { color: "#374151", size: 13 },
-                  bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1, borderpad: 5,
-                  xanchor: "right" as const, yanchor: "bottom" as const,
-                }],
+                title: { text: `ROC — ${scoreCol} predicting ${outcomeCol}`, font: { color: "#374151", size: 13 } },
+                showlegend: false,
+                annotations,
               }}
               onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; rocSingleRef.current = gd; }}
               onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; rocSingleRef.current = gd; }}
@@ -1010,7 +1057,8 @@ export default function ROCPanel() {
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
             />
             </div>
-          )}
+            );
+          })()}
 
           {/* ── DeLong comparison plot (publication quality) ── */}
           {mode === "single" && cmpResult && cmpResult.curve_1 && cmpResult.curve_2 && (
