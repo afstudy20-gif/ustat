@@ -1312,7 +1312,13 @@ export default function DataTable() {
       {ctxMenu && (
         <div ref={ctxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          style={{
+            // Clamp to viewport so the menu never spills past the right
+            // edge or below the bottom (e.g. when the user right-clicks
+            // the last column or last row of the data table).
+            left: Math.min(ctxMenu.x, window.innerWidth - 200),
+            top: Math.min(ctxMenu.y, window.innerHeight - 420),
+          }}>
           <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
             {ctxMenu.col}
             {(missingCounts[ctxMenu.col] ?? 0) > 0 && (
@@ -1456,7 +1462,10 @@ export default function DataTable() {
       {cellCtx && (
         <div ref={cellCtxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
-          style={{ left: cellCtx.x, top: cellCtx.y }}>
+          style={{
+            left: Math.min(cellCtx.x, window.innerWidth - 200),
+            top: Math.min(cellCtx.y, window.innerHeight - 200),
+          }}>
           <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
             {selectedCells.size > 1
               ? `${selectedCells.size} cells selected`
@@ -1487,7 +1496,10 @@ export default function DataTable() {
       {rowCtx && (
         <div ref={rowCtxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-44"
-          style={{ left: rowCtx.x, top: rowCtx.y }}>
+          style={{
+            left: Math.min(rowCtx.x, window.innerWidth - 184),
+            top: Math.min(rowCtx.y, window.innerHeight - 220),
+          }}>
           <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100">Row {rowCtx.idx + 1}</div>
           <button onClick={() => copyRow(rowCtx.idx)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
