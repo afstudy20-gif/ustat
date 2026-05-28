@@ -505,7 +505,7 @@ function ForestPlot({ result, modelType, outcome }: {
   outcome?: string;
 }) {
   const forestRef = useRef<any>(null);
-  const isORTable = modelType === "ortable";
+  const isORTable = modelType === "ortable" || modelType === "firth_ortable";
   const isCox     = modelType === "cox";
   const metric    = isCox ? "HR" : "OR";
   const showGrid  = useStore((s) => s.showGrid);
