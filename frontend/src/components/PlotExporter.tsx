@@ -54,12 +54,22 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
         const blob = await plotlyToTiffBlob(el, { width, height, dpi });
         downloadBlob(blob, `${safeTitle}.tiff`);
       } else {
-        // Lazy import: plotly is already in the bundle (loaded by chart components),
-        // so this resolves instantly from the module cache with no extra network cost.
-        const Plotly = (await import("plotly.js")).default;
+        // Lazy import. The xlsx-style "named vs default" dual-export pattern
+        // shows up here too: in some Vite builds plotly.js publishes
+        // downloadImage at the module root, in others only on .default. Pick
+        // whichever shape is available so the ↓ button stops silently failing
+        // when the .default path is missing.
+        const mod: any = await import("plotly.js");
+        const Plotly: any = mod?.downloadImage ? mod : mod?.default;
+        if (!Plotly?.downloadImage) {
+          throw new Error("plotly.js downloadImage not available");
+        }
         const scale = (fmt === "png" || fmt === "jpeg") ? dpi / 72 : 1;  // SVG vector
         await Plotly.downloadImage(el, { format: fmt, width, height, filename: safeTitle, ...(scale !== 1 ? { scale } : {}) } as any);
       }
+    } catch (e: unknown) {
+      console.error("PlotExporter download failed:", e);
+      alert(`Chart export failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
       setOpen(false);

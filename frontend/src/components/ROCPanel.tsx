@@ -40,8 +40,8 @@ const aucLabel = (auc: number) =>
 const fmtPct = (v: number) => `${(v * 100).toFixed(1)}%`;
 const fmtAUC = (auc: number, lo?: number, hi?: number) =>
   lo != null && hi != null
-    ? `AUC ${auc} (95% CI ${lo}–${hi})`
-    : `AUC ${auc}`;
+    ? `AUC ${auc.toFixed(2)} (95% CI ${lo.toFixed(2)}–${hi.toFixed(2)})`
+    : `AUC ${auc.toFixed(2)}`;
 
 // ── ROC Guidance ────────────────────────────────────────────────────────────
 const ROC_GUIDANCE = {
@@ -993,18 +993,18 @@ export default function ROCPanel() {
                   type: "scatter", mode: "markers",
                   x: [1 - result.optimal.specificity], y: [result.optimal.sensitivity],
                   marker: { color: "#ef4444", size: 10, symbol: "circle" },
-                  name: `Optimal cutoff = ${result.optimal.cutoff}`,
+                  name: `Optimal cutoff = ${Number(result.optimal.cutoff).toFixed(2)}`,
                 }] : result.sensitivity != null ? [{
                   type: "scatter", mode: "markers",
                   x: [1 - result.specificity], y: [result.sensitivity],
                   marker: { color: "#ef4444", size: 10, symbol: "circle" },
-                  name: `Cutoff = ${result.optimal_cutoff}`,
+                  name: `Cutoff = ${Number(result.optimal_cutoff).toFixed(2)}`,
                 }] : []),
                 ...(result.manual ? [{
                   type: "scatter", mode: "markers",
                   x: [1 - result.manual.specificity], y: [result.manual.sensitivity],
                   marker: { color: "#f59e0b", size: 10, symbol: "diamond" },
-                  name: `Manual cutoff = ${result.manual.cutoff}`,
+                  name: `Manual cutoff = ${Number(result.manual.cutoff).toFixed(2)}`,
                 }] : []),
               ]}
               layout={{
@@ -1016,7 +1016,10 @@ export default function ROCPanel() {
                 legend: { font: { color: "#374151", size: 11 }, bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
                 annotations: [{
                   x: 0.98, y: 0.06, xref: "paper" as const, yref: "paper" as const,
-                  text: `AUC = ${result.auc}`, showarrow: false,
+                  text: result.auc_p != null
+                    ? `AUC = ${result.auc.toFixed(2)} · p = ${result.auc_p < 0.001 ? "<0.001" : result.auc_p.toFixed(3)}`
+                    : `AUC = ${result.auc.toFixed(2)}`,
+                  showarrow: false,
                   font: { color: "#374151", size: 13 },
                   bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1, borderpad: 5,
                   xanchor: "right" as const, yanchor: "bottom" as const,

@@ -651,9 +651,13 @@ def roc_analysis(req: ROCRequest):
         ),
         "result_text": (
             f"ROC analysis was performed for {req.score_column} predicting {req.outcome_column} (n = {len(df)}). "
-            f"The area under the curve was {auc:.3f}, indicating "
+            f"The area under the curve was {auc:.2f}"
+            + (f" (95% CI {ci_low:.2f}–{ci_high:.2f}, p = "
+               f"{'<0.001' if (p_auc is not None and p_auc < 0.001) else f'{p_auc:.3f}' if p_auc is not None else 'n/a'})"
+               if ci_low is not None and ci_high is not None else "")
+            + ", indicating "
             f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination. "
-            f"At the optimal cutoff ({optimal['cutoff']:.3f}, Youden's J), sensitivity was {optimal['sensitivity']*100:.1f}% "
+            f"At the optimal cutoff ({optimal['cutoff']:.2f}, Youden's J), sensitivity was {optimal['sensitivity']*100:.1f}% "
             f"and specificity was {optimal['specificity']*100:.1f}%."
         ),
     })
