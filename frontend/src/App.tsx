@@ -1,6 +1,6 @@
 import "./index.css";
-import { Component, useState, useRef, useEffect, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save } from "lucide-react";
+import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
@@ -55,6 +55,111 @@ const TABS = [
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "missing",     label: "Missing",     icon: Filter },
   { id: "code",        label: "Code",        icon: Terminal },
+];
+
+// Searchable catalog of every test / model / analysis exposed by the app,
+// keyed by the tab id where the test lives. The header search box matches
+// keywords case-insensitively across `name`, `aliases`, and `tab`; clicking
+// a result jumps to that tab. Aliases include short codes, alternative
+// names, and common typos so the user can find a test by whatever they
+// remember (e.g. "M-W", "U test" → Mann-Whitney; "lojistik" → Logistic).
+interface TestEntry {
+  name: string;
+  tab: string;
+  aliases?: string[];
+  group?: string;
+}
+
+const TEST_CATALOG: TestEntry[] = [
+  // Hypothesis (Tests tab)
+  { name: "One-sample t-test", tab: "tests", group: "Parametric", aliases: ["t test", "tek örneklem"] },
+  { name: "Independent t-test", tab: "tests", group: "Parametric", aliases: ["two sample t", "bağımsız t"] },
+  { name: "One-way ANOVA", tab: "tests", group: "Parametric", aliases: ["anova", "tek yönlü varyans"] },
+  { name: "ANCOVA", tab: "tests", group: "Parametric", aliases: ["covariance analysis"] },
+  { name: "Two-way ANOVA", tab: "tests", group: "Parametric", aliases: ["iki yönlü anova", "factorial"] },
+  { name: "Mann-Whitney U", tab: "tests", group: "Non-parametric", aliases: ["m-w", "u test", "wilcoxon rank"] },
+  { name: "Kruskal-Wallis", tab: "tests", group: "Non-parametric", aliases: ["kw", "nonparametric anova"] },
+  { name: "Jonckheere-Terpstra trend", tab: "tests", group: "Non-parametric", aliases: ["jt", "trend test", "tertil trend", "ordered"] },
+  { name: "Chi-square", tab: "tests", group: "Categorical", aliases: ["chi2", "ki kare"] },
+  { name: "Fisher's exact", tab: "tests", group: "Categorical", aliases: ["fisher exact"] },
+
+  // Categorical (Tests tab — under CategoricalTestsPanel; same hub)
+  { name: "Binomial test", tab: "tests", group: "Categorical" },
+  { name: "One-proportion z-test", tab: "tests", group: "Categorical" },
+  { name: "Two-proportions z-test", tab: "tests", group: "Categorical", aliases: ["two prop"] },
+  { name: "McNemar test", tab: "tests", group: "Paired", aliases: ["paired binary"] },
+  { name: "Cochran's Q", tab: "tests", group: "Paired", aliases: ["cochran q"] },
+  { name: "Mantel-Haenszel", tab: "tests", group: "Stratified", aliases: ["cmh", "common or"] },
+  { name: "Cochran-Armitage trend", tab: "tests", group: "Trend", aliases: ["ca trend", "doz cevap"] },
+
+  // Correlation
+  { name: "Pearson correlation", tab: "correlation", aliases: ["pearson r"] },
+  { name: "Spearman correlation", tab: "correlation", group: "Non-parametric", aliases: ["spearman rho"] },
+  { name: "Kendall tau", tab: "correlation" },
+
+  // ROC
+  { name: "ROC curve", tab: "roc", aliases: ["roc analysis", "auc"] },
+  { name: "DeLong AUC comparison", tab: "roc", aliases: ["delong", "auc compare"] },
+  { name: "Multi-curve ROC", tab: "roc", aliases: ["multi roc"] },
+  { name: "Combined ROC model", tab: "roc", aliases: ["combined model"] },
+
+  // Models
+  { name: "Linear Regression", tab: "models", aliases: ["lineer regresyon", "ols", "lm"] },
+  { name: "Logistic Regression", tab: "models", aliases: ["lojistik regresyon", "logit"] },
+  { name: "Firth Logistic (penalized)", tab: "models", aliases: ["firth", "penalized logistic", "rare events"] },
+  { name: "OR Table (Uni + Multi)", tab: "models", aliases: ["ortable", "or table"] },
+  { name: "Firth OR Table", tab: "models", aliases: ["firth ortable"] },
+  { name: "Poisson Regression", tab: "models", aliases: ["count regression", "irr"] },
+  { name: "Kaplan-Meier", tab: "models", aliases: ["km", "survival"] },
+  { name: "Cox Proportional Hazards", tab: "models", aliases: ["cox model", "hr", "survival regression"] },
+  { name: "Cox time-varying", tab: "models", aliases: ["cox tv", "time varying"] },
+  { name: "RCS Dose-Response", tab: "models", aliases: ["restricted cubic spline", "spline"] },
+  { name: "Cox-RCS (multivariable)", tab: "models", aliases: ["cox rcs", "multivariable spline"] },
+  { name: "Negative Binomial", tab: "models", aliases: ["nb regression"] },
+  { name: "Gamma GLM", tab: "models" },
+  { name: "Polynomial", tab: "models", aliases: ["polynomial regression"] },
+  { name: "Ordinal Logistic", tab: "models", aliases: ["proportional odds"] },
+  { name: "Mixed-effects (LMM)", tab: "models", aliases: ["lmm", "linear mixed"] },
+  { name: "GEE", tab: "models", aliases: ["generalized estimating equations"] },
+  { name: "Stepwise selection", tab: "models", aliases: ["forward backward stepwise"] },
+
+  // Visual
+  { name: "Polynomial fit (Visual)", tab: "visual", aliases: ["polynomial visual"] },
+  { name: "Random Forest", tab: "visual", aliases: ["rf", "random forest"] },
+
+  // PSM
+  { name: "Propensity Score Matching", tab: "psm", aliases: ["psm matching"] },
+  { name: "IPTW", tab: "psm", aliases: ["inverse probability weighting", "weighted"] },
+
+  // Survival Advanced (lives in Models tab as a sub-section)
+  { name: "Fine-Gray competing risks", tab: "models", aliases: ["competing risks", "shr", "subdistribution"] },
+  { name: "RMST", tab: "models", aliases: ["restricted mean survival time"] },
+  { name: "E-value", tab: "models", aliases: ["sensitivity unmeasured confounding"] },
+  { name: "Log-rank test", tab: "models", aliases: ["logrank", "km test"] },
+  { name: "Schoenfeld residuals", tab: "models", aliases: ["proportional hazards check", "ph"] },
+
+  // Summary / Descriptive
+  { name: "Descriptive statistics", tab: "summary", aliases: ["betimsel", "tanımlayıcı"] },
+  { name: "Histogram", tab: "summary" },
+  { name: "Boxplot", tab: "summary", aliases: ["kutu grafiği"] },
+  { name: "Violin plot", tab: "summary" },
+  { name: "Q-Q plot", tab: "summary", aliases: ["qq normality"] },
+
+  // Table 1
+  { name: "Table 1 (clinical baseline)", tab: "table1", aliases: ["baseline table", "tablo 1"] },
+
+  // Compute
+  { name: "Recode", tab: "compute", aliases: ["recoding"] },
+  { name: "Formula", tab: "compute" },
+  { name: "BMI / eGFR / CHA2DS2-VASc", tab: "compute", aliases: ["clinical calc"] },
+
+  // Missing
+  { name: "Missing data audit", tab: "missing", aliases: ["eksik veri", "mice", "imputation"] },
+
+  // Reliability / repeated (lives under tests too)
+  { name: "Cronbach’s alpha", tab: "tests", aliases: ["reliability"] },
+  { name: "Fleiss’ kappa", tab: "tests", aliases: ["agreement"] },
+  { name: "ICC", tab: "tests", aliases: ["intraclass correlation"] },
 ];
 
 /** Download via fetch + blob + anchor click. Iframe-based downloads swallow
@@ -268,6 +373,37 @@ export default function App() {
   // "ENABLE_CODE_RUNNER not set" case with an in-page disabled banner.
   const visibleTabs = TABS;
 
+  // Header test-search box state. The dropdown lists tests matching the
+  // current query against `name`, `aliases`, and `group` (case-insensitive,
+  // word-substring). Picking a match jumps to that tab. Closes on
+  // outside-click and on Escape so it never traps focus.
+  const [testQuery, setTestQuery] = useState("");
+  const [showTestSearch, setShowTestSearch] = useState(false);
+  const testSearchRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!showTestSearch) return;
+    const handler = (e: MouseEvent) => {
+      if (testSearchRef.current && !testSearchRef.current.contains(e.target as Node)) {
+        setShowTestSearch(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showTestSearch]);
+
+  const testMatches = useMemo(() => {
+    const q = testQuery.trim().toLowerCase();
+    if (!q) return [];
+    return TEST_CATALOG
+      .filter((t) => {
+        const hay = [t.name, t.group ?? "", ...(t.aliases ?? [])].join(" ").toLowerCase();
+        return q.split(/\s+/).every((tok) => hay.includes(tok));
+      })
+      .slice(0, 12);
+  }, [testQuery]);
+
+  const tabLabel = (id: string) => TABS.find((t) => t.id === id)?.label ?? id;
+
   const handleOpenNew = () => setShowSaveModal(true);
 
   const handleSave = async (fmt: "csv" | "xlsx" | "json") => {
@@ -330,6 +466,55 @@ export default function App() {
             <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
               {session.rows.toLocaleString()} × {session.columns.length}
             </span>
+          </div>
+
+          {/* Test / analysis search. Type a name (e.g. "ROC", "Cox", "Firth",
+              "Jonckheere") to find which tab it lives in; click a result
+              to jump there. Aliases include short codes and Turkish names
+              so "lojistik" → Logistic, "ki kare" → Chi-square. */}
+          <div className="relative w-72 max-w-xs flex-shrink-0" ref={testSearchRef}>
+            <div className="relative">
+              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+              <input
+                value={testQuery}
+                onChange={(e) => { setTestQuery(e.target.value); setShowTestSearch(true); }}
+                onFocus={() => setShowTestSearch(true)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setShowTestSearch(false); (e.target as HTMLInputElement).blur(); }
+                  if (e.key === "Enter" && testMatches.length > 0) {
+                    const top = testMatches[0];
+                    setActiveTab(top.tab);
+                    setShowTestSearch(false);
+                    setTestQuery("");
+                  }
+                }}
+                placeholder="Search tests / models…  (ROC, Cox, Firth, Jonckheere)"
+                className="w-full pl-7 pr-2 py-1 text-xs border border-gray-200 rounded-lg bg-white focus:outline-none focus:border-indigo-400 placeholder-gray-400"
+              />
+            </div>
+            {showTestSearch && testQuery.trim() && (
+              <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-xl z-50 max-h-96 overflow-y-auto">
+                {testMatches.length === 0 ? (
+                  <p className="text-xs text-gray-400 px-3 py-2">No match for "{testQuery}".</p>
+                ) : (
+                  testMatches.map((t, i) => (
+                    <button
+                      key={`${t.name}-${i}`}
+                      onClick={() => { setActiveTab(t.tab); setShowTestSearch(false); setTestQuery(""); }}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-1.5 text-left hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-b-0"
+                    >
+                      <span className="flex flex-col min-w-0">
+                        <span className="text-xs text-gray-800 truncate">{t.name}</span>
+                        {t.group && <span className="text-[10px] text-gray-400">{t.group}</span>}
+                      </span>
+                      <span className="text-[10px] text-indigo-600 bg-indigo-50 rounded px-1.5 py-0.5 flex-shrink-0">
+                        {tabLabel(t.tab)}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
