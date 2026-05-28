@@ -333,6 +333,7 @@ export default function SurvivalAdvancedPanel() {
       {/* ── Fine-Gray ── */}
       <Section title="Fine-Gray Competing Risks" description="Cumulative incidence function with competing events (Aalen-Johansen)">
         <ThreeCol
+          storageKey="SurvivalAdvanced.FineGray"
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
@@ -465,6 +466,7 @@ export default function SurvivalAdvancedPanel() {
       <Section title="Restricted Mean Survival Time (RMST)"
         description="Average event-free time over a fixed horizon τ — PH-free alternative to the hazard ratio. Robust when curves cross or the proportional-hazards assumption fails.">
         <ThreeCol
+          storageKey="SurvivalAdvanced.RMST"
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
@@ -619,6 +621,7 @@ export default function SurvivalAdvancedPanel() {
       {/* ── Landmark ── */}
       <Section title="Landmark Survival Analysis" description="Survival analysis conditional on surviving beyond a landmark time point">
         <ThreeCol
+          storageKey="SurvivalAdvanced.Landmark"
           left={
             <>
               <div className="grid grid-cols-1 gap-2">

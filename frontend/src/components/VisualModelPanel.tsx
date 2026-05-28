@@ -16,6 +16,7 @@ import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import PlotExporter from "./PlotExporter";
 import { fmtP } from "../lib/format";
+import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 // ── p-value formatter (centralised in lib/format.ts) ───────────────────────────
 const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
@@ -85,6 +86,8 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
   const pal    = usePalette();
   const td     = useTraceDefaults();
   const showGrid = useStore(s => s.showGrid);
+  const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
+    useResizableRightCol("VisualModelPanel.poly", 380);
 
   const [outcome,    setOutcome]    = useState(numCols[0] ?? "");
   const [predictor,  setPredictor]  = useState(numCols[1] ?? numCols[0] ?? "");
@@ -166,7 +169,19 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
 
         {/* Result */}
         {result && (
-          <div className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
+          <div
+            className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
+            style={{ ["--right-col" as any]: `${rightColW}px` }}
+          >
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title="Sürükle: orta / sağ sütun genişliği · Çift tık: sıfırla"
+              onPointerDown={onResizeStart}
+              onDoubleClick={onResizeReset}
+              className="hidden xl:block absolute top-0 bottom-0 w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize z-20 transition-colors"
+              style={{ right: `calc(${rightColW}px + 5px)` }}
+            />
             <div className="panel space-y-3 xl:col-start-2">
               <h4 className="font-semibold text-gray-900">{result.model}</h4>
               <StatCards pairs={[

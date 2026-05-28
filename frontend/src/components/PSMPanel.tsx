@@ -16,6 +16,7 @@ import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
+import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const smdColor = (smd: number) =>
@@ -210,6 +211,8 @@ function PSOverlapPlot({
 export default function PSMPanel() {
   const session  = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
+  const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
+    useResizableRightCol("PSMPanel.result", 480);
   if (!session) return null;
 
   const allCols = session.columns.map((c) => c.name);
@@ -730,7 +733,19 @@ export default function PSMPanel() {
       <div className="flex-1 min-w-0 overflow-y-auto space-y-4">
 
         {result ? (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
+          <div
+            className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
+            style={{ ["--right-col" as any]: `${rightColW}px` }}
+          >
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title="Sürükle: orta / sağ sütun genişliği · Çift tık: sıfırla"
+              onPointerDown={onResizeStart}
+              onDoubleClick={onResizeReset}
+              className="hidden xl:block absolute top-0 bottom-0 w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize z-20 transition-colors"
+              style={{ right: `calc(${rightColW}px + 5px)` }}
+            />
             {/* ── Summary banner ── PSM and IPTW share the balance flag
                 semantics but report different cohort metrics. */}
             <div className={`panel border-2 xl:col-start-2 ${result.balance_achieved ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>

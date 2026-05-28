@@ -8,6 +8,7 @@ import PlotExporter from "./PlotExporter";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES } from "../store";
 import { fmtP } from "../lib/format";
+import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -1477,6 +1478,8 @@ function ModelSummaryTable({ s }: { s: any }) {
 export default function ModelsPanel() {
   const session  = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
+  const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
+    useResizableRightCol("ModelsPanel.result", 480);
   if (!session) return null;
 
   const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
@@ -1938,7 +1941,20 @@ export default function ModelsPanel() {
         )}
 
         {result ? (
-          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_480px] gap-4 auto-rows-min items-start xl:grid-flow-dense">
+          <div
+            className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
+            style={{ ["--right-col" as any]: `${rightColW}px` }}
+          >
+            {/* Draggable column divider — desktop only */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title="Sürükle: orta / sağ sütun genişliği · Çift tık: sıfırla"
+              onPointerDown={onResizeStart}
+              onDoubleClick={onResizeReset}
+              className="hidden xl:block absolute top-0 bottom-0 w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize z-20 transition-colors"
+              style={{ right: `calc(${rightColW}px + 5px)` }}
+            />
             {/* Summary cards */}
             <div className="panel xl:col-start-2">
               <h4 className="font-semibold text-gray-900 mb-3">{result.model}</h4>
