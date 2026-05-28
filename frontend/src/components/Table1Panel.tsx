@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import api from "../api";
 import ResultExporter from "./ResultExporter";
@@ -173,6 +173,77 @@ export default function Table1Panel() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  // ── Table editing state ──────────────────────────────────────────────────
+  const [editRowIdx, setEditRowIdx] = useState<number | null>(null);
+  const [editRowVal, setEditRowVal] = useState("");
+  const editRowRef = useRef<HTMLInputElement>(null);
+  const [editGroupIdx, setEditGroupIdx] = useState<number | null>(null);
+  const [editGroupVal, setEditGroupVal] = useState("");
+  const editGroupRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { editRowRef.current?.select(); }, [editRowIdx]);
+  useEffect(() => { editGroupRef.current?.select(); }, [editGroupIdx]);
+
+  const hasGroups = !!(result && result.group_labels.length > 0);
+
+  const commitRowRename = () => {
+    if (editRowIdx == null || !result) return;
+    const trimmed = editRowVal.trim();
+    if (trimmed && trimmed !== result.rows[editRowIdx].variable) {
+      const rows = result.rows.map((r, i) =>
+        i === editRowIdx ? { ...r, variable: trimmed } : r
+      );
+      setResult({ ...result, rows });
+    }
+    setEditRowIdx(null);
+  };
+
+  const commitGroupRename = () => {
+    if (editGroupIdx == null || !result) return;
+    const trimmed = editGroupVal.trim();
+    const oldLabel = result.group_labels[editGroupIdx];
+    if (trimmed && trimmed !== oldLabel) {
+      const group_labels = result.group_labels.map((g, i) =>
+        i === editGroupIdx ? trimmed : g
+      );
+      const group_ns = { ...result.group_ns };
+      if (oldLabel in group_ns) {
+        group_ns[trimmed] = group_ns[oldLabel];
+        delete group_ns[oldLabel];
+      }
+      // Remap group_stats keys in every row
+      const rows = result.rows.map((row) => {
+        const group_stats = { ...row.group_stats };
+        if (oldLabel in group_stats) {
+          group_stats[trimmed] = group_stats[oldLabel];
+          delete group_stats[oldLabel];
+        }
+        const stat_rows = row.stat_rows?.map((sr) => {
+          const gs = { ...sr.group_stats };
+          if (oldLabel in gs) { gs[trimmed] = gs[oldLabel]; delete gs[oldLabel]; }
+          return { ...sr, group_stats: gs };
+        });
+        const sub_rows = row.sub_rows?.map((sr) => {
+          const gs = { ...sr.group_stats };
+          if (oldLabel in gs) { gs[trimmed] = gs[oldLabel]; delete gs[oldLabel]; }
+          return { ...sr, group_stats: gs };
+        });
+        return { ...row, group_stats, stat_rows, sub_rows };
+      });
+      setResult({ ...result, group_labels, group_ns, rows });
+    }
+    setEditGroupIdx(null);
+  };
+
+  const moveRow = (from: number, dir: -1 | 1) => {
+    if (!result) return;
+    const to = from + dir;
+    if (to < 0 || to >= result.rows.length) return;
+    const rows = [...result.rows];
+    [rows[from], rows[to]] = [rows[to], rows[from]];
+    setResult({ ...result, rows });
+  };
+
   useEffect(() => {
     setSelected(new Set(allCols.filter((c) => c !== groupCol)));
     setKindOverrides({});
@@ -274,8 +345,6 @@ export default function Table1Panel() {
   const filteredCols = allCols.filter(
     (c) => c !== groupCol && c.toLowerCase().includes(search.toLowerCase())
   );
-  const hasGroups = result && result.group_labels.length > 0;
-
   const statsLabel = selectedStats.has("auto")
     ? "Auto"
     : `${selectedStats.size} stat${selectedStats.size > 1 ? "s" : ""}`;
@@ -479,10 +548,27 @@ export default function Table1Panel() {
                       Overall
                       <br /><span className="text-xs font-normal text-gray-400">n = {result.total_n}</span>
                     </th>
-                    {result.group_labels.map((g) => (
+                    {result.group_labels.map((g, gi) => (
                       <th key={g} className="text-center px-4 py-3 text-indigo-600 font-semibold border-r border-gray-200">
                         {result.group_column && <span className="text-gray-400 text-xs font-normal">{result.group_column} = </span>}
-                        {g}
+                        {editGroupIdx === gi ? (
+                          <input
+                            ref={editGroupRef}
+                            value={editGroupVal}
+                            onChange={(e) => setEditGroupVal(e.target.value)}
+                            onBlur={commitGroupRename}
+                            onKeyDown={(e) => { if (e.key === "Enter") commitGroupRename(); if (e.key === "Escape") setEditGroupIdx(null); }}
+                            className="w-24 text-center text-sm font-semibold text-indigo-600 border border-indigo-300 rounded px-1 py-0.5 bg-white outline-none"
+                          />
+                        ) : (
+                          <span
+                            className="cursor-pointer hover:underline hover:decoration-indigo-300"
+                            onDoubleClick={() => { setEditGroupIdx(gi); setEditGroupVal(g); }}
+                            title="Double-click to rename"
+                          >
+                            {g}
+                          </span>
+                        )}
                         <br /><span className="text-xs font-normal text-gray-400">n = {result.group_ns[g] ?? ""}</span>
                       </th>
                     ))}
@@ -510,8 +596,35 @@ export default function Table1Panel() {
                             ${si === 0 ? "border-gray-200" : "border-gray-100"}
                             ${row.significant && si === 0 ? "bg-amber-50/30" : ""}`}>
                           <td className={`px-4 py-2 border-r border-gray-200
-                            ${si === 0 ? "font-medium text-gray-900" : ""}`}>
-                            {si === 0 ? row.variable : ""}
+                            ${si === 0 ? "font-medium text-gray-900 group/var" : ""}`}>
+                            {si === 0 ? (
+                              editRowIdx === ri ? (
+                                <input
+                                  ref={editRowRef}
+                                  value={editRowVal}
+                                  onChange={(e) => setEditRowVal(e.target.value)}
+                                  onBlur={commitRowRename}
+                                  onKeyDown={(e) => { if (e.key === "Enter") commitRowRename(); if (e.key === "Escape") setEditRowIdx(null); }}
+                                  className="w-full text-sm font-medium border border-indigo-300 rounded px-1 py-0.5 bg-white outline-none"
+                                />
+                              ) : (
+                                <span className="flex items-center gap-1">
+                                  <span className="opacity-0 group-hover/var:opacity-100 flex flex-col -my-1 text-gray-300">
+                                    <button onClick={() => moveRow(ri, -1)} disabled={ri === 0}
+                                      className="hover:text-indigo-500 disabled:opacity-20 leading-none text-[10px]">▲</button>
+                                    <button onClick={() => moveRow(ri, 1)} disabled={ri === result.rows.length - 1}
+                                      className="hover:text-indigo-500 disabled:opacity-20 leading-none text-[10px]">▼</button>
+                                  </span>
+                                  <span
+                                    className="cursor-pointer hover:underline hover:decoration-indigo-300"
+                                    onDoubleClick={() => { setEditRowIdx(ri); setEditRowVal(row.variable); }}
+                                    title="Double-click to rename · arrows to reorder"
+                                  >
+                                    {row.variable}
+                                  </span>
+                                </span>
+                              )
+                            ) : null}
                           </td>
                           <td className="px-3 py-1.5 text-center text-xs text-gray-400 border-r border-gray-200">
                             {sr.label}
@@ -602,8 +715,35 @@ export default function Table1Panel() {
                       </React.Fragment>
                     ) : (
                       <React.Fragment key={`cat-${ri}`}>
-                        <tr key={`${ri}-hdr`} className="border-t-2 border-gray-200 bg-gray-50">
-                          <td className="px-4 py-2 font-semibold text-indigo-600 border-r border-gray-200">{row.variable}</td>
+                        <tr key={`${ri}-hdr`} className="border-t-2 border-gray-200 bg-gray-50 group/cat">
+                          <td className="px-4 py-2 font-semibold text-indigo-600 border-r border-gray-200">
+                            {editRowIdx === ri ? (
+                              <input
+                                ref={editRowRef}
+                                value={editRowVal}
+                                onChange={(e) => setEditRowVal(e.target.value)}
+                                onBlur={commitRowRename}
+                                onKeyDown={(e) => { if (e.key === "Enter") commitRowRename(); if (e.key === "Escape") setEditRowIdx(null); }}
+                                className="w-full text-sm font-semibold text-indigo-600 border border-indigo-300 rounded px-1 py-0.5 bg-white outline-none"
+                              />
+                            ) : (
+                              <span className="flex items-center gap-1">
+                                <span className="opacity-0 group-hover/cat:opacity-100 flex flex-col -my-1 text-gray-300">
+                                  <button onClick={() => moveRow(ri, -1)} disabled={ri === 0}
+                                    className="hover:text-indigo-500 disabled:opacity-20 leading-none text-[10px]">▲</button>
+                                  <button onClick={() => moveRow(ri, 1)} disabled={ri === result.rows.length - 1}
+                                    className="hover:text-indigo-500 disabled:opacity-20 leading-none text-[10px]">▼</button>
+                                </span>
+                                <span
+                                  className="cursor-pointer hover:underline hover:decoration-indigo-300"
+                                  onDoubleClick={() => { setEditRowIdx(ri); setEditRowVal(row.variable); }}
+                                  title="Double-click to rename · arrows to reorder"
+                                >
+                                  {row.variable}
+                                </span>
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-2 text-center text-xs text-gray-400 border-r border-gray-200">n (%)</td>
                           <td className="px-4 py-2 text-center text-xs text-gray-400 border-r border-gray-200">n = {row.overall_n}</td>
                           {result.group_labels.map((g) => {
