@@ -662,9 +662,12 @@ function ForestPlot({ result, modelType, outcome }: {
   const AB = { showarrow: false, xanchor: "left" as const, yanchor: "middle" as const };
   const HDR = { size: 9, color: "#374151" };
 
-  // Directional arrow labels below x-axis (within forest domain)
-  // forestRight = right edge of forest domain in paper coords
-  const dirAnnotations = (forestRight: number, yPos = -0.10) => [
+  // Directional arrow labels below x-axis (within forest domain).
+  // forestRight = right edge of forest domain in paper coords.
+  // Pushed below the x-axis tick numbers (which sit at roughly y = -0.05)
+  // so "◀ Reduces risk" and "Increases risk ▶" no longer overlap with
+  // 0.4, 0.6, … 2.4 tick labels.
+  const dirAnnotations = (forestRight: number, yPos = -0.20) => [
     {
       ...AB, xref: "paper" as const, yref: "paper" as const,
       x: 0.02, y: yPos, xanchor: "left" as const,
@@ -835,8 +838,11 @@ function ForestPlot({ result, modelType, outcome }: {
     const xLabel = opts.customXLabel
       || `${metric === "OR" ? "Odds Ratio" : "Hazard Ratio"} (95% CI)${splitLayout ? "" : (outcome ? ` — Outcome: ${outcome}` : "")}, log scale`;
     // Push legend BELOW the x-axis title so it never sits inside the data
-    // area. Bottom margin grows when the legend is on to make room.
-    const bottomPad = opts.showLegend ? 110 : 60;
+    // area. Bottom margin grows when the legend is on to make room. Floor
+    // raised so the "◀ Reduces risk / Increases risk ▶" annotations at
+    // y=-0.20 land below the x-axis tick numbers rather than on top of
+    // them.
+    const bottomPad = opts.showLegend ? 130 : 80;
 
     return (
       <div className="relative" ref={forestRef}>
@@ -987,7 +993,7 @@ function ForestPlot({ result, modelType, outcome }: {
         ...FOREST_BASE,
         height: effHeight,
         autosize: true,
-        margin: { t: opts.customTitle ? (opts.customSubtitle ? 70 : 50) : 20, r: 20, b: opts.showLegend ? 110 : 70, l: 180 },
+        margin: { t: opts.customTitle ? (opts.customSubtitle ? 70 : 50) : 20, r: 20, b: opts.showLegend ? 130 : 90, l: 180 },
         title: opts.customTitle
           ? { text: titleHtml, font: { size: 12, color: "#1f2937" }, x: 0.5, xanchor: "center" as const }
           : undefined,
