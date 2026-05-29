@@ -40,6 +40,7 @@ import RefreshAppButton from "./components/RefreshAppButton";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 import RCSPanel from "./components/RCSPanel";
 import MLPanel from "./components/MLPanel";
+import TimeSeriesPanel from "./components/TimeSeriesPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
 
@@ -126,6 +127,9 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "Random Forest", tab: "models", group: "Machine Learning", aliases: ["rf", "random orman", "ensemble", "ml", "makine öğrenmesi", "predictive"] },
   { name: "Gradient Boosting", tab: "models", group: "Machine Learning", aliases: ["gbm", "boosting", "ml", "predictive", "xgboost"] },
   { name: "Feature importance", tab: "models", group: "Machine Learning", aliases: ["permutation importance", "değişken önemi", "shap"] },
+  { name: "ARIMA / SARIMA forecast", tab: "models", group: "Time Series", aliases: ["arima", "sarima", "zaman serisi", "time series", "forecast", "tahmin"] },
+  { name: "Seasonal decomposition (STL)", tab: "models", group: "Time Series", aliases: ["stl", "decompose", "seasonal", "trend", "mevsimsellik"] },
+  { name: "Stationarity (ADF / KPSS) + ACF/PACF", tab: "models", group: "Time Series", aliases: ["adf", "kpss", "stationarity", "acf", "pacf", "durağanlık"] },
 
   // Visual
   { name: "Polynomial fit (Visual)", tab: "visual", aliases: ["polynomial visual"] },
@@ -307,11 +311,11 @@ function ComputeCombo() {
 }
 
 function ModelsCombo() {
-  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml">("regression");
+  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml" | "timeseries">("regression");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"]] as const).map(([id, label]) => (
+        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"], ["timeseries", "Time Series"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -320,11 +324,12 @@ function ModelsCombo() {
           </button>
         ))}
       </div>
-      <div className="flex-1 p-4 overflow-y-auto">
-        {sub === "regression" ? <ModelsPanel />
-          : sub === "rcs" ? <RCSPanel />
-          : sub === "ml" ? <MLPanel />
-          : <SurvivalAdvancedPanel />}
+      <div className="flex-1 overflow-y-auto">
+        {sub === "regression" ? <div className="p-4"><ModelsPanel /></div>
+          : sub === "rcs" ? <div className="p-4"><RCSPanel /></div>
+          : sub === "ml" ? <div className="p-4"><MLPanel /></div>
+          : sub === "timeseries" ? <TimeSeriesPanel />
+          : <div className="p-4"><SurvivalAdvancedPanel /></div>}
       </div>
     </div>
   );

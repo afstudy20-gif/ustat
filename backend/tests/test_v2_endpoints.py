@@ -370,3 +370,42 @@ def test_ml_gradient_boosting_regression(client, sid):
     assert d["task"] == "regression"
     for k in ("r2", "rmse", "mae", "scatter", "importance"):
         assert k in d
+
+
+# 21. Time series — ARIMA fit + forecast
+def test_ts_arima(client, sid):
+    r = client.post("/api/timeseries/arima", json={
+        "session_id": sid, "value_col": "AGE",
+        "p": 1, "d": 1, "q": 1, "forecast_steps": 6,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["order"] == [1, 1, 1]
+    assert "aic" in d and "bic" in d
+    assert len(d["forecast"]) == 6
+    assert all("ci_low" in f and "ci_high" in f for f in d["forecast"])
+    assert len(d["coefficients"]) >= 1
+
+
+# 22. Time series — stationarity ADF + KPSS + ACF/PACF
+def test_ts_stationarity(client, sid):
+    r = client.post("/api/timeseries/stationarity", json={
+        "session_id": sid, "value_col": "AGE", "n_lags": 15,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert "adf_p" in d and "kpss_p" in d
+    assert isinstance(d["adf_stationary"], bool)
+    assert len(d["acf"]) == 16 and len(d["pacf"]) == 16
+
+
+# 23. Time series — decomposition
+def test_ts_decompose(client, sid):
+    r = client.post("/api/timeseries/decompose", json={
+        "session_id": sid, "value_col": "AGE", "period": 4, "method": "stl",
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    for k in ("observed", "trend", "seasonal", "resid"):
+        assert k in d and len(d[k]) == d["n"]
+    assert "strength_trend" in d and "strength_seasonal" in d

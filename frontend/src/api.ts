@@ -56,6 +56,11 @@ export const runMelt          = (data: object) => api.post("/api/models/melt", d
 export const runRandomForest      = (data: object) => api.post("/api/ml/random_forest", data);
 export const runGradientBoosting  = (data: object) => api.post("/api/ml/gradient_boosting", data);
 export const runFeatureImportance = (data: object) => api.post("/api/ml/feature_importance", data);
+
+// Time series
+export const runArima        = (data: object) => api.post("/api/timeseries/arima", data);
+export const runDecompose    = (data: object) => api.post("/api/timeseries/decompose", data);
+export const runStationarity = (data: object) => api.post("/api/timeseries/stationarity", data);
 export const refreshSession   = (sessionId: string) => api.get(`/api/stats/${sessionId}/refresh`);
 export const runPSM           = (data: object) => api.post("/api/models/psm", data);
 export const runIPTW          = (data: object) => api.post("/api/models/iptw", data);
