@@ -539,3 +539,31 @@ def test_gatekeeping_gate_closes(client):
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["families"][1]["hypotheses"][0]["reject"] is False
+
+
+# 28. Non-inferiority margin test
+def test_noninferiority_binary_rr(client, synth):
+    # event ~ DM; treat DM as the arm, event as outcome
+    r = client.post("/api/stats/noninferiority", json={
+        "session_id": make_session(synth, "ni_session"),
+        "outcome_col": "event", "group_col": "DM",
+        "outcome_type": "binary", "effect": "RR", "margin": 1.20, "bound": "upper", "alpha": 0.05,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ci_level"] == 90.0           # one-sided 0.05 -> 90% CI
+    assert "estimate" in d and "ci_low" in d and "ci_high" in d
+    assert isinstance(d["non_inferior"], bool)
+    assert "p_noninferiority" in d
+
+
+def test_noninferiority_continuous(client, synth):
+    r = client.post("/api/stats/noninferiority", json={
+        "session_id": make_session(synth, "ni_session2"),
+        "outcome_col": "LDL", "group_col": "SEX",
+        "outcome_type": "continuous", "margin": 20.0, "bound": "upper", "alpha": 0.05,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["effect"] == "Mean difference"
+    assert d["ci_level"] == 90.0

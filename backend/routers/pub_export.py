@@ -443,6 +443,7 @@ _ACTION_HUMAN: Dict[str, str] = {
     "weighted_descriptive": "Weighted (survey) descriptive statistics + weighted t-test",
     "recurrent_lwyy": "Recurrent-event LWYY model (modified Andersen-Gill, cluster-robust SE)",
     "gatekeeping": "Multistage gatekeeping (truncated Hochberg / Holm) for hierarchical hypotheses",
+    "noninferiority": "Non-inferiority margin test (one-sided α / two-sided (1−2α) CI)",
     "calibration": "Logistic calibration (slope/intercept) + Hosmer-Lemeshow goodness-of-fit",
     "hosmer_lemeshow": "Hosmer-Lemeshow goodness-of-fit test",
     "dca": "Decision curve analysis (Vickers & Elkin 2006)",

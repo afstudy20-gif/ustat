@@ -65,6 +65,9 @@ export const runStationarity = (data: object) => api.post("/api/timeseries/stati
 // Weighted descriptives (survey weights)
 export const runWeightedDescriptive = (data: object) => api.post("/api/stats/weighted_descriptive", data);
 
+// Non-inferiority / margin testing
+export const runNonInferiority = (data: object) => api.post("/api/stats/noninferiority", data);
+
 // Multiplicity / gatekeeping
 export const runGatekeeping = (data: object) => api.post("/api/multiplicity/gatekeeping", data);
 

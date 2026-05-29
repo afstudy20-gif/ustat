@@ -3097,3 +3097,196 @@ def weighted_descriptive(req: WeightedDescriptiveRequest):
             + (f"svyttest({req.value_cols[0]} ~ {req.group_col}, des)\n" if req.group_col else "")
         ),
     })
+
+
+# ── Non-inferiority / superiority / equivalence (margin testing) ──────────────
+#
+# Regulatory-style margin testing for two-arm trials (ITT or per-protocol — the
+# user supplies the relevant analysis dataset). A one-sided α corresponds to a
+# two-sided (1 − 2α) confidence interval, the standard non-inferiority
+# convention (α = 0.05 → 90% CI). Supports a binary outcome (risk ratio / risk
+# difference / odds ratio) or a continuous outcome (mean difference).
+#
+# Non-inferiority is concluded from the appropriate CI bound vs the prespecified
+# margin:
+#   • bound = "upper": non-inferior if the upper CI bound < margin
+#       (event is harmful, margin > 1 for RR/OR or > 0 for RD/mean-diff)
+#   • bound = "lower": non-inferior if the lower CI bound > margin
+#       (preserve benefit, margin < 1 or < 0)
+
+
+class NonInferiorityRequest(BaseModel):
+    session_id: str
+    outcome_col: str
+    group_col: str
+    test_group: Optional[str] = None          # the new / experimental arm
+    ref_group: Optional[str] = None           # the active control / reference
+    outcome_type: str = "binary"              # binary | continuous
+    effect: str = "RR"                        # binary: RR | RD | OR
+    margin: float = 1.20
+    bound: str = "upper"                      # "upper" | "lower"
+    alpha: float = 0.05                       # ONE-SIDED alpha (→ (1−2α) CI)
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/noninferiority")
+def noninferiority(req: NonInferiorityRequest):
+    df = _get_df(req.session_id)
+    for c in [req.outcome_col, req.group_col]:
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not (0.0 < req.alpha < 0.5):
+        raise HTTPException(status_code=422, detail="One-sided alpha must be in (0, 0.5).")
+    if req.bound not in ("upper", "lower"):
+        raise HTTPException(status_code=422, detail="bound must be 'upper' or 'lower'.")
+
+    cols = [req.outcome_col, req.group_col]
+    work = apply_imputation(df[cols], cols, req.imputation or "listwise").dropna()
+    groups = work[req.group_col].astype(str)
+    levels = sorted(groups.unique().tolist())
+    if len(levels) != 2:
+        raise HTTPException(status_code=422,
+            detail=f"Group column must have exactly 2 levels; found {len(levels)}: {levels}")
+    test_g = str(req.test_group) if req.test_group is not None else levels[1]
+    ref_g = str(req.ref_group) if req.ref_group is not None else levels[0]
+    if test_g not in levels or ref_g not in levels or test_g == ref_g:
+        raise HTTPException(status_code=422, detail=f"test_group / ref_group must be the 2 distinct levels {levels}.")
+
+    z_one = float(scipy_stats.norm.ppf(1 - req.alpha))
+    ci_level = round((1 - 2 * req.alpha) * 100, 1)
+    log_margin = None
+    is_log = False
+
+    if req.outcome_type == "binary":
+        y = pd.to_numeric(work[req.outcome_col], errors="coerce")
+        if set(pd.unique(y.dropna())) - {0.0, 1.0}:
+            raise HTTPException(status_code=422, detail="Binary outcome must be coded 0/1.")
+        t = y[groups == test_g]; r = y[groups == ref_g]
+        n1, n2 = int(t.notna().sum()), int(r.notna().sum())
+        x1, x2 = int(t.sum()), int(r.sum())
+        p1, p2 = x1 / n1, x2 / n2
+        eff = req.effect.upper()
+        if eff == "RD":
+            est = p1 - p2
+            se = float(np.sqrt(p1 * (1 - p1) / n1 + p2 * (1 - p2) / n2))
+            lo, hi = est - z_one * se, est + z_one * se
+            est_disp, lo_disp, hi_disp = est, lo, hi
+        elif eff == "OR":
+            is_log = True
+            a, b, c, d = x1, n1 - x1, x2, n2 - x2
+            if min(a, b, c, d) == 0:
+                a, b, c, d = a + 0.5, b + 0.5, c + 0.5, d + 0.5
+            le = np.log((a * d) / (b * c))
+            se = float(np.sqrt(1 / a + 1 / b + 1 / c + 1 / d))
+            lo, hi = le - z_one * se, le + z_one * se
+            est_disp, lo_disp, hi_disp = float(np.exp(le)), float(np.exp(lo)), float(np.exp(hi))
+            log_margin = float(np.log(req.margin))
+        else:  # RR
+            is_log = True
+            if x1 == 0 or x2 == 0:
+                x1a, x2a = x1 + 0.5, x2 + 0.5
+                n1a, n2a = n1 + 0.5, n2 + 0.5
+            else:
+                x1a, x2a, n1a, n2a = x1, x2, n1, n2
+            r1, r2 = x1a / n1a, x2a / n2a
+            le = np.log(r1 / r2)
+            se = float(np.sqrt((1 - r1) / x1a + (1 - r2) / x2a))
+            lo, hi = le - z_one * se, le + z_one * se
+            est_disp, lo_disp, hi_disp = float(np.exp(le)), float(np.exp(lo)), float(np.exp(hi))
+            log_margin = float(np.log(req.margin))
+        detail = {"n_test": n1, "n_ref": n2, "events_test": x1, "events_ref": x2,
+                  "p_test": round(p1, 4), "p_ref": round(p2, 4)}
+        scale_point = le if is_log else est
+        scale_se = se
+    elif req.outcome_type == "continuous":
+        from statsmodels.stats.weightstats import CompareMeans, DescrStatsW
+        y = pd.to_numeric(work[req.outcome_col], errors="coerce")
+        t = y[groups == test_g].dropna().values.astype(float)
+        r = y[groups == ref_g].dropna().values.astype(float)
+        if len(t) < 2 or len(r) < 2:
+            raise HTTPException(status_code=422, detail="Each arm needs ≥ 2 observations.")
+        cm = CompareMeans(DescrStatsW(t), DescrStatsW(r))
+        est = float(t.mean() - r.mean())
+        lo, hi = cm.tconfint_diff(alpha=2 * req.alpha, usevar="unequal")
+        se = (hi - lo) / (2 * z_one)
+        est_disp, lo_disp, hi_disp = est, float(lo), float(hi)
+        detail = {"n_test": len(t), "n_ref": len(r),
+                  "mean_test": round(float(t.mean()), 4), "mean_ref": round(float(r.mean()), 4)}
+        scale_point, scale_se = est, se
+        eff = "Mean difference"
+    else:
+        raise HTTPException(status_code=422, detail="outcome_type must be 'binary' or 'continuous'.")
+
+    # NI verdict + one-sided p-value on the analysis scale (log for RR/OR).
+    m_scale = (log_margin if is_log else req.margin)
+    if req.bound == "upper":
+        non_inferior = hi_disp < req.margin
+        z = (m_scale - scale_point) / scale_se if scale_se > 0 else 0.0   # H0: effect ≥ margin
+        p_ni = float(scipy_stats.norm.cdf(z))
+        rule = f"upper {ci_level}% CI bound ({round(hi_disp, 4)}) < margin ({req.margin})"
+    else:
+        non_inferior = lo_disp > req.margin
+        z = (scale_point - m_scale) / scale_se if scale_se > 0 else 0.0   # H0: effect ≤ margin
+        p_ni = float(scipy_stats.norm.cdf(z))
+        rule = f"lower {ci_level}% CI bound ({round(lo_disp, 4)}) > margin ({req.margin})"
+
+    interp = (
+        f"Non-inferiority test ({eff}, {test_g} vs {ref_g}). "
+        f"{eff} = {round(est_disp, 4)} ({ci_level}% CI {round(lo_disp, 4)}–{round(hi_disp, 4)}); "
+        f"prespecified margin = {req.margin}. One-sided α = {req.alpha} "
+        f"(equivalently a two-sided {ci_level}% CI). "
+        + (f"Non-inferiority DEMONSTRATED — {rule}, p = {'<0.001' if p_ni < 0.001 else round(p_ni, 4)}."
+           if non_inferior else
+           f"Non-inferiority NOT demonstrated — {rule} fails (p = {round(p_ni, 4)}).")
+    )
+
+    try:
+        store.log_action(req.session_id, "noninferiority", {
+            "outcome_col": req.outcome_col, "group_col": req.group_col,
+            "effect": eff, "margin": req.margin, "bound": req.bound, "alpha": req.alpha,
+        })
+    except Exception:
+        pass
+
+    return _sanitize({
+        "test": "Non-inferiority (margin) test",
+        "outcome_type": req.outcome_type,
+        "effect": eff,
+        "test_group": test_g, "ref_group": ref_g,
+        "estimate": round(est_disp, 5),
+        "ci_level": ci_level,
+        "ci_low": round(lo_disp, 5),
+        "ci_high": round(hi_disp, 5),
+        "margin": req.margin,
+        "bound": req.bound,
+        "alpha_one_sided": req.alpha,
+        "non_inferior": bool(non_inferior),
+        "p_noninferiority": round(p_ni, 6),
+        **detail,
+        "assumptions": [
+            {"name": "Analysis population", "met": True,
+             "detail": "Provide the ITT (or per-protocol) dataset — the test runs on the loaded rows as supplied."},
+            {"name": "One-sided ↔ CI correspondence", "met": True,
+             "detail": f"One-sided α = {req.alpha} corresponds to a two-sided {ci_level}% CI (regulatory convention)."},
+            {"name": "Large-sample normal approx.", "met": (detail.get('n_test', 99) >= 10 and detail.get('n_ref', 99) >= 10),
+             "detail": "Wald / log-Wald intervals assume adequate per-arm counts."},
+        ],
+        "result_text": interp,
+        "interpretation": interp,
+        "export_rows": [
+            ["Metric", "Value"],
+            [f"{eff} ({test_g} vs {ref_g})", round(est_disp, 5)],
+            [f"{ci_level}% CI", f"{round(lo_disp, 4)} – {round(hi_disp, 4)}"],
+            ["Margin", req.margin],
+            ["Bound tested", req.bound],
+            ["One-sided alpha", req.alpha],
+            ["Non-inferior", "Yes" if non_inferior else "No"],
+            ["p (non-inferiority)", round(p_ni, 6)],
+        ],
+        "r_code": (
+            "# Non-inferiority: one-sided alpha = "
+            f"{req.alpha} ↔ two-sided {ci_level}% CI\n"
+            + ("library(epitools); riskratio(table)  # RR + CI\n" if req.effect.upper() == 'RR' and req.outcome_type == 'binary' else "")
+            + f"# Non-inferior if {req.bound} {ci_level}% CI bound vs margin {req.margin}."
+        ),
+    })
