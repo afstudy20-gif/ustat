@@ -42,6 +42,7 @@ import RCSPanel from "./components/RCSPanel";
 import MLPanel from "./components/MLPanel";
 import TimeSeriesPanel from "./components/TimeSeriesPanel";
 import MetaPanel from "./components/MetaPanel";
+import WeightedStatsPanel from "./components/WeightedStatsPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
 
@@ -140,6 +141,9 @@ const TEST_CATALOG: TestEntry[] = [
   // PSM
   { name: "Propensity Score Matching", tab: "psm", aliases: ["psm matching"] },
   { name: "IPTW", tab: "psm", aliases: ["inverse probability weighting", "weighted"] },
+
+  // Weighted / survey
+  { name: "Weighted descriptives (survey weights)", tab: "summary", group: "Weighted", aliases: ["weighted mean", "survey", "sampling weights", "ağırlıklı", "kish", "horvitz"] },
 
   // Meta-analysis
   { name: "Meta-analysis (random / fixed effects)", tab: "meta", group: "Meta-analysis", aliases: ["meta analiz", "pooled", "forest", "dersimonian", "random effects"] },
@@ -313,6 +317,27 @@ function ComputeCombo() {
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex-1 p-4 overflow-y-auto">
         <ComputePanel />
+      </div>
+    </div>
+  );
+}
+
+function SummaryCombo() {
+  const [sub, setSub] = useState<"descriptive" | "weighted">("descriptive");
+  return (
+    <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+        {([["descriptive", "Descriptive"], ["weighted", "Weighted (survey)"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSub(id)}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+            }`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        {sub === "descriptive" ? <DescriptivePanel /> : <WeightedStatsPanel />}
       </div>
     </div>
   );
@@ -659,7 +684,7 @@ export default function App() {
       <main className="flex-1 overflow-hidden flex flex-col">
         <ErrorBoundary key={activeTab}>
           {activeTab === "data"        && <div className="flex-1 p-4 overflow-hidden flex flex-col" style={{minHeight:0}}><DataTable /></div>}
-          {activeTab === "summary"     && <DescriptivePanel />}
+          {activeTab === "summary"     && <SummaryCombo />}
           {activeTab === "table1"      && <Table1Panel />}
           {activeTab === "tests"       && <TestsCombo />}
           {activeTab === "correlation" && <div className="flex-1 p-4 overflow-y-auto"><CorrelationPanel /></div>}

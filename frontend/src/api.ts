@@ -62,6 +62,9 @@ export const runArima        = (data: object) => api.post("/api/timeseries/arima
 export const runDecompose    = (data: object) => api.post("/api/timeseries/decompose", data);
 export const runStationarity = (data: object) => api.post("/api/timeseries/stationarity", data);
 
+// Weighted descriptives (survey weights)
+export const runWeightedDescriptive = (data: object) => api.post("/api/stats/weighted_descriptive", data);
+
 // Meta-analysis (study-level)
 export const runMetaAnalyze    = (data: object) => api.post("/api/meta/analyze", data);
 export const runMetaSubgroup   = (data: object) => api.post("/api/meta/subgroup", data);

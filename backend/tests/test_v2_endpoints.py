@@ -447,3 +447,22 @@ def test_meta_bias(client):
     d = r.json()
     assert "egger_p" in d and "trim_fill_missing" in d
     assert len(d["funnel"]) == 5
+
+
+# 25. Weighted descriptives (survey weights)
+def test_weighted_descriptive(client, synth):
+    # add a weight column to the synth fixture via a fresh session
+    df = synth.copy()
+    rngw = np.random.default_rng(11)
+    df["wt"] = rngw.uniform(0.5, 3.0, len(df))
+    s = make_session(df, "weighted_session")
+    r = client.post("/api/stats/weighted_descriptive", json={
+        "session_id": s, "weight_col": "wt", "value_cols": ["AGE", "LDL", "DM"], "group_col": "SEX",
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    rows = {x["column"]: x for x in d["results"]}
+    assert "AGE" in rows and "w_mean" in rows["AGE"] and "ess_kish" in rows["AGE"]
+    # DM is binary -> weighted proportion present
+    assert "w_proportion" in rows["DM"]
+    assert d["comparison"] is not None and "p" in d["comparison"]

@@ -2938,3 +2938,162 @@ def _power_result_text(req, result) -> str:
             f"Effects smaller than this will likely be missed."
         )
     return ""
+
+
+# ── Weighted descriptive statistics (survey / sampling weights) ───────────────
+#
+# Weights-only design-based estimation (no strata / cluster yet). Covers the
+# common case where each row carries a sampling or post-stratification weight.
+# Weighted mean / SD / SE / 95% CI and Kish's effective sample size come from
+# statsmodels DescrStatsW; weighted quantiles are interpolated on the sorted
+# cumulative-weight grid; a binary column additionally gets a Horvitz-Thompson
+# weighted proportion. With a 2-level group column the endpoint also returns a
+# weighted mean difference + DescrStatsW two-sample t-test.
+
+
+class WeightedDescriptiveRequest(BaseModel):
+    session_id: str
+    value_cols: List[str]
+    weight_col: str
+    group_col: Optional[str] = None
+    imputation: Optional[str] = "listwise"
+
+
+def _weighted_quantile(values: np.ndarray, weights: np.ndarray, q: float) -> float:
+    order = np.argsort(values)
+    v = values[order]
+    w = weights[order]
+    cw = np.cumsum(w) - 0.5 * w
+    cw /= np.sum(w)
+    return float(np.interp(q, cw, v))
+
+
+@router.post("/weighted_descriptive")
+def weighted_descriptive(req: WeightedDescriptiveRequest):
+    from statsmodels.stats.weightstats import DescrStatsW
+
+    df_full = _get_df(req.session_id)
+    for c in [req.weight_col, *req.value_cols] + ([req.group_col] if req.group_col else []):
+        if c not in df_full.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not req.value_cols:
+        raise HTTPException(status_code=422, detail="Select at least one value column.")
+
+    cols = [req.weight_col, *req.value_cols] + ([req.group_col] if req.group_col else [])
+    df = apply_imputation(df_full[cols], cols, req.imputation or "listwise").reset_index(drop=True)
+    w_all = pd.to_numeric(df[req.weight_col], errors="coerce")
+    if (w_all <= 0).any() or w_all.isna().all():
+        # Drop non-positive / missing weights row-wise rather than failing hard.
+        pass
+
+    results: List[dict] = []
+    for col in req.value_cols:
+        x = pd.to_numeric(df[col], errors="coerce")
+        mask = x.notna() & w_all.notna() & (w_all > 0)
+        xv = x[mask].values.astype(float)
+        wv = w_all[mask].values.astype(float)
+        if len(xv) < 3:
+            results.append({"column": col, "error": "fewer than 3 valid weighted observations"})
+            continue
+        d = DescrStatsW(xv, weights=wv, ddof=1)
+        lo, hi = d.tconfint_mean(alpha=0.05)
+        kish = float((wv.sum() ** 2) / np.sum(wv ** 2))   # effective sample size
+        uniq = np.unique(xv)
+        row = {
+            "column": col,
+            "n": int(len(xv)),
+            "sum_weights": round(float(wv.sum()), 4),
+            "ess_kish": round(kish, 2),
+            "w_mean": round(float(d.mean), 6),
+            "w_sd": round(float(d.std), 6),
+            "w_se": round(float(d.std_mean), 6),
+            "ci_low": round(float(lo), 6),
+            "ci_high": round(float(hi), 6),
+            "w_median": round(_weighted_quantile(xv, wv, 0.5), 6),
+            "w_q1": round(_weighted_quantile(xv, wv, 0.25), 6),
+            "w_q3": round(_weighted_quantile(xv, wv, 0.75), 6),
+        }
+        # Binary column → Horvitz-Thompson weighted proportion of the larger code.
+        if set(uniq.tolist()) <= {0.0, 1.0} and len(uniq) == 2:
+            p = float(np.sum(wv * xv) / np.sum(wv))
+            se_p = float(np.sqrt(p * (1 - p) / kish))
+            row["w_proportion"] = round(p, 6)
+            row["w_proportion_ci_low"] = round(max(0.0, p - 1.959963984540054 * se_p), 6)
+            row["w_proportion_ci_high"] = round(min(1.0, p + 1.959963984540054 * se_p), 6)
+        results.append(row)
+
+    # Optional weighted two-group comparison (first value column).
+    comparison = None
+    if req.group_col:
+        groups = [g for g in df[req.group_col].dropna().unique()]
+        if len(groups) == 2:
+            col = req.value_cols[0]
+            x = pd.to_numeric(df[col], errors="coerce")
+            parts = []
+            for g in groups:
+                m = (df[req.group_col] == g) & x.notna() & w_all.notna() & (w_all > 0)
+                parts.append((str(g), x[m].values.astype(float), w_all[m].values.astype(float)))
+            if all(len(p[1]) >= 3 for p in parts):
+                from statsmodels.stats.weightstats import CompareMeans, DescrStatsW as _D
+                d1 = _D(parts[0][1], weights=parts[0][2], ddof=1)
+                d2 = _D(parts[1][1], weights=parts[1][2], ddof=1)
+                cm = CompareMeans(d1, d2)
+                tstat, pval, dfree = cm.ttest_ind(usevar="unequal")
+                diff = float(d1.mean - d2.mean)
+                lo, hi = cm.tconfint_diff(alpha=0.05, usevar="unequal")
+                comparison = {
+                    "variable": col,
+                    "group_a": parts[0][0], "group_b": parts[1][0],
+                    "w_mean_a": round(float(d1.mean), 4), "w_mean_b": round(float(d2.mean), 4),
+                    "diff": round(diff, 4),
+                    "ci_low": round(float(lo), 4), "ci_high": round(float(hi), 4),
+                    "t": round(float(tstat), 4), "df": round(float(dfree), 2),
+                    "p": round(float(pval), 6),
+                }
+
+    n_total = int((w_all.notna() & (w_all > 0)).sum())
+    result_text = (
+        f"Weighted descriptive statistics on n = {n_total} rows using '{req.weight_col}' as the "
+        f"sampling weight (design-based, weights only). "
+        + (f"Weighted {comparison['variable']}: {comparison['group_a']} = {comparison['w_mean_a']} vs "
+           f"{comparison['group_b']} = {comparison['w_mean_b']}, Δ = {comparison['diff']} "
+           f"(95% CI {comparison['ci_low']}–{comparison['ci_high']}), weighted t-test p = "
+           f"{'<0.001' if comparison['p'] < 0.001 else round(comparison['p'], 3)}."
+           if comparison else "")
+    )
+
+    export_rows = [["Variable", "n", "ESS", "Weighted mean", "Weighted SD", "95% CI low", "95% CI high", "Weighted median"]]
+    for r in results:
+        if "error" in r:
+            continue
+        export_rows.append([r["column"], r["n"], r["ess_kish"], r["w_mean"], r["w_sd"], r["ci_low"], r["ci_high"], r["w_median"]])
+
+    try:
+        store.log_action(req.session_id, "weighted_descriptive", {
+            "weight_col": req.weight_col, "n_value_cols": len(req.value_cols),
+            "group_col": req.group_col,
+        })
+    except Exception:
+        pass
+
+    return _sanitize({
+        "test": "Weighted descriptive statistics",
+        "weight_col": req.weight_col,
+        "n": n_total,
+        "results": results,
+        "comparison": comparison,
+        "assumptions": [
+            {"name": "Weights-only design", "met": True,
+             "detail": "Design-based estimation with sampling weights. Strata / cluster (full complex survey) not modelled — SEs assume independent weighted observations."},
+            {"name": "Effective sample size", "met": True,
+             "detail": "Kish's ESS = (Σw)² / Σw² reported per variable; large weight variation shrinks ESS and widens CIs."},
+        ],
+        "result_text": result_text,
+        "export_rows": export_rows,
+        "r_code": (
+            "library(survey)\n"
+            f"des <- svydesign(ids = ~1, weights = ~{req.weight_col}, data = data)\n"
+            f"svymean(~{' + '.join(req.value_cols)}, des)\n"
+            + (f"svyttest({req.value_cols[0]} ~ {req.group_col}, des)\n" if req.group_col else "")
+        ),
+    })

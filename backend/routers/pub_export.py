@@ -440,6 +440,7 @@ _ACTION_HUMAN: Dict[str, str] = {
     "meta_subgroup": "Subgroup meta-analysis with between-group heterogeneity",
     "meta_regression": "Meta-regression (weighted least squares)",
     "meta_bias": "Publication-bias diagnostics (Egger, Begg, trim-and-fill)",
+    "weighted_descriptive": "Weighted (survey) descriptive statistics + weighted t-test",
     "calibration": "Logistic calibration (slope/intercept) + Hosmer-Lemeshow goodness-of-fit",
     "hosmer_lemeshow": "Hosmer-Lemeshow goodness-of-fit test",
     "dca": "Decision curve analysis (Vickers & Elkin 2006)",
