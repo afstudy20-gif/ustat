@@ -39,6 +39,7 @@ import PlotThemeBar from "./components/PlotThemeBar";
 import RefreshAppButton from "./components/RefreshAppButton";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 import RCSPanel from "./components/RCSPanel";
+import MLPanel from "./components/MLPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
 
@@ -122,6 +123,9 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "Mixed-effects (LMM)", tab: "models", aliases: ["lmm", "linear mixed"] },
   { name: "GEE", tab: "models", aliases: ["generalized estimating equations"] },
   { name: "Stepwise selection", tab: "models", aliases: ["forward backward stepwise"] },
+  { name: "Random Forest", tab: "models", group: "Machine Learning", aliases: ["rf", "random orman", "ensemble", "ml", "makine öğrenmesi", "predictive"] },
+  { name: "Gradient Boosting", tab: "models", group: "Machine Learning", aliases: ["gbm", "boosting", "ml", "predictive", "xgboost"] },
+  { name: "Feature importance", tab: "models", group: "Machine Learning", aliases: ["permutation importance", "değişken önemi", "shap"] },
 
   // Visual
   { name: "Polynomial fit (Visual)", tab: "visual", aliases: ["polynomial visual"] },
@@ -303,11 +307,11 @@ function ComputeCombo() {
 }
 
 function ModelsCombo() {
-  const [sub, setSub] = useState<"regression" | "survival" | "rcs">("regression");
+  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml">("regression");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"]] as const).map(([id, label]) => (
+        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -317,7 +321,10 @@ function ModelsCombo() {
         ))}
       </div>
       <div className="flex-1 p-4 overflow-y-auto">
-        {sub === "regression" ? <ModelsPanel /> : sub === "rcs" ? <RCSPanel /> : <SurvivalAdvancedPanel />}
+        {sub === "regression" ? <ModelsPanel />
+          : sub === "rcs" ? <RCSPanel />
+          : sub === "ml" ? <MLPanel />
+          : <SurvivalAdvancedPanel />}
       </div>
     </div>
   );

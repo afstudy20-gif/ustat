@@ -1,9 +1,10 @@
 import { X } from "lucide-react";
 
-const VERSION = "2.2.5";
-const BUILD = 225;
+const VERSION = "2.3.0";
+const BUILD = 230;
 
 const CHANGELOG = [
+  { ver: "2.3.0", date: "2026-05-29", notes: "Machine-learning predictive modeling added (Sprint 1 of the advanced-features roadmap). New `/api/ml` router with Random Forest and Gradient Boosting, each auto-detecting classification (binary outcome) vs regression (continuous outcome). Built entirely on scikit-learn (already a dependency) — no new packages, no xgboost/shap required. Performance is honest: classification AUC / accuracy / sensitivity / specificity / PPV / NPV / Brier and the calibration table all come from out-of-fold predictions via stratified `cross_val_predict`, never optimistic in-sample numbers; regression reports cross-validated R² / RMSE / MAE with a predicted-vs-actual plot. AUC ships a 500-rep bootstrap 95% CI. Feature ranking uses both impurity importance and model-agnostic permutation importance (the latter scored on AUC for classification, R² for regression, with SD whiskers). Categorical predictors are one-hot encoded (drop_first) like the regression endpoints; missing data flows through the shared imputation service; `class_weight='balanced'` toggle handles rare-event imbalance. New ML sub-tab under Models (Regression / Survival Advanced / RCS / Machine Learning) with the standard 3-column resizable layout: controls left, ROC (or predicted-vs-actual) + horizontal permutation-importance bar centre, metric tiles + confusion matrix + importance table + calibration + plain-English interpretation right. Audit log + Methods appendix recognise the new actions. Search catalogue indexes 'random forest', 'gradient boosting', 'feature importance' (＋ Turkish aliases). For inference (odds ratios, p-values) the Regression tab remains the right tool — the ML tab is for prediction / risk screening." },
   { ver: "2.2.5", date: "2026-05-28", notes: "Multi-curve ROC now uses the same 3-column controls / chart / results layout as single mode. (1) The AUC Summary table and the pairwise-DeLong matrix moved out of the left controls sidebar into a dedicated 380 px right-hand results column — the chart no longer competes for space with the numeric output, and the results sit beside the curve instead of below the predictor list. (2) The guidance strip (Use when / Check / Interpret) collapsed into a single-line summary that expands on click — it was a fixed 3-card block eating vertical space above the chart on every visit; the one-liner shows the 'Use when' text and a ▸ toggle. (3) The curve-style colour / width / dash editor is now a collapsible disclosure too, with a compact row of colour dots in the summary as a preview — the full per-curve StyleRow list only unfolds when the user wants to restyle. Net effect: the multi-curve chart gets the full centre column at first paint, with controls left and AUC / DeLong right." },
   { ver: "2.2.4", date: "2026-05-28", notes: "Hotfix: the ROC tab crashed with 'ReferenceError: Cannot access le before initialization' (a minified temporal-dead-zone error). The pairwise-DeLong re-run effect added in 2.2.1 was placed ABOVE the multi-curve state hooks it depends on, so its `[multiPAdjust]` dependency array was evaluated before `multiPAdjust` had been initialised — instant crash on entering the ROC panel. Moved the effect below all the multi-curve `useState` declarations. No behaviour change; ROC tab loads again." },
   { ver: "2.2.3", date: "2026-05-28", notes: "RCS dose-response plot no longer shows a large empty strip on the right. The spline is fit (and the OR / HR / β curve + 95% CI band drawn) only over the inner percentile range — the backend evaluates it on `np.linspace(P1, P99, 200)`. But the 'Show Data Points' rug uses the raw observations, whose upper tail can extend well past P99 (e.g. LARn data reaching 4 while the curve stops at ~2.1). With no explicit x-axis range Plotly autoscaled to the rug and left the curve hugging the left half with blank space on the right. The x-axis is now clamped to the curve's evaluated extent (min / max of `x_values`, with 3% padding); rug ticks beyond that are clipped. The estimated dose-response region now fills the panel. Linear-axis only — the log-scale Y toggle is unaffected." },
@@ -124,6 +125,15 @@ const METHODS: MethodGroup[] = [
       { name: "Ordinal logistic (proportional odds + Brant test)", impl: "statsmodels.miscmodels.ordinal_model.OrderedModel" },
       { name: "GEE (binomial / gaussian / poisson; exch / AR / indep)", impl: "statsmodels.genmod.GEE" },
       { name: "Stepwise selection (forward / backward / both; AIC / BIC / p)", impl: "custom" },
+    ],
+  },
+  {
+    group: "Machine learning (prediction)",
+    items: [
+      { name: "Random Forest (classification / regression, OOF cross-validated)", impl: "sklearn.ensemble.RandomForest* + cross_val_predict" },
+      { name: "Gradient Boosting (classification / regression, OOF cross-validated)", impl: "sklearn.ensemble.GradientBoosting*" },
+      { name: "Permutation + impurity feature importance", impl: "sklearn.inspection.permutation_importance" },
+      { name: "AUC bootstrap CI · calibration bins · confusion matrix", impl: "sklearn.metrics + custom bootstrap" },
     ],
   },
   {

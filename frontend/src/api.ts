@@ -51,6 +51,11 @@ export const runGamma       = (data: object) => api.post("/api/models/gamma", da
 export const runNegBinom    = (data: object) => api.post("/api/models/negbinom", data);
 export const runLinearDiag  = (data: object) => api.post("/api/models/linear_diag", data);
 export const runMelt          = (data: object) => api.post("/api/models/melt", data);
+
+// Machine learning (predictive modeling)
+export const runRandomForest      = (data: object) => api.post("/api/ml/random_forest", data);
+export const runGradientBoosting  = (data: object) => api.post("/api/ml/gradient_boosting", data);
+export const runFeatureImportance = (data: object) => api.post("/api/ml/feature_importance", data);
 export const refreshSession   = (sessionId: string) => api.get(`/api/stats/${sessionId}/refresh`);
 export const runPSM           = (data: object) => api.post("/api/models/psm", data);
 export const runIPTW          = (data: object) => api.post("/api/models/iptw", data);

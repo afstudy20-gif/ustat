@@ -337,3 +337,36 @@ def test_method_appendix(client, sid):
     ctype = r.headers.get("content-type", "")
     assert "wordprocessingml" in ctype
     assert len(r.content) > 1000
+
+
+# 19. Machine learning — random forest (classification)
+def test_ml_random_forest_classification(client, sid):
+    r = client.post("/api/ml/random_forest", json={
+        "session_id": sid,
+        "outcome": "event",
+        "predictors": ["AGE", "LDL", "SEX", "DM", "HT"],
+        "n_estimators": 120, "cv_folds": 4, "n_permutation_repeats": 4,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["task"] == "classification"
+    assert 0.0 <= d["auc"] <= 1.0
+    assert "confusion" in d and "roc_curve" in d and len(d["roc_curve"]) > 1
+    assert len(d["importance"]) == 5
+    assert all("permutation" in i for i in d["importance"])
+
+
+# 20. Machine learning — gradient boosting (regression auto-detected)
+def test_ml_gradient_boosting_regression(client, sid):
+    r = client.post("/api/ml/gradient_boosting", json={
+        "session_id": sid,
+        "outcome": "LDL",
+        "predictors": ["AGE", "SEX", "DM"],
+        "task": "regression",
+        "n_estimators": 120, "cv_folds": 4, "n_permutation_repeats": 4,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["task"] == "regression"
+    for k in ("r2", "rmse", "mae", "scatter", "importance"):
+        assert k in d

@@ -431,6 +431,8 @@ _ACTION_HUMAN: Dict[str, str] = {
     "cronbach": "Cronbach's α reliability",
     "roc": "Receiver operating characteristic (ROC) analysis",
     "roc_compare": "DeLong's test for paired ROC AUCs",
+    "random_forest": "Random forest (cross-validated, permutation importance)",
+    "gradient_boosting": "Gradient boosting (cross-validated, permutation importance)",
     "calibration": "Logistic calibration (slope/intercept) + Hosmer-Lemeshow goodness-of-fit",
     "hosmer_lemeshow": "Hosmer-Lemeshow goodness-of-fit test",
     "dca": "Decision curve analysis (Vickers & Elkin 2006)",
