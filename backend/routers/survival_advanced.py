@@ -386,8 +386,9 @@ def fine_gray(req: FineGrayRequest):
     durations = work[req.duration_col].values.astype(float)
     events = work[req.event_col].values.astype(int)
 
-    # Unique event types (0 = censored, others are event types)
-    event_types = sorted([e for e in np.unique(events) if e != 0])
+    # Unique event types (0 = censored, others are event types). Cast to
+    # plain int — numpy.int64 is not JSON-serialisable by FastAPI's encoder.
+    event_types = sorted(int(e) for e in np.unique(events) if e != 0)
     if req.event_of_interest not in event_types:
         raise HTTPException(status_code=422, detail=f"Event of interest {req.event_of_interest} not found. Available: {event_types}")
 
@@ -927,8 +928,18 @@ def _rmst_one_group(t: np.ndarray, e: np.ndarray, tau: float) -> Dict[str, float
     # Step-function on the unique observed times. surv[k] = S(t_k+) for
     # t in [t_k, t_{k+1}).
     sf = kmf.survival_function_.iloc[:, 0]
-    times = np.concatenate(([0.0], sf.index.values.astype(float)))
-    surv = np.concatenate(([1.0], sf.values.astype(float)))
+    sf_times = sf.index.values.astype(float)
+    sf_surv = sf.values.astype(float)
+    # lifelines already seeds the timeline with the origin (t=0, S=1). Only
+    # prepend it ourselves when it is missing — otherwise we create a
+    # duplicate zero, the first trapezoid piece has zero width, and the loop
+    # below breaks immediately, collapsing RMST to 0.
+    if len(sf_times) and sf_times[0] == 0.0:
+        times = sf_times
+        surv = sf_surv
+    else:
+        times = np.concatenate(([0.0], sf_times))
+        surv = np.concatenate(([1.0], sf_surv))
 
     et = kmf.event_table  # columns: removed, observed, censored, entrance, at_risk
     et_index = et.index.values.astype(float)
@@ -1196,3 +1207,226 @@ def rmst(req: RMSTRequest):
         "export_rows": export_rows,
         "r_code": r_code,
     }
+
+
+# ── 6. Recurrent events — LWYY (Lin-Wei-Yang-Ying) model ─────────────────────
+#
+# The LWYY marginal rate/mean model is a modified Andersen-Gill Cox model for
+# RECURRENT events (e.g. repeat heart-failure hospitalisations): a single Cox
+# fit on the counting-process (start, stop, event) data with a robust
+# cluster-sandwich variance estimator clustered on subject id. The point
+# estimate equals Andersen-Gill; the Lin-Wei-Yang-Ying (2000) contribution is
+# the cluster-robust SE that accounts for within-subject correlation of events.
+#
+# Implemented with lifelines CoxPHFitter using entry_col = start, duration_col
+# = stop, cluster_col = id, robust = True — mathematically the LWYY estimator.
+# exp(beta) is interpreted as a rate ratio (ratio of the event RATES / mean
+# cumulative functions), not a single-event hazard ratio.
+
+
+class RecurrentLWYYRequest(BaseModel):
+    session_id: str
+    id_col: str
+    start_col: str
+    stop_col: str
+    event_col: str
+    predictors: List[str]
+    group_col: Optional[str] = None          # for the mean cumulative function plot
+    imputation: Optional[str] = "listwise"
+
+
+def _mcf(intervals: pd.DataFrame, start: str, stop: str, event: str) -> List[dict]:
+    """Nonparametric mean cumulative function (Nelson 1995) for recurrent
+    events on counting-process intervals: MCF(t) = Σ_{t_k ≤ t} d_k / n_k where
+    d_k = events at t_k and n_k = subjects under observation at t_k."""
+    ev_times = np.sort(np.unique(intervals.loc[intervals[event] == 1, stop].values.astype(float)))
+    starts = intervals[start].values.astype(float)
+    stops = intervals[stop].values.astype(float)
+    evs = intervals[event].values.astype(int)
+    pts = [{"t": 0.0, "mcf": 0.0}]
+    cum = 0.0
+    for t in ev_times:
+        d = int(np.sum((stops == t) & (evs == 1)))
+        n = int(np.sum((starts < t) & (stops >= t)))
+        if n > 0:
+            cum += d / n
+        pts.append({"t": round(float(t), 4), "mcf": round(float(cum), 5)})
+    return pts
+
+
+@router.post("/recurrent_lwyy")
+def recurrent_lwyy(req: RecurrentLWYYRequest):
+    from lifelines import CoxPHFitter
+
+    df = _get_df(req.session_id)
+    needed = [req.id_col, req.start_col, req.stop_col, req.event_col, *req.predictors]
+    if req.group_col:
+        needed.append(req.group_col)
+    for c in needed:
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not req.predictors:
+        raise HTTPException(status_code=422, detail="Select at least one predictor.")
+
+    from services.impute import apply_imputation
+    work = apply_imputation(df[needed], needed, req.imputation or "listwise").reset_index(drop=True)
+
+    # Coerce the counting-process columns.
+    for c in [req.start_col, req.stop_col, req.event_col]:
+        work[c] = pd.to_numeric(work[c], errors="coerce")
+    work = work.dropna(subset=[req.id_col, req.start_col, req.stop_col, req.event_col])
+    work = work[work[req.stop_col] > work[req.start_col]]
+    if len(work) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough usable intervals (need ≥ 10, got {len(work)}).")
+    evset = set(np.unique(work[req.event_col].astype(int)))
+    if evset - {0, 1}:
+        raise HTTPException(status_code=422, detail="Event column must be 0/1 per interval (1 = event at the interval's stop time).")
+
+    # Encode predictors: numeric stays, categorical → dummies (drop_first).
+    pred_raw = work[req.predictors].copy()
+    numeric_pred, cat_pred = [], []
+    for c in req.predictors:
+        col = pred_raw[c]
+        if pd.api.types.is_numeric_dtype(col):
+            numeric_pred.append(c)
+        else:
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= 0.8 and coerced.dropna().nunique() > 2:
+                pred_raw[c] = coerced; numeric_pred.append(c)
+            else:
+                cat_pred.append(c)
+    num_part = pred_raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=pred_raw.index)
+    cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1).astype(float)
+    cov_cols = [str(c) for c in enc.columns]
+    if not cov_cols:
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+
+    fit_df = pd.concat([
+        work[[req.id_col, req.start_col, req.stop_col, req.event_col]].reset_index(drop=True),
+        enc.reset_index(drop=True),
+    ], axis=1).dropna()
+
+    cph = CoxPHFitter()
+    try:
+        cph.fit(fit_df, duration_col=req.stop_col, event_col=req.event_col,
+                entry_col=req.start_col, cluster_col=req.id_col, robust=True, show_progress=False)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"LWYY fit failed: {exc}")
+
+    summ = cph.summary
+    coefs: List[dict] = []
+    for var in cph.params_.index:
+        beta = float(cph.params_[var])
+        coefs.append({
+            "variable": str(var),
+            "estimate": round(beta, 6),
+            "rate_ratio": round(float(np.exp(beta)), 4),
+            "robust_se": round(float(summ.loc[var, "se(coef)"]), 6),
+            "z": round(float(summ.loc[var, "z"]), 4),
+            "p": round(float(summ.loc[var, "p"]), 6),
+            "rr_low": round(float(summ.loc[var, "exp(coef) lower 95%"]), 4),
+            "rr_high": round(float(summ.loc[var, "exp(coef) upper 95%"]), 4),
+        })
+
+    n_subjects = int(work[req.id_col].nunique())
+    n_events = int((work[req.event_col] == 1).sum())
+    # per-subject event counts
+    ev_per = work.groupby(req.id_col)[req.event_col].sum()
+    # total follow-up = sum over subjects of (max stop − min start)
+    grp_fu = work.groupby(req.id_col)
+    fu = grp_fu[req.stop_col].max() - grp_fu[req.start_col].min()
+    total_fu = float(fu.sum())
+
+    # Mean cumulative function — overall + by group.
+    palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4"]
+    traces = []
+    if req.group_col:
+        groups = sorted(work[req.group_col].dropna().unique().tolist(), key=lambda x: (isinstance(x, str), x))
+        for gi, g in enumerate(groups):
+            sub = work[work[req.group_col] == g]
+            pts = _mcf(sub, req.start_col, req.stop_col, req.event_col)
+            traces.append({
+                "x": [p["t"] for p in pts], "y": [p["mcf"] for p in pts],
+                "type": "scatter", "mode": "lines", "name": f"{req.group_col} = {g}",
+                "line": {"color": palette[gi % len(palette)], "width": 2, "shape": "hv"},
+            })
+    else:
+        pts = _mcf(work, req.start_col, req.stop_col, req.event_col)
+        traces.append({
+            "x": [p["t"] for p in pts], "y": [p["mcf"] for p in pts],
+            "type": "scatter", "mode": "lines", "name": "MCF",
+            "line": {"color": palette[0], "width": 2, "shape": "hv"},
+        })
+
+    plot = {
+        "data": traces,
+        "layout": {
+            "title": "Mean cumulative function (expected events per subject)",
+            "xaxis": {"title": req.stop_col, "gridcolor": "#e5e7eb"},
+            "yaxis": {"title": "Mean cumulative events", "gridcolor": "#e5e7eb"},
+            "paper_bgcolor": "transparent", "plot_bgcolor": "#ffffff",
+            "font": {"color": "#374151", "size": 12},
+            "margin": {"t": 40, "r": 20, "b": 50, "l": 60},
+            "showlegend": bool(req.group_col),
+            "legend": {"x": 0.02, "y": 0.98},
+        },
+    }
+
+    primary = coefs[0]
+    interp = (
+        f"LWYY recurrent-event model on {n_subjects} subjects with {n_events} events "
+        f"({ev_per.mean():.2f} events/subject; {n_events / total_fu * 100:.2f} events per 100 "
+        f"time-units of follow-up). Andersen-Gill point estimates with Lin-Wei-Yang-Ying "
+        f"cluster-robust SE. {primary['variable']}: rate ratio = {primary['rate_ratio']} "
+        f"(95% CI {primary['rr_low']}–{primary['rr_high']}, p = "
+        f"{'<0.001' if primary['p'] < 0.001 else round(primary['p'], 3)})."
+    )
+
+    assumptions = [
+        {"name": "Recurrent-event structure", "met": True,
+         "detail": f"Counting-process intervals (start, stop]; {len(work)} intervals across {n_subjects} subjects."},
+        {"name": "Robust variance (LWYY)", "met": True,
+         "detail": "Cluster-robust sandwich SE clustered on subject id — accounts for within-subject event correlation. No common-baseline-hazard or independent-increment assumption needed."},
+        {"name": "Rate-ratio interpretation", "met": True,
+         "detail": "exp(β) is the ratio of event rates (mean cumulative functions), not a single-event hazard ratio."},
+    ]
+
+    export_rows = [["Variable", "Rate ratio", "95% CI low", "95% CI high", "β", "Robust SE", "z", "p"]]
+    for c in coefs:
+        export_rows.append([c["variable"], c["rate_ratio"], c["rr_low"], c["rr_high"],
+                            c["estimate"], c["robust_se"], c["z"], c["p"]])
+
+    r_code = (
+        "library(survival)\n"
+        f"# LWYY = Andersen-Gill + robust cluster SE\n"
+        f"fit <- coxph(Surv({req.start_col}, {req.stop_col}, {req.event_col}) ~ "
+        f"{' + '.join(req.predictors)} + cluster({req.id_col}), data = data)\n"
+        f"summary(fit)"
+    )
+
+    try:
+        store.log_action(req.session_id, "recurrent_lwyy", {
+            "id_col": req.id_col, "event_col": req.event_col,
+            "n_predictors": len(req.predictors), "n_subjects": n_subjects, "n_events": n_events,
+        })
+    except Exception:
+        pass
+
+    return _safe({
+        "test": "Recurrent events — LWYY model",
+        "model": "Lin-Wei-Yang-Ying (modified Andersen-Gill, cluster-robust SE)",
+        "n_subjects": n_subjects,
+        "n_events": n_events,
+        "n_intervals": int(len(work)),
+        "events_per_subject": round(float(ev_per.mean()), 4),
+        "total_followup": round(total_fu, 4),
+        "concordance": round(float(cph.concordance_index_), 4),
+        "coefficients": coefs,
+        "plot": plot,
+        "assumptions": assumptions,
+        "result_text": interp,
+        "interpretation": interp,
+        "export_rows": export_rows,
+        "r_code": r_code,
+    })

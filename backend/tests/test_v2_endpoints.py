@@ -466,3 +466,39 @@ def test_weighted_descriptive(client, synth):
     # DM is binary -> weighted proportion present
     assert "w_proportion" in rows["DM"]
     assert d["comparison"] is not None and "p" in d["comparison"]
+
+
+# 26. Recurrent events — LWYY model
+@pytest.fixture(scope="module")
+def sid_recurrent():
+    rng = np.random.default_rng(5)
+    rows = []
+    for pid in range(80):
+        trt = pid % 2
+        age = rng.normal(60, 8)
+        rate = 0.4 * np.exp(-0.5 * trt + 0.02 * (age - 60))
+        t, horizon = 0.0, 10.0
+        while True:
+            gap = rng.exponential(1 / rate)
+            start, stop = t, t + gap
+            if stop >= horizon:
+                rows.append({"pid": pid, "t0": start, "t1": horizon, "ev": 0, "trt": trt, "age": age})
+                break
+            rows.append({"pid": pid, "t0": start, "t1": stop, "ev": 1, "trt": trt, "age": age})
+            t = stop
+    return make_session(pd.DataFrame(rows), "recurrent_session")
+
+
+def test_recurrent_lwyy(client, sid_recurrent):
+    r = client.post("/api/survival_advanced/recurrent_lwyy", json={
+        "session_id": sid_recurrent, "id_col": "pid", "start_col": "t0",
+        "stop_col": "t1", "event_col": "ev", "predictors": ["trt", "age"],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["n_subjects"] == 80 and d["n_events"] > 0
+    coefs = {c["variable"]: c for c in d["coefficients"]}
+    assert "trt" in coefs and "rate_ratio" in coefs["trt"]
+    # treatment lowers the recurrence rate → RR < 1
+    assert coefs["trt"]["rate_ratio"] < 1.0
+    assert d["plot"]["data"] and len(d["plot"]["data"][0]["x"]) > 1

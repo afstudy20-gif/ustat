@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -243,6 +243,18 @@ export default function SurvivalAdvancedPanel() {
   const [rmstError, setRmstError] = useState<string | null>(null);
   const rmstPlotRef = useRef<any>(null);
 
+  // Recurrent-events LWYY state
+  const [lwId, setLwId] = useState("");
+  const [lwStart, setLwStart] = useState("");
+  const [lwStop, setLwStop] = useState("");
+  const [lwEvent, setLwEvent] = useState("");
+  const [lwPreds, setLwPreds] = useState<string[]>([]);
+  const [lwGroup, setLwGroup] = useState("");
+  const [lwResult, setLwResult] = useState<any>(null);
+  const [lwLoading, setLwLoading] = useState(false);
+  const [lwError, setLwError] = useState<string | null>(null);
+  const lwPlotRef = useRef<any>(null);
+
   // Landmark state
   const [lmDuration, setLmDuration] = useState("");
   const [lmEvent, setLmEvent] = useState("");
@@ -323,6 +335,25 @@ export default function SurvivalAdvancedPanel() {
   // a near-identical table.
   useEffect(() => { setFgResult(null); setFgError(null); }, [fgDuration, fgEvent, fgInterest, fgGroup, fgPredictors]);
   useEffect(() => { setRmstResult(null); setRmstError(null); }, [rmstDuration, rmstEvent, rmstGroup, rmstTau]);
+  useEffect(() => { setLwResult(null); setLwError(null); }, [lwId, lwStart, lwStop, lwEvent, lwPreds, lwGroup]);
+
+  const handleLWYY = async () => {
+    if (!lwId || !lwStart || !lwStop || !lwEvent || lwPreds.length === 0) {
+      setLwError("Select id, start, stop, event and at least one predictor."); return;
+    }
+    setLwResult(null); setLwError(null); setLwLoading(true);
+    try {
+      const res = await runRecurrentLWYY({
+        session_id: sid, id_col: lwId, start_col: lwStart, stop_col: lwStop,
+        event_col: lwEvent, predictors: lwPreds, group_col: lwGroup || undefined,
+      });
+      setLwResult(res.data);
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      setLwError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
+        : (typeof detail === "string" ? detail : (e?.message ?? "LWYY failed")));
+    } finally { setLwLoading(false); }
+  };
   useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
   useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
   useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup, kmStratify]);
@@ -556,6 +587,91 @@ export default function SurvivalAdvancedPanel() {
                 </div>
               )}
               <ResultBlock result={rmstResult} />
+            </>
+          }
+        />
+      </Section>
+
+      {/* ── Recurrent events — LWYY ── */}
+      <Section title="Recurrent Events (LWYY)"
+        description="Modified Andersen-Gill model with Lin-Wei-Yang-Ying cluster-robust SE for recurrent events (e.g. repeat hospitalisations). Counting-process (start, stop, event] intervals; exp(β) = rate ratio.">
+        <ThreeCol
+          storageKey="SurvivalAdvanced.LWYY"
+          left={
+            <>
+              <div className="grid grid-cols-1 gap-2">
+                <VarSelect label="Subject id" value={lwId} onChange={setLwId} columns={columns} />
+                <VarSelect label="Start (interval entry)" value={lwStart} onChange={setLwStart} columns={columns} kinds={["numeric"]} />
+                <VarSelect label="Stop (interval / event time)" value={lwStop} onChange={setLwStop} columns={columns} kinds={["numeric"]} />
+                <VarSelect label="Event (1 = event at stop)" value={lwEvent} onChange={setLwEvent} columns={columns} />
+                <VarSelect label="Group for MCF plot (optional)" value={lwGroup} onChange={setLwGroup} columns={columns} kinds={["categorical"]} />
+              </div>
+              <MultiSelect label="Predictors" columns={columns} selected={lwPreds} onChange={setLwPreds}
+                excludeNames={[lwId, lwStart, lwStop, lwEvent].filter(Boolean)} />
+              <div className="flex items-center gap-3">
+                <RunButton onClick={handleLWYY} loading={lwLoading} label="Run LWYY" />
+              </div>
+              {lwError && <p className="text-xs text-red-500">{lwError}</p>}
+            </>
+          }
+          middle={
+            lwResult?.plot ? (
+              <div className="relative" ref={lwPlotRef}>
+                <Plot data={lwResult.plot.data} layout={{ ...lwResult.plot.layout, ...baseLayout, title: lwResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
+                <PlotExporter plotRef={lwPlotRef} title="MCF_LWYY" />
+              </div>
+            ) : (
+              <div className="flex items-center justify-center h-[400px] border border-dashed border-gray-200 rounded-lg text-xs text-gray-400">
+                Run LWYY to render the mean cumulative function
+              </div>
+            )
+          }
+          right={
+            <>
+              {lwResult && (
+                <div className="border border-indigo-200 bg-indigo-50/30 rounded-lg p-3 space-y-2">
+                  <h4 className="text-sm font-semibold text-gray-800">Rate-ratio table</h4>
+                  <p className="text-[10px] text-gray-500">{lwResult.model}</p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[
+                      ["Subjects", lwResult.n_subjects],
+                      ["Events", lwResult.n_events],
+                      ["Ev/subj", lwResult.events_per_subject?.toFixed(2)],
+                    ].map(([k, v]) => (
+                      <div key={String(k)} className="bg-white border border-gray-200 rounded p-1.5 text-center">
+                        <p className="text-[9px] text-gray-400">{k}</p>
+                        <p className="font-semibold text-gray-800 text-xs">{v}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="overflow-auto rounded border border-gray-200 bg-white">
+                    <table className="w-full text-[11px] border-collapse">
+                      <thead>
+                        <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
+                          {["Variable", "RR", "95% CI", "p"].map((h) => (
+                            <th key={h} className="px-1.5 py-1 text-left font-medium">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lwResult.coefficients.map((c: any) => (
+                          <tr key={c.variable} className="border-b border-gray-100">
+                            <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[80px]">{c.variable}</td>
+                            <td className={`px-1.5 py-1 font-mono font-semibold ${c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.rate_ratio?.toFixed(2)}</td>
+                            <td className="px-1.5 py-1 font-mono text-gray-500">[{c.rr_low?.toFixed(2)}, {c.rr_high?.toFixed(2)}]</td>
+                            <td className="px-1.5 py-1">
+                              <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"}`}>
+                                {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              <ResultBlock result={lwResult} />
             </>
           }
         />

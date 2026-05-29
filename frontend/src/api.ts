@@ -160,6 +160,7 @@ export const runFineGray   = (data: object) => api.post("/api/survival_advanced/
 export const runEValue     = (data: object) => api.post("/api/survival_advanced/evalue", data);
 export const runLandmark   = (data: object) => api.post("/api/survival_advanced/landmark", data);
 export const runRMST       = (data: object) => api.post("/api/survival_advanced/rmst", data);
+export const runRecurrentLWYY = (data: object) => api.post("/api/survival_advanced/recurrent_lwyy", data);
 
 // Article parser
 export const parseArticle = (file: File) => {

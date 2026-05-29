@@ -154,6 +154,7 @@ const TEST_CATALOG: TestEntry[] = [
   // Survival Advanced (lives in Models tab as a sub-section)
   { name: "Fine-Gray competing risks", tab: "models", aliases: ["competing risks", "shr", "subdistribution"] },
   { name: "RMST", tab: "models", aliases: ["restricted mean survival time"] },
+  { name: "Recurrent events (LWYY)", tab: "models", group: "Survival", aliases: ["lwyy", "lin wei yang ying", "andersen gill", "recurrent", "tekrarlayan", "mean cumulative function", "mcf", "rate ratio"] },
   { name: "E-value", tab: "models", aliases: ["sensitivity unmeasured confounding"] },
   { name: "Log-rank test", tab: "models", aliases: ["logrank", "km test"] },
   { name: "Schoenfeld residuals", tab: "models", aliases: ["proportional hazards check", "ph"] },
