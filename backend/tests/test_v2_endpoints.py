@@ -409,3 +409,41 @@ def test_ts_decompose(client, sid):
     for k in ("observed", "trend", "seasonal", "resid"):
         assert k in d and len(d[k]) == d["n"]
     assert "strength_trend" in d and "strength_seasonal" in d
+
+
+# 24. Meta-analysis — random-effects pooling
+_META_STUDIES = [
+    {"label": "A", "effect": 0.75, "ci_low": 0.55, "ci_high": 1.02, "subgroup": "EU", "moderator": 2010},
+    {"label": "B", "effect": 0.82, "ci_low": 0.60, "ci_high": 1.12, "subgroup": "EU", "moderator": 2013},
+    {"label": "C", "effect": 1.10, "ci_low": 0.80, "ci_high": 1.51, "subgroup": "US", "moderator": 2016},
+    {"label": "D", "effect": 0.68, "ci_low": 0.45, "ci_high": 1.03, "subgroup": "US", "moderator": 2019},
+    {"label": "E", "e1": 12, "n1": 100, "e2": 20, "n2": 100, "subgroup": "US", "moderator": 2021},
+]
+
+
+def test_meta_analyze(client):
+    r = client.post("/api/meta/analyze", json={"studies": _META_STUDIES, "measure": "OR", "tau2_method": "DL"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["k"] == 5
+    assert "random" in d and "fixed" in d
+    assert 0 <= d["I2_pct"] <= 100
+    assert len(d["studies"]) == 5
+    assert abs(sum(s["weight_pct"] for s in d["studies"]) - 100) < 1.0
+
+
+def test_meta_subgroup_and_regression(client):
+    rs = client.post("/api/meta/subgroup", json={"studies": _META_STUDIES, "measure": "OR"})
+    assert rs.status_code == 200, rs.text
+    assert len(rs.json()["subgroups"]) == 2
+    rr = client.post("/api/meta/regression", json={"studies": _META_STUDIES, "measure": "OR"})
+    assert rr.status_code == 200, rr.text
+    assert "slope" in rr.json() and "slope_p" in rr.json()
+
+
+def test_meta_bias(client):
+    r = client.post("/api/meta/bias", json={"studies": _META_STUDIES, "measure": "OR"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert "egger_p" in d and "trim_fill_missing" in d
+    assert len(d["funnel"]) == 5

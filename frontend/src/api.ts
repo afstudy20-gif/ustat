@@ -61,6 +61,12 @@ export const runFeatureImportance = (data: object) => api.post("/api/ml/feature_
 export const runArima        = (data: object) => api.post("/api/timeseries/arima", data);
 export const runDecompose    = (data: object) => api.post("/api/timeseries/decompose", data);
 export const runStationarity = (data: object) => api.post("/api/timeseries/stationarity", data);
+
+// Meta-analysis (study-level)
+export const runMetaAnalyze    = (data: object) => api.post("/api/meta/analyze", data);
+export const runMetaSubgroup   = (data: object) => api.post("/api/meta/subgroup", data);
+export const runMetaRegression = (data: object) => api.post("/api/meta/regression", data);
+export const runMetaBias       = (data: object) => api.post("/api/meta/bias", data);
 export const refreshSession   = (sessionId: string) => api.get(`/api/stats/${sessionId}/refresh`);
 export const runPSM           = (data: object) => api.post("/api/models/psm", data);
 export const runIPTW          = (data: object) => api.post("/api/models/iptw", data);

@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search, Layers } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
@@ -41,6 +41,7 @@ import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 import RCSPanel from "./components/RCSPanel";
 import MLPanel from "./components/MLPanel";
 import TimeSeriesPanel from "./components/TimeSeriesPanel";
+import MetaPanel from "./components/MetaPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
 
@@ -55,6 +56,7 @@ const TABS = [
   { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
+  { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
   { id: "code",        label: "Code",        icon: Terminal },
 ];
@@ -138,6 +140,12 @@ const TEST_CATALOG: TestEntry[] = [
   // PSM
   { name: "Propensity Score Matching", tab: "psm", aliases: ["psm matching"] },
   { name: "IPTW", tab: "psm", aliases: ["inverse probability weighting", "weighted"] },
+
+  // Meta-analysis
+  { name: "Meta-analysis (random / fixed effects)", tab: "meta", group: "Meta-analysis", aliases: ["meta analiz", "pooled", "forest", "dersimonian", "random effects"] },
+  { name: "Subgroup meta-analysis", tab: "meta", group: "Meta-analysis", aliases: ["subgroup", "alt grup"] },
+  { name: "Meta-regression", tab: "meta", group: "Meta-analysis", aliases: ["meta regression", "moderator", "bubble"] },
+  { name: "Publication bias (Egger / Begg / funnel)", tab: "meta", group: "Meta-analysis", aliases: ["egger", "begg", "funnel", "trim and fill", "yayın yanlılığı"] },
 
   // Survival Advanced (lives in Models tab as a sub-section)
   { name: "Fine-Gray competing risks", tab: "models", aliases: ["competing risks", "shr", "subdistribution"] },
@@ -661,6 +669,7 @@ export default function App() {
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
+          {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
           {activeTab === "code"        && <div className="flex-1 overflow-y-auto"><CodePanel /></div>}
         </ErrorBoundary>
