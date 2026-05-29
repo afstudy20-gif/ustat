@@ -12,7 +12,7 @@ try:
 except ImportError:
     psutil = None  # type: ignore
 
-from routers import upload, stats, charts, models, session, compute, repeated, advanced_anova, pub_tables, categorical, agreement, reliability, missing_data, decision_curve, model_compare, diagnostics, model_diagnostics, pub_export, nomogram, survival_advanced, article_parser, code_runner, ml, timeseries, meta
+from routers import upload, stats, charts, models, session, compute, repeated, advanced_anova, pub_tables, categorical, agreement, reliability, missing_data, decision_curve, model_compare, diagnostics, model_diagnostics, pub_export, nomogram, survival_advanced, article_parser, code_runner, ml, timeseries, meta, multiplicity
 from services import store
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
@@ -65,6 +65,7 @@ app.include_router(code_runner.router, prefix="/api/code", tags=["code_runner"])
 app.include_router(ml.router, prefix="/api/ml", tags=["ml"])
 app.include_router(timeseries.router, prefix="/api/timeseries", tags=["timeseries"])
 app.include_router(meta.router, prefix="/api/meta", tags=["meta"])
+app.include_router(multiplicity.router, prefix="/api/multiplicity", tags=["multiplicity"])
 
 
 @app.get("/.well-known/security.txt", response_class=PlainTextResponse)

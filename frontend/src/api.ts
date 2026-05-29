@@ -65,6 +65,9 @@ export const runStationarity = (data: object) => api.post("/api/timeseries/stati
 // Weighted descriptives (survey weights)
 export const runWeightedDescriptive = (data: object) => api.post("/api/stats/weighted_descriptive", data);
 
+// Multiplicity / gatekeeping
+export const runGatekeeping = (data: object) => api.post("/api/multiplicity/gatekeeping", data);
+
 // Meta-analysis (study-level)
 export const runMetaAnalyze    = (data: object) => api.post("/api/meta/analyze", data);
 export const runMetaSubgroup   = (data: object) => api.post("/api/meta/subgroup", data);

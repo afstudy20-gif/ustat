@@ -35,6 +35,7 @@ import PSMPanel from "./components/PSMPanel";
 import RepeatedMeasuresPanel from "./components/RepeatedMeasuresPanel";
 import CategoricalTestsPanel from "./components/CategoricalTestsPanel";
 import ReliabilityPanel from "./components/ReliabilityPanel";
+import GatekeepingPanel from "./components/GatekeepingPanel";
 import PlotThemeBar from "./components/PlotThemeBar";
 import RefreshAppButton from "./components/RefreshAppButton";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
@@ -96,6 +97,7 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "Cochran's Q", tab: "tests", group: "Paired", aliases: ["cochran q"] },
   { name: "Mantel-Haenszel", tab: "tests", group: "Stratified", aliases: ["cmh", "common or"] },
   { name: "Cochran-Armitage trend", tab: "tests", group: "Trend", aliases: ["ca trend", "doz cevap"] },
+  { name: "Gatekeeping (truncated Hochberg / Holm)", tab: "tests", group: "Multiplicity", aliases: ["gatekeeping", "hochberg", "holm", "multiplicity", "hierarchical", "çoklu test", "fwer", "endpoint hierarchy"] },
 
   // Correlation
   { name: "Pearson correlation", tab: "correlation", aliases: ["pearson r"] },
@@ -288,11 +290,11 @@ function SaveBeforeOpenModal({
 }
 
 function TestsCombo() {
-  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability">("hypothesis");
+  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability" | "gatekeeping">("hypothesis");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"]] as const).map(([id, label]) => (
+        {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"], ["gatekeeping", "Gatekeeping"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -306,6 +308,7 @@ function TestsCombo() {
         {sub === "repeated" && <RepeatedMeasuresPanel />}
         {sub === "categorical" && <CategoricalTestsPanel />}
         {sub === "reliability" && <ReliabilityPanel />}
+        {sub === "gatekeeping" && <GatekeepingPanel />}
       </div>
     </div>
   );

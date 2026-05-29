@@ -502,3 +502,40 @@ def test_recurrent_lwyy(client, sid_recurrent):
     # treatment lowers the recurrence rate → RR < 1
     assert coefs["trt"]["rate_ratio"] < 1.0
     assert d["plot"]["data"] and len(d["plot"]["data"][0]["x"]) > 1
+
+
+# 27. Multistage gatekeeping (truncated Hochberg)
+def test_gatekeeping_serial(client):
+    payload = {
+        "method": "hochberg", "logic": "serial", "alpha": 0.05,
+        "families": [
+            {"name": "Primary", "hypotheses": [{"label": "Death", "p": 0.012}]},
+            {"name": "Secondary", "hypotheses": [
+                {"label": "MI", "p": 0.02}, {"label": "Stroke", "p": 0.04}, {"label": "HF", "p": 0.30},
+            ]},
+        ],
+    }
+    r = client.post("/api/multiplicity/gatekeeping", json=payload)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    fams = d["families"]
+    assert len(fams) == 2
+    # primary significant -> rejected
+    assert fams[0]["hypotheses"][0]["reject"] is True
+    # adjusted p present and monotone-ish
+    assert all("p_adjusted" in h for f in fams for h in f["hypotheses"])
+
+
+def test_gatekeeping_gate_closes(client):
+    # primary NOT significant -> secondary must be blocked regardless of tiny p
+    payload = {
+        "method": "hochberg", "logic": "serial",
+        "families": [
+            {"name": "Primary", "hypotheses": [{"label": "Death", "p": 0.20}]},
+            {"name": "Secondary", "hypotheses": [{"label": "MI", "p": 0.001}]},
+        ],
+    }
+    r = client.post("/api/multiplicity/gatekeeping", json=payload)
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["families"][1]["hypotheses"][0]["reject"] is False
