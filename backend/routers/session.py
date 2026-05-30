@@ -569,3 +569,33 @@ async def get_column_decimals(session_id: str):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return store.get_decimals(session_id)
+
+
+@router.get("/{session_id}")
+async def get_session_info(session_id: str):
+    """Retrieve session details (filename, rows, columns, preview) for a saved session ID."""
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from routers.upload import _detect_kind
+    kind_overrides = store.get_kind_overrides(session_id)
+    columns = []
+    for col in df.columns:
+        kind = kind_overrides.get(col) or _detect_kind(df[col])
+        columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+
+    import numpy as np, json as _json
+    preview = _json.loads(
+        df.head(2000).replace([np.inf, -np.inf], np.nan).to_json(
+            orient="records", default_handler=str, date_format="iso", date_unit="s"
+        )
+    )
+
+    return {
+        "session_id": session_id,
+        "filename": f"session_{session_id[:8]}.csv" if not session_id.endswith("_psm") else f"psm_matched_cohort.csv",
+        "rows": len(df),
+        "columns": columns,
+        "preview": preview,
+    }

@@ -183,6 +183,7 @@ export const renameColumn = (sessionId: string, oldName: string, newName: string
 
 // Session management
 export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${sessionId}/save_session`, { responseType: "blob" });
+export const getSessionInfo = (sessionId: string) => api.get(`/api/sessions/${sessionId}`);
 export const loadSession   = (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post("/api/sessions/load_session", fd); };
 export const getAuditTrail = (sessionId: string) => api.get(`/api/sessions/${sessionId}/audit`);
 export const saveMetadata  = (sessionId: string, columns: Record<string, any>) => api.post(`/api/sessions/${sessionId}/metadata`, { columns });

@@ -4105,6 +4105,23 @@ def _run_psm(req: PSMRequest):
     df_export = df_export.rename(columns={"_match_id_": "match_set_id"})
     store.save(req.session_id + "_psm", df_export)
 
+    # Copy metadata and overrides to the matched session so the column dictionary and formatting persist
+    try:
+        parent_metadata = store.get_metadata(req.session_id)
+        if parent_metadata:
+            store.save_metadata(req.session_id + "_psm", parent_metadata)
+
+        parent_kinds = store.get_kind_overrides(req.session_id)
+        if parent_kinds:
+            kinds = {**parent_kinds, "match_set_id": "categorical"}
+            store.set_kind_overrides(req.session_id + "_psm", kinds)
+
+        parent_decimals = store.get_decimals(req.session_id)
+        if parent_decimals:
+            store.save_decimals(req.session_id + "_psm", parent_decimals)
+    except Exception:
+        pass
+
     return {
         "n_total":            int(len(df)),
         "n_treated":          n_all_treated,

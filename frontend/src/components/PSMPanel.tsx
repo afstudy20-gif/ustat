@@ -11,12 +11,13 @@
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runPSM } from "../api";
+import { runPSM, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
+import { exportDataset } from "../lib/exportDataset";
 
 const smdColor = (smd: number) =>
   smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
@@ -203,6 +204,7 @@ function PSOverlapPlot({
 export default function PSMPanel() {
   const session = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
+  const setSession = useStore((s) => s.setSession);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
     useResizableRightCol("PSMPanel.result", 480);
   if (!session) return null;
@@ -583,6 +585,78 @@ export default function PSMPanel() {
                     </p>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Matched Cohort Actions */}
+            <div className="panel border border-indigo-200 bg-indigo-50/20 xl:col-start-2 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📋</span>
+                <h4 className="text-sm font-bold text-indigo-900">Matched Cohort Actions</h4>
+              </div>
+              <p className="text-xs text-gray-600">
+                You can download the balanced matched patient cohort directly, or load it as the active dataset in uSTAT to run any other analysis (e.g. t-tests, survival curves, factor analysis).
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  onClick={async () => {
+                    if (!result.matched_session_id) return;
+                    try {
+                      setLoading(true);
+                      const res = await getSessionInfo(result.matched_session_id);
+                      setSession(res.data);
+                      // Switch to data tab so the user sees the new matched cohort patient list
+                      useStore.getState().setActiveTab("data");
+                      alert("Successfully loaded matched cohort! The entire app is now filtered and updated to the matched sample.");
+                    } catch (e: any) {
+                      alert("Failed to load matched cohort: " + (e.response?.data?.detail ?? e.message));
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  🔍 View & Analyze Matched Cohort in App
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
+                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      "csv"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  📥 Export as CSV
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
+                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      "xlsx"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  📊 Export as Excel (.xlsx)
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
+                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      "sav"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  💿 Export as SPSS (.sav)
+                </button>
               </div>
             </div>
 
