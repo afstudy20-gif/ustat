@@ -62,6 +62,10 @@ export default function GatekeepingPanel() {
             Gatekeeping (multiplicity)
             <Tip wide text="Multistage gatekeeping across ordered families of hypotheses (e.g. primary then secondary endpoints) with a truncated Holm or Hochberg test within each family (Dmitrienko, Tamhane & Wiens 2008). Serial = the next family is tested only if every hypothesis in the prior families was rejected; parallel = if at least one in the immediately preceding family was rejected. The truncation γ (0–1) reserves Bonferroni mass to open the gate; leave blank for the default (0.5 non-terminal, 1.0 terminal). Controls family-wise error at α." />
           </h3>
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[10px] text-amber-800 leading-normal flex items-start gap-1">
+            <span>💡</span>
+            <span><strong>Illustrative Sample:</strong> The default values below are sample dummy data. Please replace them with your own hypothesis names and raw p-values.</span>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-500">Within-family</span>
