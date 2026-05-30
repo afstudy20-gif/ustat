@@ -67,11 +67,13 @@ export interface CaseFilter {
 
 interface AppState {
   session: Session | null;
+  originalSession: Session | null;
   activeTab: string;
   showGrid: boolean;
   plotTheme: PlotTheme;
   caseFilter: CaseFilter | null;
   setSession: (s: Session) => void;
+  setOriginalSession: (s: Session | null) => void;
   setActiveTab: (t: string) => void;
   toggleGrid: () => void;
   clearSession: () => void;
@@ -122,6 +124,8 @@ const loadTheme = (): PlotTheme => {
 
 export const useStore = create<AppState>((set) => ({
   session: null,
+  originalSession: null,
+  setOriginalSession: (s) => set({ originalSession: s }),
   activeTab: "data",
   descriptiveTab: "histogram",
   setDescriptiveTab: (t) => set({ descriptiveTab: t }),
@@ -165,7 +169,7 @@ export const useStore = create<AppState>((set) => ({
     localStorage.setItem("plotTheme", JSON.stringify(next));
     return { plotTheme: next };
   }),
-  clearSession: () => set({ session: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0 }),
+  clearSession: () => set({ session: null, originalSession: null, activeTab: "data", table1Result: null, caseFilter: null, panelCache: {}, undoDepth: 0, redoDepth: 0 }),
   updateColumnKind: (name, kind) => {
     set((state) => {
       if (!state.session) return state;

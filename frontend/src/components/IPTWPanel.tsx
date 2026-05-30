@@ -10,12 +10,13 @@
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runIPTW } from "../api";
+import { runIPTW, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
+import { exportDataset } from "../lib/exportDataset";
 
 const smdColor = (smd: number) =>
   smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
@@ -202,6 +203,8 @@ function PSOverlapPlot({
 export default function IPTWPanel() {
   const session = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
+  const setSession = useStore((s) => s.setSession);
+  const setOriginalSession = useStore((s) => s.setOriginalSession);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
     useResizableRightCol("IPTWPanel.result", 480);
   if (!session) return null;
@@ -600,6 +603,79 @@ export default function IPTWPanel() {
                     </p>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            {/* Weighted Cohort Actions */}
+            <div className="panel border border-indigo-200 bg-indigo-50/20 xl:col-start-2 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📋</span>
+                <h4 className="text-sm font-bold text-indigo-900">Weighted Cohort Actions</h4>
+              </div>
+              <p className="text-xs text-gray-600">
+                You can download the balanced weighted patient cohort directly, or load it as the active dataset in uSTAT to run any other analysis (e.g. t-tests, survival curves, factor analysis).
+              </p>
+              <div className="flex flex-wrap gap-2 pt-1">
+                <button
+                  onClick={async () => {
+                    if (!result.matched_session_id) return;
+                    try {
+                      setLoading(true);
+                      const res = await getSessionInfo(result.matched_session_id);
+                      setOriginalSession(session);
+                      setSession(res.data);
+                      // Switch to data tab so the user sees the new matched cohort patient list
+                      useStore.getState().setActiveTab("data");
+                      alert("Successfully loaded weighted cohort! The entire app is now filtered and updated to the weighted sample with IPTW weights.");
+                    } catch (e: any) {
+                      alert("Failed to load weighted cohort: " + (e.response?.data?.detail ?? e.message));
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  🔍 View & Analyze Weighted Cohort in App
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      "csv"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  📥 Export as CSV
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      "xlsx"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  📊 Export as Excel (.xlsx)
+                </button>
+                <button
+                  onClick={() => {
+                    if (!result.matched_session_id) return;
+                    exportDataset(
+                      { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      "sav"
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  💿 Export as SPSS (.sav)
+                </button>
               </div>
             </div>
 

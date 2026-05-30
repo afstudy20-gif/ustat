@@ -419,7 +419,7 @@ function VisualChartsCombo() {
 }
 
 export default function App() {
-  const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter } = useStore();
+  const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter, originalSession, setOriginalSession, setSession } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   // Header Save-As dropdown (consolidates dataset export + session JSON
@@ -540,6 +540,20 @@ export default function App() {
             <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 font-semibold rounded-lg px-2 py-1 text-[10px] animate-pulse flex-shrink-0" title="All active analyses are automatically filtered by this subset.">
               🧹 Filter Active ({caseFilter.selected.toLocaleString()})
             </div>
+          )}
+
+          {originalSession && (
+            <button
+              onClick={() => {
+                setSession(originalSession);
+                setOriginalSession(null);
+                setActiveTab("data");
+              }}
+              className="flex items-center gap-1 bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100 font-bold rounded-lg px-2.5 py-1 text-[10px] flex-shrink-0 transition-colors shadow-sm cursor-pointer"
+              title={`Return to original dataset: ${originalSession.filename}`}
+            >
+              ↩️ Return to Original Dataset ({originalSession.filename})
+            </button>
           )}
 
           {/* Test / analysis search. Type a name (e.g. "ROC", "Cox", "Firth",

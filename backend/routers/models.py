@@ -4333,7 +4333,9 @@ def _run_iptw(req: IPTWRequest):
     if missing_cols:
         raise HTTPException(status_code=422, detail=f"Columns not found: {missing_cols}")
 
-    df = apply_imputation(df_full[needed], needed, req.imputation or "listwise").reset_index(drop=True)
+    df_imputed_temp = apply_imputation(df_full[needed], needed, req.imputation or "listwise")
+    df_full_imputed = df_full.loc[df_imputed_temp.index].copy().reset_index(drop=True)
+    df = df_imputed_temp.reset_index(drop=True)
 
     treat_vals = df[req.treatment_col].astype(float)
     if not set(treat_vals.unique().tolist()) <= {0, 1, 0.0, 1.0}:
@@ -4364,6 +4366,7 @@ def _run_iptw(req: IPTWRequest):
             n_trimmed_common_support = int((~keep_mask).sum())
 
     df_keep = df[keep_mask].reset_index(drop=True).copy()
+    df_full_keep = df_full_imputed[keep_mask].reset_index(drop=True).copy()
     ps_keep = df_keep["_ps_"].values
     t_keep = df_keep["_treat_"].values.astype(int)
     if (t_keep.sum() == 0) or ((1 - t_keep).sum() == 0):
@@ -4656,6 +4659,28 @@ def _run_iptw(req: IPTWRequest):
     except Exception:
         pass
 
+    # Persist weighted dataset for downstream analysis
+    df_export = df_full_keep.copy()
+    df_export["iptw_weight"] = w
+    store.save(req.session_id + "_iptw", df_export)
+
+    # Copy metadata and overrides to the matched session so the column dictionary and formatting persist
+    try:
+        parent_metadata = store.get_metadata(req.session_id)
+        if parent_metadata:
+            store.save_metadata(req.session_id + "_iptw", parent_metadata)
+
+        parent_kinds = store.get_kind_overrides(req.session_id)
+        if parent_kinds:
+            kinds = {**parent_kinds, "iptw_weight": "numeric"}
+            store.set_kind_overrides(req.session_id + "_iptw", kinds)
+
+        parent_decimals = store.get_decimals(req.session_id)
+        if parent_decimals:
+            store.save_decimals(req.session_id + "_iptw", parent_decimals)
+    except Exception:
+        pass
+
     return {
         "method": "iptw",
         "n_total": int(len(df)),
@@ -4681,4 +4706,5 @@ def _run_iptw(req: IPTWRequest):
         "ks_p_after": ks_after,
         "ps_distribution": ps_dist,
         "outcome_result": outcome_result,
+        "matched_session_id": req.session_id + "_iptw",
     }

@@ -594,7 +594,7 @@ async def get_session_info(session_id: str):
 
     return {
         "session_id": session_id,
-        "filename": f"session_{session_id[:8]}.csv" if not session_id.endswith("_psm") else f"psm_matched_cohort.csv",
+        "filename": f"iptw_weighted_cohort.csv" if session_id.endswith("_iptw") else f"psm_matched_cohort.csv" if session_id.endswith("_psm") else f"session_{session_id[:8]}.csv",
         "rows": len(df),
         "columns": columns,
         "preview": preview,

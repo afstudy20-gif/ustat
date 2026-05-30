@@ -205,6 +205,7 @@ export default function PSMPanel() {
   const session = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
   const setSession = useStore((s) => s.setSession);
+  const setOriginalSession = useStore((s) => s.setOriginalSession);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
     useResizableRightCol("PSMPanel.result", 480);
   if (!session) return null;
@@ -604,6 +605,7 @@ export default function PSMPanel() {
                     try {
                       setLoading(true);
                       const res = await getSessionInfo(result.matched_session_id);
+                      setOriginalSession(session);
                       setSession(res.data);
                       // Switch to data tab so the user sees the new matched cohort patient list
                       useStore.getState().setActiveTab("data");
