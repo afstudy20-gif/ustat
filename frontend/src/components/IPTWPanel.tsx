@@ -1,17 +1,16 @@
 /**
- * PSMPanel — Propensity Score Matching
+ * IPTWPanel — Inverse Probability of Treatment Weighting
  *
  * Pipeline:
- * 1. Logistic regression (Treatment ~ Covariates) → propensity scores
- * 2. Nearest-neighbor 1:1 matching with caliper (0.2 × SD of PS)
- * 3. SMD balance assessment before / after
- * 4. Love Plot — the publication-standard balance visualization
- * 5. Optional outcome analysis on matched cohort
+ * 1. Propensity Score estimation (Logistic regression / GBM)
+ * 2. Calculate weights (ATE, ATT, or Overlap)
+ * 3. SMD balance assessment and Love Plot
+ * 4. Outcome analysis (Weighted GLM or Weighted Cox PH)
  */
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runPSM } from "../api";
+import { runIPTW } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
@@ -50,7 +49,7 @@ function LovePlot({
     {
       type: "scatter",
       mode: "markers",
-      name: "Unmatched cohort",
+      name: "Unweighted cohort",
       x: covariates.map((c) => smdBefore[c]),
       y: covariates,
       marker: { symbol: "square", size: 11, color: "#ef4444" },
@@ -59,7 +58,7 @@ function LovePlot({
     {
       type: "scatter",
       mode: "markers",
-      name: "Matched cohort",
+      name: "Weighted cohort",
       x: covariates.map((c) => smdAfter[c]),
       y: covariates,
       marker: { symbol: "circle", size: 11, color: "#3b82f6" },
@@ -134,7 +133,7 @@ function LovePlot({
         onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
         onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
       />
-      <PlotExporter plotRef={plotRef} title="Love_Plot_PSM" />
+      <PlotExporter plotRef={plotRef} title="Love_Plot_IPTW" />
     </div>
   );
 }
@@ -154,7 +153,7 @@ function PSOverlapPlot({
         data={[
           {
             type: "histogram",
-            name: "Treated (unmatched)",
+            name: "Treated",
             x: psDist.treated_unmatched,
             opacity: 0.55,
             marker: { color: "#ef4444" },
@@ -163,7 +162,7 @@ function PSOverlapPlot({
           },
           {
             type: "histogram",
-            name: "Control (unmatched)",
+            name: "Control",
             x: psDist.control_unmatched,
             opacity: 0.55,
             marker: { color: "#3b82f6" },
@@ -185,7 +184,7 @@ function PSOverlapPlot({
           legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
           annotations: [{
             x: 0.5, y: 1.08, xref: "paper", yref: "paper",
-            text: "Propensity Score Overlap (Common Support)",
+            text: "Propensity Score Overlap",
             showarrow: false, font: { color: "#374151", size: 12 },
           }],
         } as any}
@@ -195,16 +194,16 @@ function PSOverlapPlot({
         onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
         onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
       />
-      <PlotExporter plotRef={plotRef} title="PSM_Propensity_Overlap" />
+      <PlotExporter plotRef={plotRef} title="IPTW_Propensity_Overlap" />
     </div>
   );
 }
 
-export default function PSMPanel() {
+export default function IPTWPanel() {
   const session = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
-    useResizableRightCol("PSMPanel.result", 480);
+    useResizableRightCol("IPTWPanel.result", 480);
   if (!session) return null;
 
   const allCols = session.columns.map((c) => c.name);
@@ -221,20 +220,23 @@ export default function PSMPanel() {
   const [treatCol, setTreatCol] = useState(binaryCols[0] ?? allCols[0] ?? "");
   const [outcomeCol, setOutcomeCol] = useState("");
   const [covariates, setCovariates] = useState<string[]>([]);
-  const [caliper, setCaliper] = useState(0.2);
-  const [caliperScale, setCaliperScale] = useState<"logit" | "raw">("logit");
   const [trimCommonSupport, setTrimCommonSupport] = useState(false);
-  const [ratio, setRatio] = useState(1);
   const [randomState, setRandomState] = useState<number>(42);
   const [scoreMethod, setScoreMethod] = useState<"logistic" | "probit" | "gbm">("logistic");
-  const [matchingMethod, setMatchingMethod] = useState<"greedy" | "optimal">("greedy");
-  const [exactMatch, setExactMatch] = useState<string[]>([]);
   const [outcomeType, setOutcomeType] = useState<"binary" | "survival">("binary");
   const [survDuration, setSurvDuration] = useState("");
   const [survEvent, setSurvEvent] = useState("");
-  const [computeRosenbaum, setComputeRosenbaum] = useState(false);
-  const [rosenbaumGammaMax, setRosenbaumGammaMax] = useState<number>(3.0);
   const [covFilter, setCovFilter] = useState("");
+
+  // IPTW options
+  const [estimand, setEstimand] = useState<"ate" | "att" | "overlap">("ate");
+  const [stabilize, setStabilize] = useState(true);
+  const [weightTruncation, setWeightTruncation] = useState<"percentile" | "hard" | "none">("percentile");
+  const [weightTruncLo, setWeightTruncLo] = useState(0.01);
+  const [weightTruncHi, setWeightTruncHi] = useState(0.99);
+  const [weightTruncMax, setWeightTruncMax] = useState(10);
+  const [seMethod, setSeMethod] = useState<"robust" | "bootstrap">("robust");
+  const [bootstrapReps, setBootstrapReps] = useState(500);
 
   // Result & UI
   const [result, setResult] = useState<any>(null);
@@ -250,29 +252,31 @@ export default function PSMPanel() {
     if (covariates.length === 0) { setError("Select at least one covariate"); return; }
     setLoading(true); setError(null); setResult(null);
     try {
-      const res = await runPSM({
+      const res = await runIPTW({
         session_id: session.session_id,
         treatment_col: treatCol,
         covariates,
         outcome_col: outcomeType === "binary" ? (outcomeCol || undefined) : undefined,
-        caliper,
-        caliper_scale: caliperScale,
-        trim_common_support: trimCommonSupport,
-        ratio,
+        imputation: undefined,
         random_state: Number.isFinite(randomState) ? randomState : undefined,
         score_method: scoreMethod,
-        matching_method: matchingMethod,
-        exact_match: exactMatch.length > 0 ? exactMatch : undefined,
+        estimand,
+        stabilize,
+        trim_common_support: trimCommonSupport,
+        weight_truncation: weightTruncation,
+        weight_truncation_lo: weightTruncLo,
+        weight_truncation_hi: weightTruncHi,
+        weight_truncation_max: weightTruncMax,
         outcome_type: outcomeType,
         survival_duration_col: outcomeType === "survival" ? (survDuration || undefined) : undefined,
         survival_event_col: outcomeType === "survival" ? (survEvent || undefined) : undefined,
-        compute_rosenbaum: outcomeType === "binary" && ratio === 1 && computeRosenbaum,
-        rosenbaum_gamma_max: rosenbaumGammaMax,
+        se_method: seMethod,
+        bootstrap_reps: seMethod === "bootstrap" ? bootstrapReps : undefined,
       });
       setResult(res.data);
     } catch (e: any) {
       const msg = e.response?.data?.detail;
-      setError(typeof msg === "string" ? msg : (e.message ?? "PSM failed"));
+      setError(typeof msg === "string" ? msg : (e.message ?? "IPTW failed"));
     } finally { setLoading(false); }
   };
 
@@ -297,23 +301,147 @@ export default function PSMPanel() {
       {/* ── Left sidebar ─────────────────────────────────────────────────── */}
       <div className="w-64 flex-shrink-0 space-y-3 overflow-y-auto">
         {/* Header */}
-        <div className="panel bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200 space-y-2">
+        <div className="panel bg-gradient-to-br from-indigo-50 to-emerald-50 border-indigo-200 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-xl">🧬</span>
+            <span className="text-xl">⚖️</span>
             <h2 className="text-sm font-bold text-indigo-800">
-              Propensity Score Matching (PSM)
+              Inverse Probability of Treatment Weighting (IPTW)
             </h2>
           </div>
           <p className="text-[10px] text-indigo-600 leading-snug">
-            Mimics an RCT from observational data by balancing confounders between treated and control groups via 1:k matching.
+            Reweights every unit by the inverse of its propensity score. Keeps the full sample; supports ATE / ATT / overlap estimands; pairs with weighted GLM or weighted Cox.
           </p>
+        </div>
+
+        {/* IPTW options */}
+        <div className="panel space-y-3">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            IPTW Options
+            <Tip wide text="Choose the estimand (target population), whether to stabilise the weights, and how to truncate the upper tail. Stabilisation rescales by P(T=1) to bring weights closer to 1 and reduces SE inflation." />
+          </label>
+
+          <div className="space-y-1">
+            <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+              Estimand
+              <Tip wide text="ATE — average effect across the whole population. ATT — effect on those actually exposed. Overlap — concentrates inference on the overlap region; naturally bounded and robust to extreme PS." />
+            </span>
+            <div className="flex gap-1">
+              {(["ate", "att", "overlap"] as const).map((e) => (
+                <button key={e} onClick={() => setEstimand(e)}
+                  className={`flex-1 px-2 py-1 text-[10px] rounded border transition-colors ${estimand === e ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+                  {e === "ate" ? "ATE ★" : e === "att" ? "ATT" : "Overlap"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input type="checkbox" className="accent-indigo-500 mt-0.5"
+              checked={stabilize} onChange={(e) => setStabilize(e.target.checked)} />
+            <span className="text-[10px] text-gray-600 leading-tight">
+              <span className="font-medium">Stabilised weights</span>
+              <Tip wide text="Rescales weights by the marginal P(T=1) (and 1−P(T=1) for controls). Reduces extreme-weight impact without changing the point estimate." />
+              <span className="block text-gray-400">Multiplies by marginal P(T=1)</span>
+            </span>
+          </label>
+
+          <div className="space-y-1 pt-2 border-t border-gray-100">
+            <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+              Weight truncation
+              <Tip wide text="Truncating the weight distribution controls the influence of units near the PS support boundaries. Percentile (e.g. 1st/99th) is recommended. Hard cap clips at an absolute maximum." />
+            </span>
+            <div className="flex gap-1">
+              {(["percentile", "hard", "none"] as const).map((m) => (
+                <button key={m} onClick={() => setWeightTruncation(m)}
+                  className={`flex-1 px-2 py-1 text-[10px] rounded border transition-colors ${weightTruncation === m ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+                  {m === "percentile" ? "Pctile ★" : m === "hard" ? "Hard" : "None"}
+                </button>
+              ))}
+            </div>
+            {weightTruncation === "percentile" && (
+              <div className="grid grid-cols-2 gap-1.5">
+                <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                  Lo
+                  <input type="number" min="0" max="0.5" step="0.005" className="select text-[10px] py-0.5 flex-1"
+                    value={weightTruncLo}
+                    onChange={(e) => setWeightTruncLo(parseFloat(e.target.value))} />
+                </label>
+                <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                  Hi
+                  <input type="number" min="0.5" max="1" step="0.005" className="select text-[10px] py-0.5 flex-1"
+                    value={weightTruncHi}
+                    onChange={(e) => setWeightTruncHi(parseFloat(e.target.value))} />
+                </label>
+              </div>
+            )}
+            {weightTruncation === "hard" && (
+              <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                Max weight
+                <input type="number" min="1" step="0.5" className="select text-[10px] py-0.5 flex-1"
+                  value={weightTruncMax}
+                  onChange={(e) => setWeightTruncMax(parseFloat(e.target.value))} />
+              </label>
+            )}
+          </div>
+
+          <div className="space-y-1 pt-2 border-t border-gray-100">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+                Score model
+                <Tip wide text="Model used to estimate propensity scores. Logistic = standard parametric. Probit = probit link. GBM = gradient-boosted trees." />
+              </span>
+              <select className="select text-[10px] py-0.5" value={scoreMethod}
+                onChange={(e) => setScoreMethod(e.target.value as any)}>
+                <option value="logistic">Logistic ★</option>
+                <option value="probit">Probit</option>
+                <option value="gbm">GBM</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-500 font-medium">Seed</span>
+              <input type="number" className="select text-[10px] py-0.5 flex-1"
+                value={randomState} onChange={(e) => setRandomState(parseInt(e.target.value, 10))} />
+            </div>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="accent-indigo-500 mt-0.5"
+                checked={trimCommonSupport} onChange={(e) => setTrimCommonSupport(e.target.checked)} />
+              <span className="text-[10px] text-gray-600 leading-tight">
+                <span className="font-medium">Trim to common support</span>
+                <Tip wide text="Exclude treated and control units with PS outside the overlap region before weighting." />
+                <span className="block text-gray-400">Crump 2009 trimming</span>
+              </span>
+            </label>
+          </div>
+
+          <div className="space-y-1 pt-2 border-t border-gray-100">
+            <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
+              Standard error
+              <Tip wide text="Robust — HC1 sandwich. Bootstrap — refit propensity scores and outcome model on resampled subjects." />
+            </span>
+            <div className="flex gap-1">
+              {(["robust", "bootstrap"] as const).map((m) => (
+                <button key={m} onClick={() => setSeMethod(m)}
+                  className={`flex-1 px-2 py-1 text-[10px] rounded border transition-colors ${seMethod === m ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
+                  {m === "robust" ? "Robust ★" : "Bootstrap"}
+                </button>
+              ))}
+            </div>
+            {seMethod === "bootstrap" && (
+              <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                Reps
+                <input type="number" min="50" max="5000" step="50" className="select text-[10px] py-0.5 flex-1"
+                  value={bootstrapReps}
+                  onChange={(e) => setBootstrapReps(parseInt(e.target.value, 10))} />
+              </label>
+            )}
+          </div>
         </div>
 
         {/* Treatment variable */}
         <div className="panel space-y-2">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
             Treatment Variable
-            <Tip wide text="The binary intervention variable: 1 = Treated, 0 = Control. Must be coded 0/1." />
+            <Tip wide text="The binary intervention variable (0/1)." />
           </label>
           <select
             className="select w-full"
@@ -323,16 +451,13 @@ export default function PSMPanel() {
               ? binaryCols.map((c) => <option key={c} value={c}>{c}</option>)
               : allCols.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          {!binaryCols.includes(treatCol) && (
-            <p className="text-[10px] text-amber-600">⚠ Column may not be binary (0/1)</p>
-          )}
         </div>
 
         {/* Outcome variable */}
         <div className="panel space-y-2">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
             Outcome Variable <span className="normal-case font-normal text-gray-400">(optional)</span>
-            <Tip wide text="The endpoint to analyse in the matched cohort. If binary, conditional logistic or GEE logistic is run automatically. Leave blank to only assess balance." />
+            <Tip wide text="The endpoint to analyse in the weighted cohort." />
           </label>
           <select
             className="select w-full"
@@ -347,7 +472,7 @@ export default function PSMPanel() {
         <div className="panel space-y-2">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
             Covariates (Confounders)
-            <Tip wide text="Baseline patient characteristics that influence both treatment and outcome. Include all known confounders." />
+            <Tip wide text="Baseline characteristics that influence both treatment and outcome." />
           </label>
           <input
             type="text"
@@ -374,111 +499,16 @@ export default function PSMPanel() {
           <p className="text-[10px] text-gray-400">{covariates.length} selected</p>
         </div>
 
-        {/* Caliper */}
-        <div className="panel space-y-2">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-            Caliper
-            <Tip wide text="Maximum allowed PS distance for a match, as a fraction of the SD of propensity scores. Medical standard = 0.2." />
-          </label>
-          <div className="flex gap-2 items-center">
-            <input type="range" min="0.05" max="0.50" step="0.05"
-              className="flex-1 accent-indigo-500"
-              value={caliper}
-              onChange={(e) => setCaliper(parseFloat(e.target.value))} />
-            <span className="font-mono text-sm font-semibold text-indigo-700 w-10 text-right">{caliper}</span>
-          </div>
-          <div className="flex justify-between text-[9px] text-gray-400">
-            <span>0.05 (strict)</span>
-            <span className="text-indigo-500">0.20 ★ standard</span>
-            <span>0.50 (loose)</span>
-          </div>
-          <div className="pt-2 border-t border-gray-100 space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
-                Caliper scale
-                <Tip wide text="Austin (2011) recommends matching on the LOGIT of the propensity score: 'logit' is the publication standard." />
-              </span>
-              <div className="flex gap-1">
-                {(["logit", "raw"] as const).map((s) => (
-                  <button key={s} onClick={() => setCaliperScale(s)}
-                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${caliperScale === s ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
-                    {s === "logit" ? "Logit ★" : "Raw PS"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" className="accent-indigo-500 mt-0.5"
-                checked={trimCommonSupport} onChange={(e) => setTrimCommonSupport(e.target.checked)} />
-              <span className="text-[10px] text-gray-600 leading-tight">
-                <span className="font-medium">Trim to common support</span>
-                <Tip wide text="Exclude treated and control units with PS outside the overlap region before matching." />
-                <span className="block text-gray-400">Crump 2009 trimming</span>
-              </span>
-            </label>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-500 font-medium">Ratio</span>
-              <select className="select text-[10px] py-0.5 flex-1" value={ratio} onChange={(e) => setRatio(parseInt(e.target.value, 10))}>
-                {[1, 2, 3, 4, 5].map((k) => <option key={k} value={k}>1 : {k}</option>)}
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-500 font-medium">Seed</span>
-              <input type="number" className="select text-[10px] py-0.5 flex-1"
-                value={randomState} onChange={(e) => setRandomState(parseInt(e.target.value, 10))} />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 font-medium">Score model</span>
-              <select className="select text-[10px] py-0.5" value={scoreMethod}
-                onChange={(e) => setScoreMethod(e.target.value as any)}>
-                <option value="logistic">Logistic ★</option>
-                <option value="probit">Probit</option>
-                <option value="gbm">GBM</option>
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
-                Matching
-                <Tip wide text="Greedy: standard caliper nearest neighbour. Optimal: Hungarian algorithm minimises total distance." />
-              </span>
-              <div className="flex gap-1">
-                {(["greedy", "optimal"] as const).map((m) => (
-                  <button key={m} onClick={() => setMatchingMethod(m)}
-                    className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${matchingMethod === m ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
-                    {m === "greedy" ? "Greedy ★" : "Optimal"}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="space-y-1">
-              <span className="text-[10px] text-gray-500 font-medium flex items-center gap-1">
-                Exact match strata
-              </span>
-              <div className="max-h-20 overflow-y-auto border border-gray-200 rounded p-1 space-y-0.5">
-                {allCols.filter((c) => c !== treatCol).slice(0, 100).map((c) => (
-                  <label key={c} className="flex items-center gap-1 text-[10px] px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
-                    <input type="checkbox" className="accent-indigo-500"
-                      checked={exactMatch.includes(c)}
-                      onChange={() => setExactMatch((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c])} />
-                    <span className="text-gray-700 truncate">{c}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Outcome type */}
         <div className="panel space-y-2">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-            Outcome type
-            <Tip wide text="Binary: conditional logistic / GEE logistic on the matched cohort. Survival: stratified Cox PH." />
+            Outcome Type
           </label>
           <div className="flex gap-1">
             {(["binary", "survival"] as const).map((t) => (
               <button key={t} onClick={() => { setOutcomeType(t); setResult(null); }}
                 className={`flex-1 px-2 py-1 text-[11px] rounded border transition-colors ${outcomeType === t ? "bg-indigo-600 text-white border-indigo-600" : "border-gray-300 text-gray-500 hover:bg-gray-50"}`}>
-                {t === "binary" ? "Binary" : "Survival (Cox)"}
+                {t === "binary" ? "Binary" : "Survival"}
               </button>
             ))}
           </div>
@@ -500,17 +530,6 @@ export default function PSMPanel() {
               </div>
             </div>
           )}
-          {outcomeType === "binary" && ratio === 1 && outcomeCol && (
-            <label className="flex items-start gap-2 cursor-pointer pt-1 border-t border-gray-100">
-              <input type="checkbox" className="accent-indigo-500 mt-0.5"
-                checked={computeRosenbaum} onChange={(e) => setComputeRosenbaum(e.target.checked)} />
-              <span className="text-[10px] text-gray-600 leading-tight">
-                <span className="font-medium">Rosenbaum bounds</span>
-                <Tip wide text="Sensitivity analysis to unmeasured confounding. Computes the critical Γ — hidden bias size nullifying treatment p < 0.05." />
-                <span className="block text-gray-400">1:1 binary only · Γ up to {rosenbaumGammaMax.toFixed(1)}</span>
-              </span>
-            </label>
-          )}
         </div>
 
         {/* Run */}
@@ -518,8 +537,8 @@ export default function PSMPanel() {
           className="btn-primary w-full py-3 text-sm font-semibold flex items-center justify-center gap-2"
           onClick={run} disabled={loading || covariates.length === 0}>
           {loading
-            ? <><span className="animate-spin inline-block">⏳</span> Matching…</>
-            : <><span>🔗</span> Run PSM</>}
+            ? <><span className="animate-spin inline-block">⏳</span> Weighting…</>
+            : <><span>⚖️</span> Run IPTW</>}
         </button>
         {error && (
           <div className="bg-red-50 border border-red-200 rounded-xl px-3 py-2 text-xs text-red-600">{error}</div>
@@ -549,17 +568,17 @@ export default function PSMPanel() {
                   <p className={`font-bold text-sm ${result.balance_achieved ? "text-emerald-800" : "text-amber-800"}`}>
                     {result.balance_achieved
                       ? "Balance achieved — all SMDs < 0.10. Publication-ready."
-                      : "Partial balance — some SMDs ≥ 0.10. Consider widening caliper or adjusting covariates."}
+                      : "Partial balance — some SMDs ≥ 0.10. Consider trimming weights, switching to overlap weights, or adjusting covariates."}
                   </p>
                   <p className="text-xs text-gray-600 mt-1">
-                    Matched {result.n_matched_pairs} treated : {result.n_matched_controls} control pairs
-                    ({result.n_unmatched} treated patients unmatched and excluded).
+                    IPTW · {(result.estimand ?? "ate").toUpperCase()} weights
+                    {result.stabilize ? " (stabilised)" : ""}
+                    {" · "}n = {result.n_total} ({result.n_treated} treated, {result.n_control} control)
+                    {result.n_trimmed_common_support > 0 && <> · {result.n_trimmed_common_support} trimmed (common support)</>}
+                    {result.weight_truncation?.n_trimmed > 0 && <> · {result.weight_truncation.n_trimmed} weights truncated</>}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Caliper = {result.caliper_used?.toFixed(4)} on the <b>{result.caliper_scale ?? "logit"}</b> scale ({caliper} × SD = {result.caliper_used?.toFixed(4)}).
-                    {result.n_trimmed_common_support > 0 && (
-                      <> · {result.n_trimmed_common_support} units trimmed (common support [{result.common_support?.lo?.toFixed(3)}, {result.common_support?.hi?.toFixed(3)}]).</>
-                    )}
+                    Score = {result.score_method} · ESS treated = {result.weight_summary?.ess_treated} · ESS control = {result.weight_summary?.ess_control} · max w = {result.weight_summary?.max}
                   </p>
                 </div>
               </div>
@@ -570,15 +589,13 @@ export default function PSMPanel() {
                   { label: "Total N", val: result.n_total },
                   { label: "Treated", val: result.n_treated },
                   { label: "Controls", val: result.n_control },
-                  { label: "Matched Pairs", val: result.n_matched_pairs, highlight: true },
-                  { label: "Unmatched", val: result.n_unmatched, warn: result.n_unmatched > 0 },
-                ].map(({ label, val, highlight, warn }: any) => (
+                  { label: "ESS Treated", val: result.weight_summary?.ess_treated, highlight: true },
+                  { label: "ESS Control", val: result.weight_summary?.ess_control, highlight: true },
+                ].map(({ label, val, highlight }: any) => (
                   <div key={label} className={`rounded-lg px-2 py-2 text-center border ${
-                    highlight ? "bg-indigo-50 border-indigo-200" :
-                    warn && val > 0 ? "bg-amber-50 border-amber-200" :
-                    "bg-white border-gray-200"}`}>
+                    highlight ? "bg-indigo-50 border-indigo-200" : "bg-white border-gray-200"}`}>
                     <p className="text-[9px] text-gray-400 uppercase tracking-wide">{label}</p>
-                    <p className={`text-lg font-bold ${highlight ? "text-indigo-700" : warn && val > 0 ? "text-amber-600" : "text-gray-800"}`}>
+                    <p className={`text-lg font-bold ${highlight ? "text-indigo-700" : "text-gray-800"}`}>
                       {val}
                     </p>
                   </div>
@@ -586,19 +603,61 @@ export default function PSMPanel() {
               </div>
             </div>
 
+            {/* Weight distribution */}
+            {result.weight_distribution && (
+              <div className="panel space-y-2 xl:col-start-1">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-800">Weight Distribution</h3>
+                    <p className="text-[10px] text-gray-400">
+                      Per-unit IPTW weights by treatment group. Wider tails or large maxima indicate poor PS support.
+                    </p>
+                  </div>
+                  <div className="text-[10px] text-gray-500 text-right">
+                    min {result.weight_summary?.min} · median {result.weight_summary?.median} · max {result.weight_summary?.max}
+                  </div>
+                </div>
+                <Plot
+                  data={[
+                    {
+                      type: "histogram", name: "Treated",
+                      x: result.weight_distribution.treated,
+                      opacity: 0.65, marker: { color: "#6366f1" },
+                    },
+                    {
+                      type: "histogram", name: "Control",
+                      x: result.weight_distribution.control,
+                      opacity: 0.65, marker: { color: "#10b981" },
+                    },
+                  ] as any}
+                  layout={{
+                    ...PLOT_BASE,
+                    barmode: "overlay",
+                    height: 220, autosize: true,
+                    margin: { t: 24, r: 20, b: 40, l: 60 },
+                    xaxis: { title: { text: "IPTW weight" } },
+                    yaxis: { title: { text: "Count" } },
+                    legend: { font: { size: 10 } },
+                  }}
+                  style={{ width: "100%", height: 220 }}
+                  config={{ responsive: true, displaylogo: false }}
+                />
+              </div>
+            )}
+
             {/* Love Plot */}
             <div className="panel space-y-3 xl:col-start-1">
               <div className="flex items-center justify-between flex-wrap gap-2">
                 <div>
                   <h3 className="text-sm font-bold text-gray-800">Love Plot: Covariate Balance</h3>
                   <p className="text-[10px] text-gray-400">
-                    Thomas Love plot. Publication-required visual proof of balance. All matched points (blue ●) must lie left of the threshold.
+                    Publication-standard balance visualization. All weighted points (blue ●) must lie left of the threshold line.
                   </p>
                 </div>
                 <div className="flex gap-3">
                   {[
-                    { label: "Avg Unmatched SMD", val: result.avg_smd_before, color: "text-red-600" },
-                    { label: "Avg Matched SMD", val: result.avg_smd_after, color: "text-emerald-600" },
+                    { label: "Avg Unweighted SMD", val: result.avg_smd_before, color: "text-red-600" },
+                    { label: "Avg Weighted SMD", val: result.avg_smd_after, color: "text-emerald-600" },
                     { label: "Reduction", val: `${result.reduction_pct}%`, color: "text-indigo-600" },
                   ].map(({ label, val, color }) => (
                     <div key={label} className="text-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
@@ -637,8 +696,8 @@ export default function PSMPanel() {
                   </div>
                 </label>
                 <div className="flex items-center gap-3 text-xs ml-auto">
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-400 rounded-sm inline-block" /> Unmatched</span>
-                  <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-500 rounded-full inline-block" /> Matched</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 bg-red-400 rounded-sm inline-block" /> Unweighted</span>
+                  <span className="flex items-center gap-1"><span className="w-3 h-3 bg-blue-500 rounded-full inline-block" /> Weighted</span>
                   <span className="flex items-center gap-1"><span className="border-l-2 border-dashed border-red-500 h-3 inline-block" /> Threshold</span>
                 </div>
               </div>
@@ -649,10 +708,10 @@ export default function PSMPanel() {
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-700">
                   SMD Balance Table
-                  <Tip wide text="Standardized Mean Difference measures imbalance. Golden standard: SMDs after matching must be < 0.10 (Austin, 2009)." />
+                  <Tip wide text="Standardized Mean Difference measures imbalance in each covariate between groups." />
                 </h3>
                 <ResultExporter
-                  title="PSM_SMD_Balance"
+                  title="IPTW_SMD_Balance"
                   headers={smdExportHeaders}
                   rows={smdExportRows}
                 />
@@ -665,7 +724,7 @@ export default function PSMPanel() {
                       <th className="text-right px-3 py-2 font-medium">SMD Before</th>
                       <th className="text-right px-3 py-2 font-medium">SMD After</th>
                       <th className="text-right px-3 py-2 font-medium" title="Rubin's variance ratio. Target 0.5–2.0.">Var Ratio</th>
-                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value.">KS p (after)</th>
+                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value after weighting.">KS p (after)</th>
                       <th className="text-right px-3 py-2 font-medium">Reduction</th>
                       <th className="text-center px-3 py-2 font-medium">Balanced</th>
                     </tr>
@@ -738,11 +797,11 @@ export default function PSMPanel() {
             {result.outcome_result && !result.outcome_result.error && (() => {
               const t: string = result.outcome_result.type ?? "";
               const isCoxKind = t.startsWith("stratified_cox") || t.startsWith("weighted_cox");
-              const isClogit = t.startsWith("conditional_logistic");
+              const isWeightedGLM = t.startsWith("weighted_glm");
               return (
               <div className="panel space-y-3 xl:col-start-2">
                 <h3 className="text-sm font-semibold text-gray-700">
-                  Outcome Analysis — Matched Cohort
+                  Outcome Analysis — Weighted Cohort
                   <span className="ml-2 text-[10px] font-normal text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-full px-2 py-0.5">
                     {result.outcome_result.model}
                   </span>
@@ -750,7 +809,7 @@ export default function PSMPanel() {
                 <div className="grid grid-cols-3 gap-2">
                   {isCoxKind ? (
                     [
-                      ["n (matched)", result.outcome_result.n],
+                      ["n (weighted)", result.outcome_result.n],
                       ["Events", result.outcome_result.n_events],
                       ["C-index", result.outcome_result.concordance?.toFixed(3)],
                     ].map(([k, v]: any) => (
@@ -759,11 +818,11 @@ export default function PSMPanel() {
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
                       </div>
                     ))
-                  ) : isClogit ? (
+                  ) : isWeightedGLM ? (
                     [
-                      ["n (in fit)", result.outcome_result.n],
-                      ["Informative sets", result.outcome_result.n_informative_sets],
-                      ["Concordant sets", result.outcome_result.n_uninformative_sets],
+                      ["n (weighted)", result.outcome_result.n],
+                      ["Estimand", (result.estimand ?? "ate").toUpperCase()],
+                      ["SE Method", (result.se_method === "bootstrap" ? "Bootstrap" : "Robust HC1")],
                     ].map(([k, v]: any) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
@@ -772,7 +831,7 @@ export default function PSMPanel() {
                     ))
                   ) : (
                     [
-                      ["n (matched)", result.outcome_result.n],
+                      ["n (weighted)", result.outcome_result.n],
                       ["AIC", result.outcome_result.aic?.toFixed(2)],
                       ["BIC", result.outcome_result.bic?.toFixed(2)],
                     ].map(([k, v]: any) => (
@@ -835,95 +894,33 @@ export default function PSMPanel() {
                 Outcome analysis failed: {result.outcome_result.error}
               </div>
             )}
-
-            {/* Rosenbaum bounds */}
-            {result.rosenbaum && (
-              <div className="panel space-y-2 xl:col-start-2">
-                <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
-                  Rosenbaum Bounds — Sensitivity to Hidden Bias
-                </h3>
-                {result.rosenbaum.applicable === false ? (
-                  <p className="text-xs text-gray-500">{result.rosenbaum.reason}</p>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-4 gap-2">
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
-                        <p className="text-[10px] text-gray-400">Discordant pairs</p>
-                        <p className="font-semibold text-gray-800 text-sm">{result.rosenbaum.discordant_pairs} ({result.rosenbaum.b} / {result.rosenbaum.c})</p>
-                      </div>
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
-                        <p className="text-[10px] text-gray-400">p (Γ = 1)</p>
-                        <p className="font-semibold text-gray-800 text-sm">{fmtP(result.rosenbaum.p_unbiased)}</p>
-                      </div>
-                      <div className={`rounded-lg p-2 text-center border ${result.rosenbaum.critical_gamma != null && result.rosenbaum.critical_gamma > 1.5 ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
-                        <p className="text-[10px] text-gray-500">Critical Γ</p>
-                        <p className={`font-semibold text-sm ${result.rosenbaum.critical_gamma != null && result.rosenbaum.critical_gamma > 1.5 ? "text-emerald-700" : "text-amber-700"}`}>
-                          {result.rosenbaum.critical_gamma != null ? result.rosenbaum.critical_gamma.toFixed(2) : `> ${result.rosenbaum.gamma_max}`}
-                        </p>
-                      </div>
-                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
-                        <p className="text-[10px] text-gray-400">α</p>
-                        <p className="font-semibold text-gray-800 text-sm">{result.rosenbaum.alpha}</p>
-                      </div>
-                    </div>
-                    <div className="overflow-auto rounded-lg border border-gray-200 max-h-48">
-                      <table className="w-full text-[11px] border-collapse">
-                        <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 text-gray-500">
-                          <tr>
-                            <th className="text-left px-2 py-1">Γ</th>
-                            <th className="text-right px-2 py-1">Upper-bound one-sided p</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {result.rosenbaum.curve?.map((r: any) => (
-                            <tr key={r.gamma} className={r.p_upper > result.rosenbaum.alpha ? "bg-amber-50" : ""}>
-                              <td className="px-2 py-0.5 font-mono">{r.gamma.toFixed(2)}</td>
-                              <td className="px-2 py-0.5 text-right font-mono">{r.p_upper.toFixed(4)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    <p className="text-[10px] text-gray-400">
-                      Reference: Rosenbaum PR (2002). <em>Observational Studies</em>.
-                    </p>
-                  </>
-                )}
-              </div>
-            )}
-
-            {result.matching_warning && (
-              <div className="panel bg-amber-50 border border-amber-200 text-xs text-amber-800 xl:col-start-2">
-                {result.matching_warning}
-              </div>
-            )}
           </div>
         ) : (
           /* Empty state */
           <div className="space-y-4">
-            <div className="panel bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-100">
+            <div className="panel bg-gradient-to-br from-indigo-50 to-emerald-50 border-indigo-100">
               <div className="flex items-center gap-3 mb-3">
-                <span className="text-3xl">🧬</span>
+                <span className="text-3xl">⚖️</span>
                 <div>
-                  <h2 className="text-base font-bold text-indigo-900">Propensity Score Matching</h2>
-                  <p className="text-xs text-indigo-600">Advanced Epidemiology — Observational Causal Inference</p>
+                  <h2 className="text-base font-bold text-indigo-900">Inverse Probability of Treatment Weighting (IPTW)</h2>
+                  <p className="text-xs text-indigo-600">Observational Causal Inference — Propensity Score Weighting</p>
                 </div>
               </div>
               <p className="text-sm text-gray-700 leading-relaxed">
-                PSM mimics a Randomized Controlled Trial from observational data by balancing baseline characteristics between treated and control groups. It is the accepted gold standard for non-randomized cardiology studies.
+                IPTW is a causal inference technique that uses propensity scores to weight each individual in the dataset. This creates a synthetic sample where baseline characteristics are balanced between groups, allowing for unbiased estimation of treatment effects (e.g., ATE or ATT) without discarding data.
               </p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               {[
                 { icon: "🎯", title: "Step 1 — Propensity Score",
-                  body: "Logistic regression (Treatment ~ Covariates) estimates each patient's probability of receiving treatment given baseline profile. This is their Propensity Score (PS)." },
-                { icon: "🔗", title: "Step 2 — Nearest-Neighbour Matching",
-                  body: "Each treated patient is matched to the control with the closest PS. Caliper = 0.2 × SD(PS) — the medical standard prevents poor matches from degrading balance." },
-                { icon: "📊", title: "Step 3 — Love Plot (SMD)",
-                  body: "Standardized Mean Differences are calculated before and after matching for every covariate. ALL SMDs must be < 0.10 for the match to be publication-ready." },
-                { icon: "🏥", title: "Step 4 — Outcome Analysis",
-                  body: "Logistic regression or Cox regression is run on the balanced matched cohort. Treatment effects estimated here are free from measured confounding." },
+                  body: "A model (Logistic, Probit or GBM) predicts the probability of receiving treatment for each subject given their baseline covariates." },
+                { icon: "⚖️", title: "Step 2 — Weight Calculation",
+                  body: "Subject weights are computed as the inverse probability of their actual treatment assignment. Supports ATE (whole sample), ATT (exposed target), or Overlap (clinical equipoise)." },
+                { icon: "📊", title: "Step 3 — Love Plot Balance Check",
+                  body: "The weighted standardized mean differences (SMDs) are evaluated for all covariates. Values < 0.10 show excellent publication-ready balance." },
+                { icon: "🏥", title: "Step 4 — Weighted Outcome GLM",
+                  body: "A weighted regression model (GLM or Cox proportional hazards) is run on the weighted sample, using robust (sandwich) or bootstrap standard errors." },
               ].map(({ icon, title, body }) => (
                 <div key={title} className="panel flex gap-3 border-t-4 border-indigo-200">
                   <span className="text-2xl flex-shrink-0">{icon}</span>
@@ -938,9 +935,9 @@ export default function PSMPanel() {
             <div className="panel bg-amber-50 border border-amber-200 space-y-1.5">
               <p className="text-xs font-bold text-amber-800">⚠ Key Assumptions</p>
               {[
-                ["No unmeasured confounders", "PSM only balances variables you include. Hidden confounders (not in your dataset) cannot be removed."],
-                ["Binary treatment", "The treatment variable must be 0/1. Continuous or multi-level treatments require other methods."],
-                ["Common support", "Treated and control propensity score distributions must overlap substantially. No overlap = no valid matches."],
+                ["Positivity", "Every subject must have a non-zero probability of receiving both treatment options. Extreme weights (close to 0 or 1 PS) can destabilize the estimator."],
+                ["Stabilisation", "Stabilised weights rescale the raw weights by the marginal probability of treatment, drastically reducing standard error inflation."],
+                ["Exchangeability", "Assumes all confounding factors are measured and properly adjusted for in the propensity score model."],
               ].map(([title, body]) => (
                 <div key={title} className="flex gap-1.5 text-[10px] text-amber-700">
                   <span className="flex-shrink-0 font-semibold">{title}:</span>
