@@ -1430,3 +1430,262 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
         "export_rows": export_rows,
         "r_code": r_code,
     })
+
+
+# ── Survival model validation: time-dependent AUC(t) + calibration ───────────
+
+class SurvivalValidationRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predictors: List[str]
+    horizon: float                       # landmark time t* for AUC(t) / calibration
+    n_groups: int = 10                   # risk groups for the calibration plot
+    imputation: Optional[str] = "listwise"
+
+
+def _encode_survival_predictors(df: pd.DataFrame, predictors: List[str]) -> pd.DataFrame:
+    """Numeric stay numeric; categorical → drop_first dummies; all float."""
+    raw = df[predictors].copy()
+    num, cat = [], []
+    for c in predictors:
+        if pd.api.types.is_numeric_dtype(raw[c]):
+            num.append(c)
+        else:
+            coerced = pd.to_numeric(raw[c], errors="coerce")
+            if coerced.notna().mean() >= 0.8 and coerced.dropna().nunique() > 2:
+                raw[c] = coerced
+                num.append(c)
+            else:
+                cat.append(c)
+    num_part = raw[num].apply(pd.to_numeric, errors="coerce") if num else pd.DataFrame(index=raw.index)
+    cat_part = pd.get_dummies(raw[cat], drop_first=True, dummy_na=False) if cat else pd.DataFrame(index=raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1)
+    enc.columns = [str(c) for c in enc.columns]
+    return enc.astype(float)
+
+
+@router.post("/survival_validation")
+def survival_validation(req: SurvivalValidationRequest):
+    from lifelines import CoxPHFitter, KaplanMeierFitter
+    from services.impute import apply_imputation
+
+    df = _get_df(req.session_id)
+    for c in [req.duration_col, req.event_col, *req.predictors]:
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not req.predictors:
+        raise HTTPException(status_code=422, detail="Select at least one predictor.")
+
+    cols = [req.duration_col, req.event_col, *req.predictors]
+    work = apply_imputation(df[cols], cols, req.imputation or "listwise").reset_index(drop=True)
+    work[req.duration_col] = pd.to_numeric(work[req.duration_col], errors="coerce")
+    work[req.event_col] = pd.to_numeric(work[req.event_col], errors="coerce")
+    work = work.dropna(subset=[req.duration_col, req.event_col])
+    enc = _encode_survival_predictors(work, req.predictors)
+    fit_df = pd.concat(
+        [work[[req.duration_col, req.event_col]].reset_index(drop=True), enc.reset_index(drop=True)], axis=1
+    ).dropna()
+    if len(fit_df) < 20:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need >= 20, got {len(fit_df)}).")
+    if not list(enc.columns):
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+
+    t = fit_df[req.duration_col].to_numpy(dtype=float)
+    e = fit_df[req.event_col].to_numpy(dtype=int)
+    if set(np.unique(e)) - {0, 1}:
+        raise HTTPException(status_code=422, detail="Event column must be binary 0/1.")
+    tau = float(req.horizon)
+    if tau <= 0 or tau > float(t.max()):
+        raise HTTPException(status_code=422, detail=f"horizon must be in (0, {t.max():.3f}].")
+
+    cph = CoxPHFitter()
+    try:
+        cph.fit(fit_df, duration_col=req.duration_col, event_col=req.event_col)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Cox model did not converge: {exc}")
+
+    X = fit_df[list(enc.columns)]
+    risk_lp = cph.predict_log_partial_hazard(X).to_numpy(dtype=float)          # higher = worse
+    surv_t = cph.predict_survival_function(X, times=[tau]).iloc[0].to_numpy(dtype=float)
+    pred_risk = 1.0 - surv_t                                                    # predicted cum. incidence at tau
+
+    # ── IPCW cumulative-case / dynamic-control AUC(t) (Uno 2007) ──
+    kmc = KaplanMeierFitter().fit(t, (e == 0).astype(int))                      # KM of the censoring distribution
+    g_times = kmc.survival_function_.index.values.astype(float)
+    g_vals = kmc.survival_function_.iloc[:, 0].to_numpy(dtype=float)
+
+    def _G(x: float) -> float:
+        idx = int(np.searchsorted(g_times, x, side="right")) - 1
+        return float(g_vals[idx]) if idx >= 0 else 1.0
+
+    case = (t <= tau) & (e == 1)
+    control = t > tau
+    auc_t = None
+    if case.sum() > 0 and control.sum() > 0:
+        w_case = np.array([1.0 / max(_G(ti), 1e-8) for ti in t])
+        wc = 1.0 / max(_G(tau), 1e-8)
+        Mc = np.sort(risk_lp[control])
+        n_ctrl = len(Mc)
+        num = 0.0
+        den = 0.0
+        for i in np.where(case)[0]:
+            below = int(np.searchsorted(Mc, risk_lp[i], side="left"))
+            ties = int(np.searchsorted(Mc, risk_lp[i], side="right")) - below
+            num += w_case[i] * wc * (below + 0.5 * ties)
+            den += w_case[i] * wc * n_ctrl
+        auc_t = float(num / den) if den > 0 else None
+
+    # ── Calibration by predicted-risk groups ──
+    ng = max(2, min(req.n_groups, 20))
+    order = np.argsort(pred_risk)
+    cal = []
+    obs_total = 0.0
+    for gi, idxs in enumerate(np.array_split(order, ng)):
+        if len(idxs) == 0:
+            continue
+        kmf = KaplanMeierFitter().fit(t[idxs], e[idxs])
+        s_at = kmf.survival_function_at_times(tau)
+        s_val = float(s_at.iloc[0]) if hasattr(s_at, "iloc") else float(s_at)
+        obs = 1.0 - s_val
+        cal.append({"group": gi + 1, "n": int(len(idxs)),
+                    "pred": round(float(np.mean(pred_risk[idxs])), 4), "obs": round(float(obs), 4)})
+        obs_total += obs * len(idxs)
+    exp_total = float(np.sum(pred_risk))
+    oe = float(obs_total / exp_total) if exp_total > 0 else None
+
+    return _safe({
+        "test": "Survival model validation",
+        "horizon": tau,
+        "n": int(len(fit_df)),
+        "n_events_by_horizon": int(case.sum()),
+        "time_auc": round(auc_t, 4) if auc_t is not None else None,
+        "concordance": round(float(cph.concordance_index_), 4),
+        "oe_ratio": round(oe, 4) if oe is not None else None,
+        "calibration": cal,
+        "coefficients": [
+            {"variable": str(v), "hr": round(float(np.exp(cph.params_[v])), 4)}
+            for v in cph.params_.index
+        ],
+        "note": (
+            "Time-dependent AUC(t) is the IPCW cumulative-case / dynamic-control AUC at the "
+            "horizon (Uno 2007). Calibration compares the Cox-predicted cumulative incidence "
+            "with the 1 - Kaplan-Meier observed risk in each predicted-risk group; O/E is "
+            "total observed / total expected events."
+        ),
+    })
+
+
+# ── Discrete-time survival (person-period logistic, cluster-robust) ───────────
+
+class DiscreteTimeRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predictors: List[str]
+    n_intervals: int = 5
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/discrete_time")
+def discrete_time(req: DiscreteTimeRequest):
+    import statsmodels.api as sm
+    from services.impute import apply_imputation
+
+    df = _get_df(req.session_id)
+    for c in [req.duration_col, req.event_col, *req.predictors]:
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not req.predictors:
+        raise HTTPException(status_code=422, detail="Select at least one predictor.")
+
+    cols = [req.duration_col, req.event_col, *req.predictors]
+    work = apply_imputation(df[cols], cols, req.imputation or "listwise").reset_index(drop=True)
+    work[req.duration_col] = pd.to_numeric(work[req.duration_col], errors="coerce")
+    work[req.event_col] = pd.to_numeric(work[req.event_col], errors="coerce")
+    work = work.dropna(subset=[req.duration_col, req.event_col])
+    enc = _encode_survival_predictors(work, req.predictors)
+    base = pd.concat(
+        [work[[req.duration_col, req.event_col]].reset_index(drop=True), enc.reset_index(drop=True)], axis=1
+    ).dropna()
+    if len(base) < 20:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need >= 20, got {len(base)}).")
+
+    t = base[req.duration_col].to_numpy(dtype=float)
+    e = base[req.event_col].to_numpy(dtype=int)
+    if set(np.unique(e)) - {0, 1}:
+        raise HTTPException(status_code=422, detail="Event column must be binary 0/1.")
+    cov_cols = list(enc.columns)
+    if not cov_cols:
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+
+    n_int = max(2, min(int(req.n_intervals), 12))
+    edges = np.unique(np.quantile(t, np.linspace(0.0, 1.0, n_int + 1)))
+    edges[0] = float(t.min()) - 1e-9
+    n_int = len(edges) - 1
+    if n_int < 2:
+        raise HTTPException(status_code=422, detail="Too few distinct event times to form discrete intervals.")
+    if len(base) * n_int > 400_000:
+        raise HTTPException(status_code=422, detail="Person-period dataset too large; reduce rows or intervals.")
+
+    cov_arr = base[cov_cols].to_numpy(dtype=float)
+    sid, interval, yv, covs = [], [], [], []
+    for i in range(len(base)):
+        ti, ei = float(t[i]), int(e[i])
+        for k in range(n_int):
+            lo, hi = edges[k], edges[k + 1]
+            if ti <= lo:
+                break
+            y = 1 if (ei == 1 and ti <= hi) else 0
+            sid.append(i); interval.append(k); yv.append(y); covs.append(cov_arr[i])
+            if ti <= hi:
+                break
+
+    pp = pd.DataFrame(covs, columns=cov_cols)
+    pp["_sid_"] = sid
+    pp["_int_"] = interval
+    pp["_y_"] = yv
+    int_dummies = pd.get_dummies(pp["_int_"], prefix="interval", drop_first=True).astype(float)
+    X = pd.concat([int_dummies, pp[cov_cols]], axis=1).astype(float)
+    X = sm.add_constant(X, has_constant="add")
+
+    try:
+        model = sm.GEE(pp["_y_"].astype(float), X, groups=pp["_sid_"],
+                       family=sm.families.Binomial(), cov_struct=sm.cov_struct.Independence())
+        res = model.fit()
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Discrete-time model did not converge: {exc}")
+
+    ci = res.conf_int()
+    coefs = []
+    for v in res.params.index:
+        if v == "const":
+            continue
+        beta = float(res.params[v])
+        lo = float(ci.loc[v, 0]); hi = float(ci.loc[v, 1])
+        is_interval = str(v).startswith("interval_")
+        coefs.append({
+            "variable": str(v),
+            "kind": "baseline_interval" if is_interval else "covariate",
+            "estimate": round(beta, 6),
+            "or": round(float(np.exp(beta)), 4),
+            "or_low": round(float(np.exp(lo)), 4),
+            "or_high": round(float(np.exp(hi)), 4),
+            "p": round(float(res.pvalues[v]), 6),
+        })
+
+    return _safe({
+        "test": "Discrete-time survival (person-period logistic)",
+        "model": "Cluster-robust logistic discrete-time hazard (GEE, independence working correlation)",
+        "n_subjects": int(len(base)),
+        "n_person_periods": int(len(pp)),
+        "n_intervals": int(n_int),
+        "interval_edges": [round(float(x), 4) for x in edges],
+        "coefficients": coefs,
+        "note": (
+            "Each subject is split into person-period rows up to their event/censoring interval; "
+            "a logistic model with interval indicators estimates the discrete-time hazard, with "
+            "cluster-robust (GEE) standard errors at the subject level. exp(beta) for a covariate "
+            "is the discrete-time hazard odds ratio; the interval terms are the baseline hazard shape."
+        ),
+    })

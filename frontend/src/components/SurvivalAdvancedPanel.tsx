@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runSurvivalValidation, runDiscreteTime } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -181,6 +181,25 @@ export default function SurvivalAdvancedPanel() {
   const [fgResult, setFgResult] = useState<any>(null);
   const [fgLoading, setFgLoading] = useState(false);
   const [fgError, setFgError] = useState<string | null>(null);
+
+  // Survival validation (time-dependent AUC + calibration)
+  const [svDur, setSvDur] = useState("");
+  const [svEvent, setSvEvent] = useState("");
+  const [svPreds, setSvPreds] = useState<string[]>([]);
+  const [svHorizon, setSvHorizon] = useState("");
+  const [svGroups, setSvGroups] = useState(10);
+  const [svResult, setSvResult] = useState<any>(null);
+  const [svLoading, setSvLoading] = useState(false);
+  const [svError, setSvError] = useState<string | null>(null);
+
+  // Discrete-time survival (person-period clustered logistic)
+  const [dtDur, setDtDur] = useState("");
+  const [dtEvent, setDtEvent] = useState("");
+  const [dtPreds, setDtPreds] = useState<string[]>([]);
+  const [dtIntervals, setDtIntervals] = useState(5);
+  const [dtResult, setDtResult] = useState<any>(null);
+  const [dtLoading, setDtLoading] = useState(false);
+  const [dtError, setDtError] = useState<string | null>(null);
 
   // E-value state
   const [evEst, setEvEst] = useState("");
@@ -1485,6 +1504,158 @@ export default function SurvivalAdvancedPanel() {
             </table>
           </div>
         )}
+      </Section>
+
+      <Section title="Model Validation — AUC(t) & Calibration"
+        description="Time-dependent discrimination (IPCW AUC at a horizon) and calibration (predicted vs observed risk by group) for a Cox model">
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Duration</label>
+              <select className="select w-full text-sm" value={svDur} onChange={(e) => setSvDur(e.target.value)}>
+                <option value="">— select —</option>
+                {columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Event (0/1)</label>
+              <select className="select w-full text-sm" value={svEvent} onChange={(e) => setSvEvent(e.target.value)}>
+                <option value="">— select —</option>
+                {columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-gray-500 block mb-0.5">Horizon t*</label>
+                <input className="select w-full text-sm" value={svHorizon} onChange={(e) => setSvHorizon(e.target.value)} placeholder="e.g. 365" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 block mb-0.5">Groups</label>
+                <input type="number" min={2} max={20} className="select w-full text-sm" value={svGroups} onChange={(e) => setSvGroups(Number(e.target.value))} />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-0.5">Predictors</label>
+            <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-1">
+              {columns.filter((c) => c.name !== svDur && c.name !== svEvent).map((c) => (
+                <label key={c.name} className="flex items-center gap-1.5 text-xs px-1 py-0.5 hover:bg-gray-50 cursor-pointer">
+                  <input type="checkbox" className="accent-indigo-500" checked={svPreds.includes(c.name)}
+                    onChange={() => setSvPreds((p) => p.includes(c.name) ? p.filter((x) => x !== c.name) : [...p, c.name])} />
+                  <span className="truncate">{c.name}</span>
+                </label>
+              ))}
+            </div>
+            <button className="btn-primary w-full mt-2 text-sm"
+              disabled={svLoading || !svDur || !svEvent || svPreds.length === 0 || !svHorizon}
+              onClick={async () => {
+                setSvLoading(true); setSvError(null); setSvResult(null);
+                try {
+                  const r = await runSurvivalValidation({ session_id: sid, duration_col: svDur, event_col: svEvent, predictors: svPreds, horizon: parseFloat(svHorizon), n_groups: svGroups });
+                  setSvResult(r.data);
+                } catch (e: any) { setSvError(e?.response?.data?.detail ?? "Validation failed"); }
+                finally { setSvLoading(false); }
+              }}>
+              {svLoading ? "Computing…" : "Run validation"}
+            </button>
+            {svError && <p className="text-red-500 text-xs mt-1">{svError}</p>}
+          </div>
+          <div>
+            {svResult && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[["AUC(t)", svResult.time_auc != null ? svResult.time_auc.toFixed(3) : "—"],
+                    ["C-index", svResult.concordance?.toFixed(3)],
+                    ["O/E", svResult.oe_ratio != null ? svResult.oe_ratio.toFixed(2) : "—"]].map(([k, v]) => (
+                    <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
+                      <p className="text-[9px] text-gray-400">{k}</p><p className="font-mono font-semibold text-xs">{v}</p>
+                    </div>
+                  ))}
+                </div>
+                <table className="w-full text-[11px]">
+                  <thead className="text-gray-400"><tr><th className="text-left">Grp</th><th className="text-right">Pred</th><th className="text-right">Obs</th><th className="text-right">n</th></tr></thead>
+                  <tbody>
+                    {svResult.calibration.map((g: any) => (
+                      <tr key={g.group} className="border-t border-gray-100"><td>{g.group}</td><td className="text-right font-mono">{g.pred.toFixed(3)}</td><td className="text-right font-mono">{g.obs.toFixed(3)}</td><td className="text-right text-gray-400">{g.n}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="text-[10px] text-gray-400">{svResult.n_events_by_horizon} events by t = {svResult.horizon}. {svResult.note}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Discrete-Time Survival"
+        description="Person-period logistic hazard with interval baselines and cluster-robust (GEE) standard errors at the subject level">
+        <div className="grid md:grid-cols-3 gap-3">
+          <div className="space-y-2">
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Duration</label>
+              <select className="select w-full text-sm" value={dtDur} onChange={(e) => setDtDur(e.target.value)}>
+                <option value="">— select —</option>
+                {columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Event (0/1)</label>
+              <select className="select w-full text-sm" value={dtEvent} onChange={(e) => setDtEvent(e.target.value)}>
+                <option value="">— select —</option>
+                {columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-0.5">Intervals</label>
+              <input type="number" min={2} max={12} className="select w-full text-sm" value={dtIntervals} onChange={(e) => setDtIntervals(Number(e.target.value))} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 block mb-0.5">Predictors</label>
+            <div className="max-h-40 overflow-y-auto border border-gray-200 rounded p-1">
+              {columns.filter((c) => c.name !== dtDur && c.name !== dtEvent).map((c) => (
+                <label key={c.name} className="flex items-center gap-1.5 text-xs px-1 py-0.5 hover:bg-gray-50 cursor-pointer">
+                  <input type="checkbox" className="accent-indigo-500" checked={dtPreds.includes(c.name)}
+                    onChange={() => setDtPreds((p) => p.includes(c.name) ? p.filter((x) => x !== c.name) : [...p, c.name])} />
+                  <span className="truncate">{c.name}</span>
+                </label>
+              ))}
+            </div>
+            <button className="btn-primary w-full mt-2 text-sm"
+              disabled={dtLoading || !dtDur || !dtEvent || dtPreds.length === 0}
+              onClick={async () => {
+                setDtLoading(true); setDtError(null); setDtResult(null);
+                try {
+                  const r = await runDiscreteTime({ session_id: sid, duration_col: dtDur, event_col: dtEvent, predictors: dtPreds, n_intervals: dtIntervals });
+                  setDtResult(r.data);
+                } catch (e: any) { setDtError(e?.response?.data?.detail ?? "Discrete-time failed"); }
+                finally { setDtLoading(false); }
+              }}>
+              {dtLoading ? "Fitting…" : "Fit discrete-time"}
+            </button>
+            {dtError && <p className="text-red-500 text-xs mt-1">{dtError}</p>}
+          </div>
+          <div>
+            {dtResult && (
+              <div className="space-y-2">
+                <p className="text-[11px] text-gray-500">{dtResult.n_subjects} subjects · {dtResult.n_person_periods} person-periods · {dtResult.n_intervals} intervals</p>
+                <table className="w-full text-[11px]">
+                  <thead className="text-gray-400"><tr><th className="text-left">Term</th><th className="text-right">OR</th><th className="text-right">95% CI</th><th className="text-right">p</th></tr></thead>
+                  <tbody>
+                    {dtResult.coefficients.map((co: any) => (
+                      <tr key={co.variable} className={`border-t border-gray-100 ${co.kind === "baseline_interval" ? "text-gray-400" : ""}`}>
+                        <td className="truncate max-w-[90px]" title={co.variable}>{co.variable}</td>
+                        <td className="text-right font-mono">{co.or.toFixed(2)}</td>
+                        <td className="text-right font-mono text-gray-400">{co.or_low.toFixed(2)}–{co.or_high.toFixed(2)}</td>
+                        <td className="text-right font-mono">{co.p < 0.001 ? "<0.001" : co.p.toFixed(3)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       </Section>
     </div>
   );

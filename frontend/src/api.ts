@@ -170,6 +170,8 @@ export const runEValue     = (data: object) => api.post("/api/survival_advanced/
 export const runLandmark   = (data: object) => api.post("/api/survival_advanced/landmark", data);
 export const runRMST       = (data: object) => api.post("/api/survival_advanced/rmst", data);
 export const runRecurrentLWYY = (data: object) => api.post("/api/survival_advanced/recurrent_lwyy", data);
+export const runSurvivalValidation = (data: object) => api.post("/api/survival_advanced/survival_validation", data);
+export const runDiscreteTime = (data: object) => api.post("/api/survival_advanced/discrete_time", data);
 
 // Article parser
 export const parseArticle = (file: File) => {
