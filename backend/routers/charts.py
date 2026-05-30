@@ -314,3 +314,138 @@ def forest_plot(req: ForestRequest):
         "rows": rows,
         "meta": meta,
     }
+
+
+class SubgroupBarRequest(BaseModel):
+    session_id: str
+    y_col: str
+    subgroup_col: str
+    xaxis_col: str
+    color_col: Optional[str] = None
+    y_mode: str = "mean"  # "mean" or "percentage"
+    target_value: Optional[str] = None
+    error_type: str = "ci"  # "ci", "se", "sd", "none"
+
+
+@router.post("/subgroup_bar")
+def subgroup_bar(req: SubgroupBarRequest):
+    df = _get_df(req.session_id)
+    
+    # Check if selected columns exist
+    for col in [req.y_col, req.subgroup_col, req.xaxis_col]:
+        if col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{col}' not found")
+            
+    if req.color_col and req.color_col not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{req.color_col}' not found")
+        
+    # Get subset of columns
+    cols_to_use = [req.y_col, req.subgroup_col, req.xaxis_col]
+    if req.color_col:
+        cols_to_use.append(req.color_col)
+        
+    sub = df[cols_to_use].copy()
+    
+    # Drop missing in grouping columns, but handle Y missing per cell safely
+    sub = sub.dropna(subset=[req.subgroup_col, req.xaxis_col] + ([req.color_col] if req.color_col else []))
+    
+    if len(sub) == 0:
+        raise HTTPException(status_code=400, detail="No valid data points found after dropping missing values in grouping variables.")
+
+    # Get unique groups, handling categories sorting nicely
+    subgroups = sorted(sub[req.subgroup_col].dropna().unique())
+    x_vals = sorted(sub[req.xaxis_col].dropna().unique())
+    color_groups = sorted(sub[req.color_col].dropna().unique()) if req.color_col else ["All"]
+
+    traces = []
+    
+    for cg in color_groups:
+        trace_x_subgroup = []
+        trace_x_xaxis = []
+        trace_y = []
+        trace_error = []
+        trace_ns = []
+        
+        for sg in subgroups:
+            for xv in x_vals:
+                # Filter for this cell
+                mask = (sub[req.subgroup_col] == sg) & (sub[req.xaxis_col] == xv)
+                if req.color_col:
+                    mask = mask & (sub[req.color_col] == cg)
+                
+                cell_data = sub.loc[mask, req.y_col].dropna()
+                n = len(cell_data)
+                
+                val = 0.0
+                err = 0.0
+                
+                if n > 0:
+                    if req.y_mode == "percentage":
+                        target = req.target_value
+                        if target is None:
+                            unique_vals = cell_data.unique()
+                            if len(unique_vals) > 0:
+                                target = str(unique_vals[0])
+                            else:
+                                target = "1"
+                        
+                        successes = sum(cell_data.astype(str) == str(target))
+                        p = successes / n
+                        val = p * 100.0
+                        
+                        sd = np.sqrt(p * (1 - p)) * 100.0
+                        se = (np.sqrt(p * (1 - p) / n)) * 100.0
+                        ci = 1.96 * se
+                    else:
+                        numeric_data = pd.to_numeric(cell_data, errors='coerce').dropna()
+                        n_num = len(numeric_data)
+                        if n_num > 0:
+                            val = float(numeric_data.mean())
+                            sd = float(numeric_data.std()) if n_num > 1 else 0.0
+                            se = sd / np.sqrt(n_num)
+                            ci = 1.96 * se
+                        else:
+                            val = 0.0
+                            sd = 0.0
+                            se = 0.0
+                            ci = 0.0
+                    
+                    if req.error_type == "ci":
+                        err = ci
+                    elif req.error_type == "se":
+                        err = se
+                    elif req.error_type == "sd":
+                        err = sd
+                    else:
+                        err = 0.0
+                else:
+                    val = 0.0
+                    err = 0.0
+                
+                trace_x_subgroup.append(str(sg))
+                trace_x_xaxis.append(str(xv))
+                trace_y.append(val)
+                trace_error.append(err)
+                trace_ns.append(n)
+                
+        traces.append({
+            "name": str(cg),
+            "x_subgroup": trace_x_subgroup,
+            "x_xaxis": trace_x_xaxis,
+            "y": trace_y,
+            "error": trace_error,
+            "ns": trace_ns
+        })
+        
+    return {
+        "type": "subgroup_bar",
+        "y_col": req.y_col,
+        "subgroup_col": req.subgroup_col,
+        "xaxis_col": req.xaxis_col,
+        "color_col": req.color_col,
+        "y_mode": req.y_mode,
+        "target_value": req.target_value,
+        "error_type": req.error_type,
+        "traces": traces
+    }
+

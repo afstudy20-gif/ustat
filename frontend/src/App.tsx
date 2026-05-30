@@ -22,6 +22,7 @@ import UploadZone from "./components/UploadZone";
 import DataTable from "./components/DataTable";
 import DescriptivePanel from "./components/DescriptivePanel";
 import ChartsPanel from "./components/ChartsPanel";
+import SubgroupBarPanel from "./components/SubgroupBarPanel";
 import ForestBuilderPanel from "./components/ForestBuilderPanel";
 import HypothesisPanel from "./components/HypothesisPanel";
 import CorrelationPanel from "./components/CorrelationPanel";
@@ -376,13 +377,14 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = useState<"models" | "charts" | "forest">("models");
+  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest">("models");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
         {([
           ["models", "Models & Diagnostics"],
           ["charts", "Charts"],
+          ["subgroup", "Subgroup Bar Chart"],
           ["forest", "Forest plot (sensitivity / multi-endpoint)"],
         ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
@@ -396,6 +398,7 @@ function VisualChartsCombo() {
       <div className="flex-1 p-4 overflow-y-auto">
         {sub === "models" ? <VisualModelPanel />
           : sub === "charts" ? <ChartsPanel />
+          : sub === "subgroup" ? <SubgroupBarPanel />
           : <ForestBuilderPanel />}
       </div>
     </div>
