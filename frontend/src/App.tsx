@@ -1,8 +1,9 @@
 import "./index.css";
 import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Save, Search, Layers, Scale } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Save, Search, Layers, Scale, HelpCircle } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
+import HelpModal from "./components/HelpModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
@@ -422,6 +423,7 @@ export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter, originalSession, setOriginalSession, setSession } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   // Header Save-As dropdown (consolidates dataset export + session JSON
   // — supersedes the dropdown previously hidden inside the DataTable
   // toolbar). Closes on outside-click.
@@ -511,6 +513,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       {showSaveModal && (
         <SaveBeforeOpenModal
           session={session}
@@ -608,6 +611,13 @@ export default function App() {
           <div className="ml-auto flex items-center gap-1.5">
             <PlotThemeBar />
             <RefreshAppButton confirmBeforeReload />
+            <button
+              onClick={() => setShowHelp(true)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+              title="Help & Interactive Tutorials"
+            >
+              <HelpCircle size={16} />
+            </button>
             <button
               onClick={() => setShowAbout(true)}
               className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
