@@ -3760,7 +3760,9 @@ def _run_psm(req: PSMRequest):
     if missing_cols:
         raise HTTPException(status_code=422, detail=f"Columns not found: {missing_cols}")
 
-    df = apply_imputation(df_full[needed], needed, req.imputation or "listwise").reset_index(drop=True)
+    df_imputed_temp = apply_imputation(df_full[needed], needed, req.imputation or "listwise")
+    df_full_imputed = df_full.loc[df_imputed_temp.index].copy().reset_index(drop=True)
+    df = df_imputed_temp.reset_index(drop=True)
 
     # Validate treatment is binary 0/1
     treat_vals = df[req.treatment_col].astype(float)
@@ -3850,7 +3852,10 @@ def _run_psm(req: PSMRequest):
                    "Try widening the caliper or check that treatment groups overlap in covariate space.")
 
     matched_all_idx = matched_treated + matched_controls
-    df_matched = df.iloc[matched_all_idx].copy()
+    df_matched = df_full_imputed.iloc[matched_all_idx].copy()
+    df_matched["_treat_"] = df["_treat_"].iloc[matched_all_idx].values
+    df_matched["_ps_"] = df["_ps_"].iloc[matched_all_idx].values
+    df_matched["_logit_ps_"] = df["_logit_ps_"].iloc[matched_all_idx].values
 
     # Assign match-set IDs for downstream paired/clustered analysis
     match_ids = []
