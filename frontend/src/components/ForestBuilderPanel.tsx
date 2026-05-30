@@ -1,7 +1,8 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import ThreeCol from "./ThreeCol";
+import { useStore } from "../store";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,105 @@ export default function ForestBuilderPanel() {
   const plotRef = useRef<any>(null);
   const [pastebox, setPastebox] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
+
+  const session = useStore((s) => s.session);
+
+  const [mapLabel, setMapLabel] = useState("");
+  const [mapEst, setMapEst] = useState("");
+  const [mapCiLow, setMapCiLow] = useState("");
+  const [mapCiHigh, setMapCiHigh] = useState("");
+  const [mapP, setMapP] = useState("");
+  const [mapExtra, setMapExtra] = useState("");
+
+  const allCols = useMemo(() => session?.columns?.map((c) => c.name) ?? [], [session]);
+  const numCols = useMemo(() => session?.columns?.filter((c) => c.kind === "numeric").map((c) => c.name) ?? [], [session]);
+
+  useEffect(() => {
+    if (!session || !session.columns) return;
+    const cols = session.columns;
+    
+    // Auto-map Label
+    const labelCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return n.includes("label") || n.includes("study") || n.includes("name") || n.includes("subgroup") || n.includes("variable");
+    })?.name || cols[0]?.name || "";
+    setMapLabel(labelCol);
+
+    // Auto-map Est
+    const estCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return c.kind === "numeric" && (n === "est" || n === "hr" || n === "or" || n === "rr" || n === "estimate" || n === "coef" || n === "mean" || n === "beta");
+    })?.name || cols.find((c) => c.kind === "numeric")?.name || "";
+    setMapEst(estCol);
+
+    // Auto-map CI Low
+    const ciLowCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return c.kind === "numeric" && (n.includes("low") || n.includes("lower") || n.includes("min") || n === "ci_l" || n === "cilow");
+    })?.name || "";
+    setMapCiLow(ciLowCol);
+
+    // Auto-map CI High
+    const ciHighCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return c.kind === "numeric" && (n.includes("high") || n.includes("upper") || n.includes("max") || n === "ci_h" || n === "cihigh");
+    })?.name || "";
+    setMapCiHigh(ciHighCol);
+
+    // Auto-map p-value
+    const pCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return c.kind === "numeric" && (n === "p" || n === "p_val" || n === "pval" || n === "pvalue" || n.includes("sig"));
+    })?.name || "";
+    setMapP(pCol);
+
+    // Auto-map Extra
+    const extraCol = cols.find((c) => {
+      const n = c.name.toLowerCase();
+      return n.includes("extra") || n.includes("event") || n.includes("note") || n === "n" || n.includes("weight");
+    })?.name || "";
+    setMapExtra(extraCol);
+  }, [session]);
+
+  const handleLoadFromDataset = () => {
+    if (!session || !mapLabel || !mapEst || !mapCiLow || !mapCiHigh) return;
+
+    const loadedRows: ForestRowInput[] = [];
+    const previewData = session.preview ?? [];
+
+    for (const row of previewData) {
+      const labelVal = String(row[mapLabel] ?? "");
+      const estVal = row[mapEst] != null ? parseFloat(String(row[mapEst])) : null;
+      const ciLowVal = row[mapCiLow] != null ? parseFloat(String(row[mapCiLow])) : null;
+      const ciHighVal = row[mapCiHigh] != null ? parseFloat(String(row[mapCiHigh])) : null;
+
+      // Optional p-value
+      let pVal: number | null = null;
+      if (mapP && row[mapP] != null) {
+        const parsedP = parseFloat(String(row[mapP]));
+        if (!isNaN(parsedP)) pVal = parsedP;
+      }
+
+      // Optional extra
+      let extraVal = "";
+      if (mapExtra && row[mapExtra] != null) {
+        extraVal = String(row[mapExtra]);
+      }
+
+      loadedRows.push({
+        label: labelVal,
+        est: Number.isNaN(estVal as number) ? null : estVal,
+        ci_low: Number.isNaN(ciLowVal as number) ? null : ciLowVal,
+        ci_high: Number.isNaN(ciHighVal as number) ? null : ciHighVal,
+        p: pVal,
+        extra: extraVal,
+      });
+    }
+
+    if (loadedRows.length > 0) {
+      setRows(loadedRows);
+    }
+  };
 
   const updateRow = (i: number, patch: Partial<ForestRowInput>) => {
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -240,6 +340,93 @@ export default function ForestBuilderPanel() {
 
   const leftCol = (
     <div className="space-y-4 max-h-[82vh] overflow-y-auto pr-1">
+      {/* Load from Active Dataset */}
+      <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-700">Load from Active Dataset</h3>
+          {session && (
+            <span className="text-[9px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded font-medium border border-indigo-100">
+              {session.filename}
+            </span>
+          )}
+        </div>
+
+        {!session ? (
+          <p className="text-[11px] text-gray-400 leading-relaxed">
+            No active dataset loaded. Please upload a dataset in the <strong>Data</strong> tab first to map columns directly.
+          </p>
+        ) : (
+          <div className="space-y-2 text-xs">
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">Label Column</span>
+                <select value={mapLabel} onChange={(e) => setMapLabel(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— select —</option>
+                  {allCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">Estimate Column</span>
+                <select value={mapEst} onChange={(e) => setMapEst(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— select —</option>
+                  {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">CI Low Column</span>
+                <select value={mapCiLow} onChange={(e) => setMapCiLow(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— select —</option>
+                  {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">CI High Column</span>
+                <select value={mapCiHigh} onChange={(e) => setMapCiHigh(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— select —</option>
+                  {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">p-value (Opt)</span>
+                <select value={mapP} onChange={(e) => setMapP(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— none —</option>
+                  {numCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+
+              <label className="flex flex-col gap-0.5">
+                <span className="text-gray-500 text-[10px]">Extra Col (Opt)</span>
+                <select value={mapExtra} onChange={(e) => setMapExtra(e.target.value)}
+                  className="w-full text-xs border border-gray-300 rounded px-1 py-1 focus:outline-none focus:border-indigo-400 bg-white">
+                  <option value="">— none —</option>
+                  {allCols.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <button
+              onClick={handleLoadFromDataset}
+              disabled={!mapLabel || !mapEst || !mapCiLow || !mapCiHigh}
+              className="w-full mt-2 text-xs bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 text-white rounded py-1.5 transition-colors font-medium flex items-center justify-center gap-1.5 shadow-sm">
+              📥 Load Dataset Rows
+            </button>
+          </div>
+        )}
+      </div>
+
       <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
         <h3 className="text-sm font-semibold text-gray-700">Presets</h3>
         <div className="space-y-1.5">
