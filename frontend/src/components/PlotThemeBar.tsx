@@ -31,7 +31,7 @@ export default function PlotThemeBar() {
       <button
         onClick={() => setOpen((o) => !o)}
         className={`p-1.5 rounded-lg transition-colors ${open ? "bg-indigo-50 text-indigo-600" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
-        title="Chart theme"
+        title="Color palette · chart theme"
       >
         <Palette size={16} />
       </button>

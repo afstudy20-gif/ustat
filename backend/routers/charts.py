@@ -205,6 +205,113 @@ def bar(req: ChartRequest):
         }
 
 
+# ── Grouped bar (clustered bars with error bars) ─────────────────────────────
+
+class GroupedBarRequest(BaseModel):
+    session_id: str
+    x: str                          # categorical subgroup → clusters on the x-axis
+    series: Optional[str] = None    # categorical → paired/coloured bars within each cluster
+    y: Optional[str] = None         # numeric value column; binary 0/1 → proportion
+    error: str = "ci95"             # 'ci95' | 'se' (continuous only; proportions use Wilson 95%)
+
+
+def _wilson_ci(k: int, n: int, z: float = 1.959963984540054) -> tuple[float, float]:
+    """Wilson score 95% interval for a binomial proportion k/n."""
+    if n <= 0:
+        return 0.0, 0.0
+    p = k / n
+    denom = 1.0 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = (z / denom) * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return max(0.0, center - half), min(1.0, center + half)
+
+
+@router.post("/grouped_bar")
+def grouped_bar(req: GroupedBarRequest):
+    """Clustered bar chart with error bars (e.g. the WHI 'statin use by subgroup'
+    figure): subgroups on the x-axis, one coloured bar per `series` level within
+    each subgroup, error bars from the 95% CI / SE.
+
+    - Continuous `y` → bar = group mean, error = t-based 95% CI (or SE).
+    - Binary 0/1 `y` → bar = proportion, error = Wilson score 95% CI.
+    - No `y` → bar = row count (no error bars).
+    """
+    df = _get_df(req.session_id)
+    for c in [req.x] + ([req.series] if req.series else []) + ([req.y] if req.y else []):
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+
+    proportion = False
+    if req.y:
+        yv_all = pd.to_numeric(df[req.y], errors="coerce")
+        uniq = set(pd.unique(yv_all.dropna()))
+        proportion = len(uniq) > 0 and uniq.issubset({0, 1})
+
+    def _levels(col: str) -> list:
+        vals = df[col].dropna().unique().tolist()
+        return sorted(vals, key=lambda v: (isinstance(v, str), v))
+
+    x_levels = [str(v) for v in _levels(req.x)]
+    series_levels = [str(v) for v in _levels(req.series)] if req.series else ["All"]
+    if not x_levels:
+        raise HTTPException(status_code=400, detail=f"No non-missing values in '{req.x}'.")
+
+    z = 1.959963984540054
+    value_kind = "count"
+    groups = []
+    for s in series_levels:
+        vals, lo, hi, ns = [], [], [], []
+        for xl in x_levels:
+            mask = df[req.x].astype(str) == xl
+            if req.series:
+                mask = mask & (df[req.series].astype(str) == s)
+            sub = df[mask]
+            if not req.y:
+                value_kind = "count"
+                n = int(len(sub))
+                ns.append(n); vals.append(float(n)); lo.append(float(n)); hi.append(float(n))
+                continue
+            yv = pd.to_numeric(sub[req.y], errors="coerce").dropna()
+            n = int(len(yv))
+            ns.append(n)
+            if n == 0:
+                vals.append(0.0); lo.append(0.0); hi.append(0.0); continue
+            if proportion:
+                value_kind = "proportion"
+                k = int(yv.sum())
+                p = k / n
+                l, h = _wilson_ci(k, n, z)
+                vals.append(p); lo.append(l); hi.append(h)
+            else:
+                value_kind = "mean"
+                m = float(yv.mean())
+                vals.append(m)
+                if n >= 2:
+                    se = float(yv.std(ddof=1) / np.sqrt(n))
+                    if req.error == "se":
+                        l, h = m - se, m + se
+                    else:
+                        tcrit = float(scipy_stats.t.ppf(0.975, n - 1))
+                        l, h = m - tcrit * se, m + tcrit * se
+                    lo.append(l); hi.append(h)
+                else:
+                    lo.append(m); hi.append(m)
+        groups.append({
+            "series": s, "x": x_levels,
+            "value": vals, "err_low": lo, "err_high": hi, "n": ns,
+        })
+
+    return {
+        "type": "grouped_bar",
+        "x": req.x, "series": req.series, "y": req.y,
+        "value_kind": value_kind,      # 'mean' | 'proportion' | 'count'
+        "error": req.error,
+        "x_levels": x_levels,
+        "series_levels": series_levels,
+        "groups": groups,
+    }
+
+
 # ── Forest plot ─────────────────────────────────────────────────────────────────
 
 class ForestRow(BaseModel):

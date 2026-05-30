@@ -7,7 +7,7 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from services import store
 from services.impute import apply_imputation
 from services.rcs_basis import (
@@ -66,15 +66,77 @@ class LinearRequest(BaseModel):
     # product; categorical columns expand into one interaction per surviving
     # dummy (e.g. SEX × AGE produces SEX_M:AGE).
     interactions: Optional[List[List[str]]] = None
+    # Per-categorical reference level: {column: level}. The named level is
+    # held out as the dummy-coding reference (e.g. {"coffee": "0 cups"} so all
+    # other levels are contrasted against 0 cups/day). Columns not listed fall
+    # back to the first sorted level (pandas drop_first default). Only applies
+    # to columns pandas treats as categorical (object/category dtype).
+    reference_levels: Optional[Dict[str, str]] = None
+    # Missing-indicator method: for each listed predictor, add a `<col>__missing`
+    # dummy (1 = value was missing in the raw data, 0 = observed) and impute the
+    # column itself (median for numeric, mode for categorical) so incomplete rows
+    # are retained rather than dropped. Lets a model absorb informative
+    # missingness instead of losing the cases.
+    missing_indicator: Optional[List[str]] = None
+
+
+def _encode_design(
+    df: pd.DataFrame, predictors: List[str],
+    reference_levels: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Dummy-code predictors, honouring a caller-chosen reference level per
+    categorical column. Numeric columns pass through unchanged (matching
+    pandas.get_dummies); categorical columns are reordered so the requested
+    reference sorts first and is therefore dropped by drop_first=True.
+    """
+    refs = reference_levels or {}
+    work = df[predictors].copy()
+    for col in predictors:
+        if col not in refs:
+            continue
+        if pd.api.types.is_numeric_dtype(work[col]):
+            # Reference levels are meaningless for a continuous/numeric column.
+            continue
+        ref = str(refs[col])
+        levels = [str(v) for v in pd.unique(work[col].dropna())]
+        if ref not in levels:
+            raise HTTPException(
+                status_code=422,
+                detail=f"reference level '{ref}' not found in column '{col}'. Levels: {sorted(levels)}",
+            )
+        others = sorted(l for l in levels if l != ref)
+        work[col] = pd.Categorical(work[col].astype(str), categories=[ref] + others)
+    return pd.get_dummies(work, drop_first=True).astype(float)
 
 
 @router.post("/linear")
 def linear_regression(req: LinearRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
-    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+
+    # ── Missing-indicator method ─────────────────────────────────────────────
+    # Capture NA flags from the RAW data before any imputation, then pre-fill
+    # the flagged columns so listwise deletion / imputation keeps their rows.
+    mi_cols = [c for c in (req.missing_indicator or []) if c in req.predictors]
+    for c in mi_cols:
+        if c not in df_full.columns:
+            raise HTTPException(status_code=422, detail=f"missing_indicator column '{c}' not found")
+    df_src = df_full.copy()
+    mi_flags: Dict[str, pd.Series] = {}
+    for c in mi_cols:
+        mi_flags[c] = df_src[c].isna().astype(int)
+        if pd.api.types.is_numeric_dtype(df_src[c]):
+            df_src[c] = df_src[c].fillna(df_src[c].median())
+        else:
+            mode = df_src[c].mode(dropna=True)
+            df_src[c] = df_src[c].fillna(mode.iloc[0] if len(mode) else "")
+
+    df = apply_imputation(df_src, [req.outcome] + req.predictors, req.imputation or "listwise")
     n_excluded = n_total - len(df)
-    X_enc = pd.get_dummies(df[req.predictors], drop_first=True).astype(float)
+    X_enc = _encode_design(df, req.predictors, req.reference_levels)
+    # Append the missing-indicator dummies, aligned to the surviving rows.
+    for c in mi_cols:
+        X_enc[f"{c}__missing"] = mi_flags[c].reindex(df.index).fillna(0).astype(float).values
     X_enc, ix_added = _add_pairwise_interactions(X_enc, req.interactions, req.predictors)
     X = sm.add_constant(X_enc)
     y = df[req.outcome].astype(float)
@@ -137,6 +199,8 @@ def linear_regression(req: LinearRequest):
         "df_resid": int(model.df_resid),
         "predictors": req.predictors,
         "predictor_info": predictor_info,
+        "reference_levels": req.reference_levels or {},
+        "missing_indicator_cols": mi_cols,
         "result_text": _linear_results_text(req.outcome, coefs, model),
     }
 

@@ -208,7 +208,12 @@ function PSOverlapPlot({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function PSMPanel() {
+// `mode` controls which estimator(s) the panel exposes:
+//   "both" → original combined panel with a PSM/IPTW toggle
+//   "psm"  → matching only (the PSM tab)
+//   "iptw" → weighting only (the dedicated IPTW tab)
+type PSMMode = "psm" | "iptw" | "both";
+export default function PSMPanel({ mode = "both" }: { mode?: PSMMode } = {}) {
   const session  = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
@@ -247,7 +252,7 @@ export default function PSMPanel() {
   const [covFilter,  setCovFilter]  = useState("");
 
   // ── IPTW-only form state ────────────────────────────────────────────────
-  const [method,            setMethod]            = useState<"psm" | "iptw">("psm");
+  const [method,            setMethod]            = useState<"psm" | "iptw">(mode === "iptw" ? "iptw" : "psm");
   const [estimand,          setEstimand]          = useState<"ate" | "att" | "overlap">("ate");
   const [stabilize,         setStabilize]         = useState(true);
   const [weightTruncation,  setWeightTruncation]  = useState<"percentile" | "hard" | "none">("percentile");
@@ -358,7 +363,9 @@ export default function PSMPanel() {
               ? "Mimics an RCT from observational data by balancing confounders between treated and control groups via 1:k matching."
               : "Reweights every unit by the inverse of its propensity score. Keeps the full sample; supports ATE / ATT / overlap estimands; pairs with weighted GLM or weighted Cox."}
           </p>
-          {/* Method toggle */}
+          {/* Method toggle — only in the combined panel; the dedicated PSM /
+              IPTW tabs lock to a single estimator. */}
+          {mode === "both" && (
           <div className="flex gap-1 pt-1 border-t border-indigo-200">
             {(["psm", "iptw"] as const).map((m) => (
               <button key={m}
@@ -372,6 +379,7 @@ export default function PSMPanel() {
               </button>
             ))}
           </div>
+          )}
         </div>
 
         {/* ── IPTW-only controls ─────────────────────────────────────────── */}
@@ -719,7 +727,8 @@ export default function PSMPanel() {
         {/* Run */}
         <button
           className="btn-primary w-full py-3 text-sm font-semibold flex items-center justify-center gap-2"
-          onClick={run} disabled={loading || covariates.length === 0}>
+          title={covariates.length === 0 ? "Select at least one covariate first" : undefined}
+          onClick={run} disabled={loading}>
           {loading
             ? <><span className="animate-spin inline-block">⏳</span> {method === "psm" ? "Matching…" : "Weighting…"}</>
             : <><span>{method === "psm" ? "🔗" : "⚖️"}</span> {method === "psm" ? "Run PSM" : "Run IPTW"}</>}

@@ -5,6 +5,7 @@ import api from "../api";
 import Plot from "../PlotComponent";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
+import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -168,11 +169,13 @@ const CHART_TABS = [
 ] as const;
 function NumericView({ summary, loadSummary, selected }: { summary: any; loadSummary: (col: string) => void; selected: string }) {
   const chartTab = useStore((s) => s.descriptiveTab);
-  const setChartTab = useStore((s) => s.setDescriptiveTab);
   const showGrid = useStore((s) => s.showGrid);
   const pal = usePalette();
   const plotRef = useRef<any>(null);
   const P = pal[0]; // primary color
+  // Chart width is resizable from the right edge; export tracks this size.
+  const { w: chartW, onDragStart: onChartResize, onReset: onChartReset } =
+    useResizableRightCol("uStat.descChartW", 680, 320, 1200, "left");
 
   const histData = [{
     type: "bar" as const,
@@ -293,26 +296,23 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      {/* Chart type tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 self-start">
-        {CHART_TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setChartTab(id)}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
-              ${chartTab === id
-                ? "bg-white text-indigo-600 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Chart area — width-resizable from the right edge (drag the handle).
+          PlotExporter reads chartW so a shrunk chart exports at the shrunk size.
+          Chart-type selection now lives in the single top menu. */}
+      <div className="relative" style={{ width: chartW, maxWidth: "100%" }}>
+        <div
+          onPointerDown={onChartResize}
+          onDoubleClick={onChartReset}
+          title="Drag to resize chart · double-click to reset"
+          className="absolute top-0 -right-2 z-20 h-full w-3 cursor-ew-resize flex items-center justify-center group"
+        >
+          <span className="h-12 w-1 rounded-full bg-gray-300 group-hover:bg-indigo-400 transition-colors" />
+        </div>
 
       {/* Histogram */}
       {chartTab === "histogram" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="Histogram" />
+        <PlotExporter plotRef={plotRef} title="Histogram" defaultWidth={chartW} defaultHeight={380} />
         <Plot ref={plotRef}
           data={histData}
           layout={{ ...BASE_LAYOUT, autosize: true, bargap: 0.02,
@@ -328,7 +328,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
       {/* Box Plot */}
       {chartTab === "boxplot" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="BoxPlot" />
+        <PlotExporter plotRef={plotRef} title="BoxPlot" defaultWidth={chartW} defaultHeight={380} />
         <Plot ref={plotRef}
           data={boxData}
           layout={{
@@ -387,7 +387,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
       {/* Violin Plot */}
       {chartTab === "violin" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="Violin" />
+        <PlotExporter plotRef={plotRef} title="Violin" defaultWidth={chartW} defaultHeight={380} />
         <Plot ref={plotRef}
           data={[{
             type: "violin" as any,
@@ -434,7 +434,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
       {/* Q-Q Plot */}
       {chartTab === "qq" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="QQ_Plot" />
+        <PlotExporter plotRef={plotRef} title="QQ_Plot" defaultWidth={chartW} defaultHeight={380} />
         <Plot ref={plotRef}
           data={qqData}
           layout={{ ...BASE_LAYOUT, autosize: true,
@@ -451,6 +451,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
         )}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -793,6 +794,10 @@ export default function DescriptivePanel() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"distribution" | "scatter">("distribution");
+  // Chart-type selection (Histogram/Box/Violin/QQ) lives in the global store so
+  // the single top menu and the chart renderer stay in sync.
+  const descChartTab = useStore((s) => s.descriptiveTab);
+  const setDescChartTab = useStore((s) => s.setDescriptiveTab);
 
   useEffect(() => {
     if (!session) return;
@@ -914,23 +919,38 @@ export default function DescriptivePanel() {
       {/* ── Right: view area ── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
-        {/* ── View tab switcher ── */}
+        {/* ── Single chart menu: chart types (numeric) + Scatter, one row ── */}
         <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-200 flex-shrink-0 bg-gray-50">
-          {([
-            { id: "distribution", label: "📊 Distribution" },
-            { id: "scatter",      label: "⬡ Scatter Plot" },
-          ] as const).map(({ id, label }) => (
+          {selected && numCols.includes(selected) ? (
+            CHART_TABS.map(({ id, label }) => {
+              const on = view === "distribution" && descChartTab === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => { setView("distribution"); setDescChartTab(id); }}
+                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors
+                    ${on ? "bg-indigo-600 text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"}`}
+                >
+                  {label}
+                </button>
+              );
+            })
+          ) : (
             <button
-              key={id}
-              onClick={() => setView(id)}
+              onClick={() => setView("distribution")}
               className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors
-                ${view === id
-                  ? "bg-indigo-600 text-white"
-                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"}`}
+                ${view === "distribution" ? "bg-indigo-600 text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"}`}
             >
-              {label}
+              📊 Distribution
             </button>
-          ))}
+          )}
+          <button
+            onClick={() => setView("scatter")}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors
+              ${view === "scatter" ? "bg-indigo-600 text-white" : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"}`}
+          >
+            ⬡ Scatter Plot
+          </button>
         </div>
 
         {/* ── Scatter view ── */}

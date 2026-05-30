@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
-import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
+import { getHistogram, getScatter, getBoxplot, getBar, getGroupedBar } from "../api";
 import PlotExporter from "./PlotExporter";
 
 export default function ChartsPanel() {
@@ -20,6 +20,7 @@ export default function ChartsPanel() {
   const [y, setY] = useState(numCols[1] ?? "");
   const [color, setColor] = useState("");
   const [bins, setBins] = useState(20);
+  const [errorType, setErrorType] = useState("ci95");
   const [plotData, setPlotData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,6 +34,7 @@ export default function ChartsPanel() {
       if (chartType === "histogram") res = await getHistogram(base);
       else if (chartType === "scatter") res = await getScatter({ ...base, y, color: color || undefined });
       else if (chartType === "boxplot" || chartType === "violin") res = await getBoxplot({ ...base, color: color || undefined });
+      else if (chartType === "grouped") res = await getGroupedBar({ session_id: session.session_id, x, series: color || undefined, y: y || undefined, error: errorType });
       else res = await getBar({ ...base, y: y || undefined, color: color || undefined });
       setPlotData(res.data);
     } catch (e: any) {
@@ -51,11 +53,11 @@ export default function ChartsPanel() {
       <div className="w-60 flex-shrink-0 space-y-4">
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Chart Type</h3>
-          {["histogram", "scatter", "boxplot", "violin", "bar"].map((t) => (
+          {["histogram", "scatter", "boxplot", "violin", "bar", "grouped"].map((t) => (
             <label key={t} className="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="chartType" value={t} checked={chartType === t}
                 onChange={() => setChartType(t)} className="accent-indigo-500" />
-              <span className="text-sm text-gray-700 capitalize">{t}</span>
+              <span className="text-sm text-gray-700 capitalize">{t === "grouped" ? "Grouped bar (± CI)" : t}</span>
             </label>
           ))}
         </div>
@@ -63,16 +65,18 @@ export default function ChartsPanel() {
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">X axis</label>
+            <label className="text-xs text-gray-400 block mb-1">{chartType === "grouped" ? "Subgroup (x)" : "X axis"}</label>
             <select className="select w-full" value={x} onChange={(e) => setX(e.target.value)}>
-              {(chartType === "boxplot" || chartType === "violin" ? numCols : [...numCols, ...catCols]).map((c) => (
+              {(chartType === "boxplot" || chartType === "violin" ? numCols
+                : chartType === "grouped" ? [...catCols, ...numCols]
+                : [...numCols, ...catCols]).map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>
           </div>
-          {(chartType === "scatter" || chartType === "bar") && (
+          {(chartType === "scatter" || chartType === "bar" || chartType === "grouped") && (
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Y axis</label>
+              <label className="text-xs text-gray-400 block mb-1">{chartType === "grouped" ? "Value (y) — mean, or 0/1 → proportion" : "Y axis"}</label>
               <select className="select w-full" value={y} onChange={(e) => setY(e.target.value)}>
                 <option value="">— count —</option>
                 {numCols.map((c) => <option key={c}>{c}</option>)}
@@ -81,11 +85,21 @@ export default function ChartsPanel() {
           )}
           {chartType !== "histogram" && catCols.length > 0 && (
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Color / Group</label>
+              <label className="text-xs text-gray-400 block mb-1">{chartType === "grouped" ? "Series (paired bars)" : "Color / Group"}</label>
               <select className="select w-full" value={color} onChange={(e) => setColor(e.target.value)}>
                 <option value="">None</option>
                 {catCols.map((c) => <option key={c}>{c}</option>)}
               </select>
+            </div>
+          )}
+          {chartType === "grouped" && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Error bars</label>
+              <select className="select w-full" value={errorType} onChange={(e) => setErrorType(e.target.value)}>
+                <option value="ci95">95% CI</option>
+                <option value="se">± SE</option>
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">A binary 0/1 value is shown as a proportion with a Wilson 95% CI.</p>
             </div>
           )}
           {chartType === "histogram" && (
@@ -108,6 +122,7 @@ export default function ChartsPanel() {
             chartType === "scatter" ? "Reveals relationships between two continuous variables. The regression line and R\u00B2 show linear fit strength. Add a Color variable to see group-specific patterns." :
             chartType === "boxplot" ? "Compares distributions across groups. The box shows Q1\u2013Q3 (IQR), the line is the median, whiskers extend to 1.5\u00D7IQR. Points beyond whiskers are outliers." :
             chartType === "violin" ? "Combines a box plot with a kernel density estimate. The wider the violin, the more data points at that value. Better than box plots for showing bimodal or skewed distributions." :
+            chartType === "grouped" ? "Clustered bars by subgroup with error bars — like the 'statin use across subgroups' figure. Pick a Subgroup (x), a Series (the paired bars) and a Value: a continuous value gives mean ± 95% CI / SE; a binary 0/1 value gives a proportion with a Wilson 95% CI." :
             "Shows counts or aggregated values for categories. Use for comparing frequencies across groups. Add a Color variable for stacked/grouped comparisons."
           }</p>
         </div>
@@ -121,7 +136,27 @@ export default function ChartsPanel() {
           <Plot
             ref={chartRef}
             data={traces}
-            layout={{ ...layout, title: { text: plotData?.x ?? "", font: { color: "#374151" } }, autosize: true }}
+            layout={{
+              ...layout,
+              title: {
+                text: chartType === "grouped" && plotData
+                  ? `${plotData.value_kind === "proportion" ? "Proportion" : (plotData.y ?? "Count")} by ${plotData.x}`
+                  : (plotData?.x ?? ""),
+                font: { color: "#374151" },
+              },
+              autosize: true,
+              ...(chartType === "grouped" && plotData ? {
+                barmode: "group" as const,
+                bargap: 0.28,
+                bargroupgap: 0.08,
+                xaxis: { ...(layout as any).xaxis, title: { text: plotData.x } },
+                yaxis: {
+                  ...(layout as any).yaxis,
+                  rangemode: "tozero" as const,
+                  title: { text: plotData.value_kind === "proportion" ? "Proportion" : plotData.value_kind === "mean" ? (plotData.y ?? "Mean") : "Count" },
+                },
+              } : {}),
+            }}
             style={{ width: "100%", height: "100%" }}
             useResizeHandler
             config={{ responsive: true, displayModeBar: true, displaylogo: false }}
@@ -232,6 +267,28 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
       y: d.data.map((r: any) => r.value),
       marker: { color: C[0] },
     }];
+  }
+
+  if (d.type === "grouped_bar") {
+    const withErr = d.value_kind !== "count";
+    return d.groups.map((g: any, i: number) => ({
+      type: "bar",
+      name: String(g.series),
+      x: g.x,
+      y: g.value,
+      marker: { color: C[i % C.length] },
+      error_y: withErr ? {
+        type: "data",
+        symmetric: false,
+        array:      g.value.map((v: number, j: number) => Math.max(0, g.err_high[j] - v)),
+        arrayminus: g.value.map((v: number, j: number) => Math.max(0, v - g.err_low[j])),
+        color: "#374151",
+        thickness: 1.2,
+        width: 4,
+      } : undefined,
+      customdata: g.n,
+      hovertemplate: `%{x} · ${g.series}<br>%{y:.3f}<br>n = %{customdata}<extra></extra>`,
+    }));
   }
 
   return null;

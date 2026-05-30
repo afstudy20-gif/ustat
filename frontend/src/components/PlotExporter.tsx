@@ -3,8 +3,9 @@
  * Plotly is imported lazily inside the handler so this file adds no extra
  * top-level dependency on plotly.js (the chart component already loads it).
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
+import { plotlyToDataUrl } from "../lib/plotlyExport";
 
 type ExportFmt = "png" | "svg" | "tiff" | "jpeg";
 
@@ -12,12 +13,23 @@ interface Props {
   plotRef: React.RefObject<any>;
   title?: string;
   className?: string;
+  /** Seed the export width/height from the on-screen chart size so a chart
+   *  the user has shrunk exports at that same (smaller) size. */
+  defaultWidth?: number;
+  defaultHeight?: number;
 }
 
-export default function PlotExporter({ plotRef, title = "chart", className = "" }: Props) {
+export default function PlotExporter({ plotRef, title = "chart", className = "", defaultWidth, defaultHeight }: Props) {
   const [open, setOpen]       = useState(false);
-  const [width, setWidth]     = useState(1200);
-  const [height, setHeight]   = useState(700);
+  const [width, setWidth]     = useState(Math.round(defaultWidth ?? 1200));
+  const [height, setHeight]   = useState(Math.round(defaultHeight ?? 700));
+  // Keep export dimensions in sync with the live chart size while the popover
+  // is closed; don't clobber a width/height the user is editing in the popover.
+  useEffect(() => {
+    if (open) return;
+    if (defaultWidth)  setWidth(Math.round(defaultWidth));
+    if (defaultHeight) setHeight(Math.round(defaultHeight));
+  }, [defaultWidth, defaultHeight, open]);
   const [fmt, setFmt]         = useState<ExportFmt>("png");
   const [dpi, setDpi]         = useState(300);
   const [busy, setBusy]       = useState(false);
@@ -50,15 +62,7 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
   const renderPngBlob = async (): Promise<Blob | null> => {
     const el = getEl();
     if (!el) return null;
-    // Reuse the gd's own Plotly instance — same fix as downloadImage.
-    let Plotly: any = (el as any)._Plotly;
-    if (!Plotly?.toImage) {
-      const mod: any = await import("plotly.js/dist/plotly");
-      Plotly = mod?.toImage ? mod : mod?.default;
-    }
-    if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
-    const scale = dpi / 72;
-    const dataUrl: string = await Plotly.toImage(el, { format: "png", width, height, scale });
+    const dataUrl = await plotlyToDataUrl(el, { format: "png", width, height, scale: dpi / 72 });
     const res = await fetch(dataUrl);
     return await res.blob();
   };
@@ -97,35 +101,13 @@ export default function PlotExporter({ plotRef, title = "chart", className = "" 
         const blob = await plotlyToTiffBlob(el, { width, height, dpi });
         downloadBlob(blob, `${safeTitle}.tiff`);
       } else {
-        // Use Plotly.toImage instead of Plotly.downloadImage — the latter
-        // crashes on plotly.js@3 in production builds with "Cannot read
-        // properties of undefined (reading 'prototype')" because part of
-        // its internal download chain got tree-shaken away. toImage just
-        // returns a data URL / Blob, which we hand to an anchor click —
-        // the same trustworthy pattern the TIFF and dataset exporters use.
-        // Import the same UMD bundle that react-plotly.js uses
-        // (plotly.js/dist/plotly) — the package-root entrypoint resolves
-        // to an ESM build whose toImage / downloadImage chains were
-        // tree-shaken in production and crash with "Cannot read properties
-        // of undefined (reading 'prototype')".
-        // Prefer the Plotly instance react-plotly.js already attached to
-        // the gd — calling _Plotly.toImage reuses the exact bundle that
-        // rendered the chart and bypasses the ESM tree-shake bug entirely.
-        let Plotly: any = (el as any)._Plotly;
-        if (!Plotly?.toImage) {
-          const mod: any = await import("plotly.js/dist/plotly");
-          Plotly = mod?.toImage ? mod : mod?.default;
-        }
-        if (!Plotly?.toImage) {
-          throw new Error("plotly.js toImage not available");
-        }
-        const scale = (fmt === "png" || fmt === "jpeg") ? dpi / 72 : 1;  // SVG vector
-        const dataUrl: string = await Plotly.toImage(el, {
-          format: fmt,
-          width,
-          height,
-          ...(scale !== 1 ? { scale } : {}),
-        });
+        // Rasterise through the shared Plotly export helper: it reuses the
+        // single statically-imported bundle (no flaky dynamic import) and
+        // re-renders with a guaranteed-available font so axis/tick/annotation
+        // text survives the SVG→bitmap step. PNG/JPEG honour DPI; SVG stays
+        // vector.
+        const scale = (fmt === "png" || fmt === "jpeg") ? dpi / 72 : 1;
+        const dataUrl: string = await plotlyToDataUrl(el, { format: fmt, width, height, scale });
         // Data URL → Blob → anchor click. Direct anchor.href = dataUrl works
         // for small charts but Safari truncates very large data URLs; round
         // through a Blob so any chart size downloads cleanly.

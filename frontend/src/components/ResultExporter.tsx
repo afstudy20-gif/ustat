@@ -14,6 +14,7 @@
 import { useState } from "react";
 import { Download } from "lucide-react";
 import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
+import { plotlyToDataUrl } from "../lib/plotlyExport";
 
 interface Props {
   title: string;
@@ -77,22 +78,10 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
   if (!el) {
     throw new Error("plot is not mounted yet — wait for the chart to render and try again");
   }
-  // Prefer the Plotly instance react-plotly.js already attached to the
-  // gd — reuses the exact bundle that drew the chart and bypasses the
-  // ESM tree-shake bug entirely. Fall back to the dist subpath only when
-  // _Plotly isn't present.
-  let Plotly: any = (el as any)._Plotly;
-  if (!Plotly?.toImage) {
-    const mod: any = await import("plotly.js/dist/plotly");
-    Plotly = mod?.toImage ? mod : mod?.default;
-  }
-  if (!Plotly?.toImage) {
-    throw new Error("plotly.js toImage not available");
-  }
-  // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300). Plotly.downloadImage
-  // crashes on plotly.js@3 in production builds (tree-shaking strips an
-  // internal dep) — use toImage + anchor-click instead.
-  const dataUrl: string = await Plotly.toImage(el, {
+  // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300). The shared export helper
+  // reuses the single statically-imported Plotly bundle and keeps axis/tick
+  // text in the exported bitmap (see lib/plotlyExport).
+  const dataUrl: string = await plotlyToDataUrl(el, {
     format: "png",
     width: 1200,
     height: 700,
@@ -144,13 +133,7 @@ async function renderPlotPngBlob(plotRef: React.RefObject<any>): Promise<Blob> {
   }
   const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
   if (!el) throw new Error("plot is not mounted yet — wait for the chart to render and try again");
-  let Plotly: any = (el as any)._Plotly;
-  if (!Plotly?.toImage) {
-    const mod: any = await import("plotly.js/dist/plotly");
-    Plotly = mod?.toImage ? mod : mod?.default;
-  }
-  if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
-  const dataUrl: string = await Plotly.toImage(el, {
+  const dataUrl: string = await plotlyToDataUrl(el, {
     format: "png",
     width: 1200,
     height: 700,

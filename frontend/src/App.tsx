@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search, Layers } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search, Layers, Scale } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
@@ -59,6 +59,7 @@ const TABS = [
   { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
+  { id: "iptw",        label: "IPTW",        icon: Scale },
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
   { id: "code",        label: "Code",        icon: Terminal },
@@ -144,7 +145,7 @@ const TEST_CATALOG: TestEntry[] = [
 
   // PSM
   { name: "Propensity Score Matching", tab: "psm", aliases: ["psm matching"] },
-  { name: "IPTW", tab: "psm", aliases: ["inverse probability weighting", "weighted"] },
+  { name: "IPTW", tab: "iptw", aliases: ["inverse probability weighting", "weighted", "inverse probability of treatment weighting"] },
 
   // Weighted / survey
   { name: "Weighted descriptives (survey weights)", tab: "summary", group: "Weighted", aliases: ["weighted mean", "survey", "sampling weights", "ağırlıklı", "kish", "horvitz"] },
@@ -570,7 +571,16 @@ export default function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
+            {/* Palette + grid toggle sit side by side — both are chart-appearance
+                controls. Each shows a hover tooltip via `title`. */}
             <PlotThemeBar />
+            <button
+              onClick={toggleGrid}
+              className={`p-1.5 rounded-lg transition-colors ${showGrid ? "text-indigo-500 bg-indigo-50 hover:bg-indigo-100" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
+              title={showGrid ? "Chart grid lines: ON — click to hide" : "Chart grid lines: OFF — click to show"}
+            >
+              {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
+            </button>
             <RefreshAppButton confirmBeforeReload />
             <button
               onClick={() => setShowAbout(true)}
@@ -578,13 +588,6 @@ export default function App() {
               title="About uSTAT — packages & methods"
             >
               <Info size={16} />
-            </button>
-            <button
-              onClick={toggleGrid}
-              className={`p-1.5 rounded-lg transition-colors ${showGrid ? "text-indigo-500 bg-indigo-50 hover:bg-indigo-100" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
-              title={showGrid ? "Hide chart grid lines" : "Show chart grid lines"}
-            >
-              {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
             </button>
             <div className="relative" ref={headerSaveMenuRef}>
               <button
@@ -700,7 +703,8 @@ export default function App() {
           {activeTab === "visual"      && <VisualChartsCombo />}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}
-          {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
+          {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel mode="psm" /></div>}
+          {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel mode="iptw" /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
           {activeTab === "code"        && <div className="flex-1 overflow-y-auto"><CodePanel /></div>}

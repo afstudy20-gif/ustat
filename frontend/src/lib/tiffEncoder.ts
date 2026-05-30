@@ -18,6 +18,7 @@
  * Transparent areas are composited onto a white background — TIFF
  * baseline has no alpha channel.
  */
+import { plotlyToDataUrl } from "./plotlyExport";
 
 interface TiffOptions {
   width: number;
@@ -145,21 +146,14 @@ export async function plotlyToTiffBlob(
   graphDiv: HTMLElement,
   opts: { width: number; height: number; dpi: number; filename?: string },
 ): Promise<Blob> {
-  // Prefer the Plotly instance react-plotly.js already attached to the
-  // gd (saves a dynamic import + side-steps the ESM tree-shake bug);
-  // fall back to plotly.js/dist/plotly only when _Plotly isn't present.
-  let Plotly: any = (graphDiv as any)._Plotly;
-  if (!Plotly?.toImage) {
-    Plotly = (await import("plotly.js/dist/plotly")).default;
-  }
-  const scale = opts.dpi / 72;
-  const dataUrl: string = await Plotly.toImage(graphDiv, {
+  // Rasterise through the shared export helper (single static Plotly bundle +
+  // an export font that survives the SVG→bitmap step) before painting to canvas.
+  const dataUrl: string = await plotlyToDataUrl(graphDiv, {
     format: "png",
     width: opts.width,
     height: opts.height,
-    // Runtime supports `scale` even if the published d.ts is missing it.
-    scale,
-  } as Parameters<typeof Plotly.toImage>[1] & { scale: number });
+    scale: opts.dpi / 72,
+  });
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();
