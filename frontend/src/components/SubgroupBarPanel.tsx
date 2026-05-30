@@ -162,6 +162,8 @@ export default function SubgroupBarPanel() {
   
   const fullLayout = plotData ? {
     ...layout,
+    width: chartWidth - 32,
+    height: chartHeight - 32,
     title: { text: customTitle || chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
     xaxis: {
       ...layout.xaxis,
