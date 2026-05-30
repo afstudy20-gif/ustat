@@ -119,6 +119,9 @@ def health():
 
 # Serve compiled React frontend (production build).
 # Must come AFTER all /api routes so API routes are matched first.
-_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+_dist = os.environ.get(
+    "USTAT_FRONTEND_DIST",
+    os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"),
+)
 if os.path.isdir(_dist):
     app.mount("/", StaticFiles(directory=_dist, html=True), name="static")
