@@ -390,3 +390,226 @@ def feature_importance(req: MLRequest):
         "outcome": res["outcome"], "importance": res["importance"],
         "interpretation": res["interpretation"],
     }
+
+
+# ── Penalised / kernel predictive pipeline ───────────────────────────────────
+# Lasso (L1 logistic) or RBF-kernel SVM, with a held-out test set, stratified
+# k-fold GridSearchCV tuning, calibration + Brier + AUC on the holdout, optional
+# cubic-spline feature expansion, and partial-dependence plots.
+
+
+class PredictiveRequest(BaseModel):
+    session_id: str
+    outcome: str
+    predictors: List[str]
+    model: str = "lasso"                 # 'lasso' | 'svm_rbf'
+    holdout_frac: float = 0.3            # stratified test fraction (default 70/30)
+    cv_folds: int = 5
+    spline: bool = False                 # expand numeric predictors via cubic splines
+    spline_knots: int = 4
+    pdp_features: Optional[List[str]] = None
+    max_pdp: int = 4
+    random_state: int = 42
+    imputation: Optional[str] = "listwise"
+
+
+def _build_design(df: pd.DataFrame, predictors: List[str], spline: bool, knots: int):
+    """Encode predictors; when spline=True, expand numeric predictors into a
+    natural cubic-spline (B-spline) basis. Returns a float design DataFrame."""
+    raw = df[predictors].copy()
+    numeric, categorical = [], []
+    for c in predictors:
+        if pd.api.types.is_numeric_dtype(raw[c]):
+            numeric.append(c)
+        else:
+            coerced = pd.to_numeric(raw[c], errors="coerce")
+            if coerced.notna().mean() >= 0.8 and coerced.dropna().nunique() > 2:
+                raw[c] = coerced
+                numeric.append(c)
+            else:
+                categorical.append(c)
+    parts = []
+    if numeric:
+        num_df = raw[numeric].apply(pd.to_numeric, errors="coerce")
+        if spline:
+            from sklearn.preprocessing import SplineTransformer
+            for c in numeric:
+                col = num_df[[c]].astype(float)
+                nun = int(col[c].nunique())
+                if nun < 4:
+                    parts.append(col.rename(columns={c: c}))
+                    continue
+                st = SplineTransformer(n_knots=min(max(3, knots), nun), degree=3,
+                                       include_bias=False, extrapolation="constant")
+                basis = st.fit_transform(col.values)
+                cols = [f"{c}_sp{i+1}" for i in range(basis.shape[1])]
+                parts.append(pd.DataFrame(basis, columns=cols, index=raw.index))
+        else:
+            parts.append(num_df)
+    if categorical:
+        parts.append(pd.get_dummies(raw[categorical], drop_first=True, dummy_na=False))
+    if not parts:
+        return pd.DataFrame(index=raw.index)
+    enc = pd.concat(parts, axis=1)
+    enc.columns = [str(c) for c in enc.columns]
+    return enc.astype(float)
+
+
+def _calibration_deciles(proba: np.ndarray, y01: np.ndarray) -> list:
+    cal = []
+    try:
+        bins = pd.qcut(proba, q=min(10, len(np.unique(proba))), duplicates="drop")
+        cdf = pd.DataFrame({"p": proba, "y": y01, "bin": bins})
+        for _, g in cdf.groupby("bin", observed=True):
+            cal.append({"pred": round(float(g["p"].mean()), 4),
+                        "obs": round(float(g["y"].mean()), 4), "n": int(len(g))})
+    except Exception:
+        cal = []
+    return cal
+
+
+@router.post("/predictive")
+def predictive(req: PredictiveRequest):
+    from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
+    from sklearn.metrics import roc_auc_score, roc_curve, brier_score_loss, confusion_matrix
+
+    if req.model not in ("lasso", "svm_rbf"):
+        raise HTTPException(status_code=422, detail="model must be 'lasso' or 'svm_rbf'.")
+    df = _get_df(req.session_id)
+    for c in [req.outcome, *req.predictors]:
+        if c not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    if not req.predictors:
+        raise HTTPException(status_code=422, detail="Select at least one predictor.")
+
+    cols = [req.outcome, *req.predictors]
+    work = apply_imputation(df[cols], cols, req.imputation or "listwise").reset_index(drop=True)
+    X = _build_design(work, req.predictors, req.spline, req.spline_knots)
+    y_raw = work[req.outcome]
+    keep = X.notna().all(axis=1) & y_raw.notna()
+    X, y_raw = X[keep].reset_index(drop=True), y_raw[keep].reset_index(drop=True)
+    if X.shape[1] == 0:
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+
+    uniq = sorted(pd.unique(pd.to_numeric(y_raw, errors="coerce").dropna()).tolist()) \
+        if pd.api.types.is_numeric_dtype(y_raw) else sorted(map(str, pd.unique(y_raw.dropna())))
+    classes = sorted(map(str, pd.unique(y_raw.dropna())))
+    if len(classes) != 2:
+        raise HTTPException(status_code=422, detail=f"Predictive pipeline needs a binary outcome (got {len(classes)} levels).")
+    pos = classes[-1]
+    y = (y_raw.astype(str) == pos).astype(int).values
+    if len(X) < 40:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need >= 40, got {len(X)}).")
+
+    X_tr, X_te, y_tr, y_te = train_test_split(
+        X, y, test_size=req.holdout_frac, stratify=y, random_state=req.random_state)
+
+    if req.model == "lasso":
+        from sklearn.linear_model import LogisticRegression
+        pipe = Pipeline([("scale", StandardScaler()),
+                         ("clf", LogisticRegression(penalty="l1", solver="liblinear",
+                                                    class_weight="balanced", max_iter=2000,
+                                                    random_state=req.random_state))])
+        grid = {"clf__C": [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]}
+        model_label = "Lasso (L1 logistic)"
+    else:
+        from sklearn.svm import SVC
+        pipe = Pipeline([("scale", StandardScaler()),
+                         ("clf", SVC(kernel="rbf", probability=True,
+                                     class_weight="balanced", random_state=req.random_state))])
+        grid = {"clf__C": [0.5, 1.0, 5.0, 10.0], "clf__gamma": ["scale", 0.01, 0.1]}
+        model_label = ("Spline-SVM (RBF kernel)" if req.spline else "SVM (RBF kernel)")
+
+    folds = max(2, min(req.cv_folds, int(np.bincount(y_tr).min())))
+    gs = GridSearchCV(pipe, grid, cv=StratifiedKFold(folds, shuffle=True, random_state=req.random_state),
+                      scoring="roc_auc", n_jobs=-1)
+    gs.fit(X_tr, y_tr)
+    best = gs.best_estimator_
+
+    proba = best.predict_proba(X_te)[:, 1]
+    auc = float(roc_auc_score(y_te, proba))
+    brier = float(brier_score_loss(y_te, proba))
+    fpr, tpr, _ = roc_curve(y_te, proba)
+    pred = (proba >= 0.5).astype(int)
+    tn, fp, fn, tp = confusion_matrix(y_te, pred, labels=[0, 1]).ravel()
+    cal = _calibration_deciles(proba, y_te)
+    # O/E ratio on the holdout
+    oe = float(y_te.mean() / proba.mean()) if proba.mean() > 0 else None
+
+    # Selected (non-zero) Lasso coefficients
+    selected = None
+    if req.model == "lasso":
+        coef = best.named_steps["clf"].coef_.ravel()
+        selected = [{"feature": str(c), "coef": round(float(b), 6),
+                     "or": round(float(np.exp(b)), 4)}
+                    for c, b in zip(X.columns, coef) if abs(b) > 1e-8]
+        selected.sort(key=lambda d: abs(d["coef"]), reverse=True)
+
+    # Partial-dependence plots
+    pdp = []
+    try:
+        from sklearn.inspection import partial_dependence
+        if req.pdp_features:
+            want = [c for c in X.columns
+                    if c in req.pdp_features or any(c == p or c.startswith(p + "_") or c.startswith(p + "_sp") for p in req.pdp_features)]
+        else:
+            # rank by training-set variance as a cheap proxy for "interesting"
+            want = list(X.var().sort_values(ascending=False).index)
+        want = want[:max(1, req.max_pdp)]
+        for col in want:
+            idx = X.columns.get_loc(col)
+            pd_res = partial_dependence(best, X_tr, [idx], kind="average")
+            grid_vals = pd_res["grid_values"][0] if "grid_values" in pd_res else pd_res["values"][0]
+            avg = np.asarray(pd_res["average"]).ravel()
+            pdp.append({
+                "feature": str(col),
+                "x": [round(float(v), 4) for v in grid_vals],
+                "y": [round(float(v), 4) for v in avg],
+            })
+    except Exception:
+        pdp = []
+
+    _ = uniq  # (kept for potential numeric-class labelling)
+    interp = (
+        f"{model_label} trained on {len(X_tr)} cases ({int(np.sum(y_tr))} events) with "
+        f"{folds}-fold GridSearchCV, evaluated on a held-out {len(X_te)} cases "
+        f"({int(np.sum(y_te))} events). Holdout AUC = {auc:.3f}, Brier = {brier:.3f}, "
+        f"O/E = {oe:.2f}." if oe is not None else
+        f"{model_label}: holdout AUC = {auc:.3f}, Brier = {brier:.3f}."
+    )
+
+    try:
+        store.log_action(req.session_id, f"ml_{req.model}", {
+            "outcome": req.outcome, "n_predictors": len(req.predictors),
+            "spline": req.spline, "holdout_frac": req.holdout_frac,
+        })
+    except Exception:
+        pass
+
+    return {
+        "model": model_label,
+        "task": "classification",
+        "outcome": req.outcome,
+        "predictors": req.predictors,
+        "positive_class": pos,
+        "n_total": int(len(X)),
+        "n_train": int(len(X_tr)),
+        "n_test": int(len(X_te)),
+        "n_features": int(X.shape[1]),
+        "best_params": {k: _safe(v) for k, v in gs.best_params_.items()},
+        "cv_best_auc": round(float(gs.best_score_), 4),
+        "holdout": {
+            "auc": round(auc, 4),
+            "brier": round(brier, 4),
+            "oe_ratio": round(oe, 4) if oe is not None else None,
+            "confusion": {"tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn)},
+            "roc_curve": _downsample_curve(fpr, tpr),
+            "calibration": cal,
+        },
+        "selected_coefficients": selected,
+        "pdp": pdp,
+        "benchmark_note": "External benchmark models (e.g. EuroSCORE II) are not built in — supply their predicted risks as a column to compare.",
+        "interpretation": interp,
+    }

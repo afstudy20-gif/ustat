@@ -58,6 +58,7 @@ export const runMelt          = (data: object) => api.post("/api/models/melt", d
 export const runRandomForest      = (data: object) => api.post("/api/ml/random_forest", data);
 export const runGradientBoosting  = (data: object) => api.post("/api/ml/gradient_boosting", data);
 export const runFeatureImportance = (data: object) => api.post("/api/ml/feature_importance", data);
+export const runPredictive         = (data: object) => api.post("/api/ml/predictive", data);
 
 // Time series
 export const runArima        = (data: object) => api.post("/api/timeseries/arima", data);
