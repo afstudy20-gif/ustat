@@ -642,7 +642,7 @@ export default function IPTWPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
-                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric", dtype: "float64" }),
                       "csv"
                     );
                   }}
@@ -655,7 +655,7 @@ export default function IPTWPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
-                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric", dtype: "float64" }),
                       "xlsx"
                     );
                   }}
@@ -668,7 +668,7 @@ export default function IPTWPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "iptw_weighted_cohort" },
-                      session.columns.concat({ name: "iptw_weight", kind: "numeric" }),
+                      session.columns.concat({ name: "iptw_weight", kind: "numeric", dtype: "float64" }),
                       "sav"
                     );
                   }}

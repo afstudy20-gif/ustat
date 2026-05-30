@@ -3,9 +3,7 @@ import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
-import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
-import ResultExporter from "./ResultExporter";
 
 type AnalysisType = "ttest_one" | "ttest_ind" | "ttest_paired" | "correlation" | "regression";
 
@@ -19,7 +17,7 @@ export default function BayesianPanel() {
   if (!session) return null;
   const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
   const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
-  const allCols = session.columns.map((c) => c.name);
+
 
   // States
   const [analysisType, setAnalysisType] = useState<AnalysisType>("ttest_one");

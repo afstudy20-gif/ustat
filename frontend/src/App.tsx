@@ -64,8 +64,6 @@ const TABS = [
   { id: "iptw",        label: "IPTW",        icon: Scale },
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
-  { id: "factor",      label: "Factor",      icon: Grid3x3 },
-  { id: "bayesian",    label: "Bayesian",    icon: Scale },
   { id: "compute",     label: "Compute",     icon: Calculator },
 ];
 
@@ -192,13 +190,13 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "ICC", tab: "tests", aliases: ["intraclass correlation"] },
 
   // Factor Analysis / PCA
-  { name: "Principal Component Analysis (PCA)", tab: "factor", aliases: ["pca", "faktör analizi", "scree plot", "loadings", "varimax", "promax"] },
-  { name: "Exploratory Factor Analysis (EFA)", tab: "factor", aliases: ["efa", "factor analysis", "kmo", "bartlett"] },
+  { name: "Principal Component Analysis (PCA)", tab: "tests", aliases: ["pca", "faktör analizi", "scree plot", "loadings", "varimax", "promax"] },
+  { name: "Exploratory Factor Analysis (EFA)", tab: "tests", aliases: ["efa", "factor analysis", "kmo", "bartlett"] },
 
   // Bayesian
-  { name: "Bayesian T-test", tab: "bayesian", aliases: ["bayes", "bayesian t test", "jzs", "bf10"] },
-  { name: "Bayesian Correlation", tab: "bayesian", aliases: ["bayesian pearson", "rho prior"] },
-  { name: "Bayesian Regression", tab: "bayesian", aliases: ["bayesian multiple regression", "bic bf"] },
+  { name: "Bayesian T-test", tab: "tests", aliases: ["bayes", "bayesian t test", "jzs", "bf10"] },
+  { name: "Bayesian Correlation", tab: "tests", aliases: ["bayesian pearson", "rho prior"] },
+  { name: "Bayesian Regression", tab: "tests", aliases: ["bayesian multiple regression", "bic bf"] },
 ];
 
 /** Download via fetch + blob + anchor click. Iframe-based downloads swallow
@@ -306,11 +304,11 @@ function SaveBeforeOpenModal({
 }
 
 function TestsCombo() {
-  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability" | "noninferiority" | "gatekeeping">("hypothesis");
+  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability" | "noninferiority" | "gatekeeping" | "factor" | "bayesian">("hypothesis");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"], ["noninferiority", "Non-Inferiority"], ["gatekeeping", "Gatekeeping"]] as const).map(([id, label]) => (
+        {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"], ["noninferiority", "Non-Inferiority"], ["gatekeeping", "Gatekeeping"], ["factor", "Factor Analysis"], ["bayesian", "Bayesian Statistics"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -326,6 +324,8 @@ function TestsCombo() {
         {sub === "reliability" && <ReliabilityPanel />}
         {sub === "noninferiority" && <NonInferiorityPanel />}
         {sub === "gatekeeping" && <GatekeepingPanel />}
+        {sub === "factor" && <div className="flex-1 overflow-y-auto"><FactorPCAPanel /></div>}
+        {sub === "bayesian" && <div className="flex-1 overflow-y-auto"><BayesianPanel /></div>}
       </div>
     </div>
   );
@@ -739,8 +739,6 @@ export default function App() {
           {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><IPTWPanel /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
-          {activeTab === "factor"      && <div className="flex-1 overflow-y-auto"><FactorPCAPanel /></div>}
-          {activeTab === "bayesian"    && <div className="flex-1 overflow-y-auto"><BayesianPanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}
         </ErrorBoundary>
       </main>

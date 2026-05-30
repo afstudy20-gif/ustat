@@ -3,7 +3,6 @@ import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runFactorPCA } from "../api";
-import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
 import ResultExporter from "./ResultExporter";
 

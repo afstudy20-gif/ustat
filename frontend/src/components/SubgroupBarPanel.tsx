@@ -14,7 +14,6 @@ export default function SubgroupBarPanel() {
   if (!session) return null;
 
   const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
   const allCols = session.columns.map((c) => c.name);
 
   // States
@@ -166,7 +165,7 @@ export default function SubgroupBarPanel() {
     height: chartHeight - 32,
     title: { text: customTitle || chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
     xaxis: {
-      ...layout.xaxis,
+      ...(layout.xaxis as any),
       title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
       type: "multicategory",
       showgrid: showGrid,
@@ -176,7 +175,7 @@ export default function SubgroupBarPanel() {
       tickfont: { size: 10 },
     },
     yaxis: {
-      ...layout.yaxis,
+      ...(layout.yaxis as any),
       title: { text: customYLabel || yAxisTitle, font: { size: 11 } },
       showgrid: showGrid,
       gridcolor: showGrid ? "#e5e7eb" : "transparent",

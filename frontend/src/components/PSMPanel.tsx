@@ -236,7 +236,7 @@ export default function PSMPanel() {
   const [survDuration, setSurvDuration] = useState("");
   const [survEvent, setSurvEvent] = useState("");
   const [computeRosenbaum, setComputeRosenbaum] = useState(false);
-  const [rosenbaumGammaMax, setRosenbaumGammaMax] = useState<number>(3.0);
+  const [rosenbaumGammaMax] = useState<number>(3.0);
   const [covFilter, setCovFilter] = useState("");
 
   // Result & UI
@@ -625,7 +625,7 @@ export default function PSMPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
-                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      session.columns.concat({ name: "match_set_id", kind: "categorical", dtype: "object" }),
                       "csv"
                     );
                   }}
@@ -638,7 +638,7 @@ export default function PSMPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
-                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      session.columns.concat({ name: "match_set_id", kind: "categorical", dtype: "object" }),
                       "xlsx"
                     );
                   }}
@@ -651,7 +651,7 @@ export default function PSMPanel() {
                     if (!result.matched_session_id) return;
                     exportDataset(
                       { session_id: result.matched_session_id, filename: "psm_matched_cohort" },
-                      session.columns.concat({ name: "match_set_id", kind: "categorical" }),
+                      session.columns.concat({ name: "match_set_id", kind: "categorical", dtype: "object" }),
                       "sav"
                     );
                   }}
