@@ -24,6 +24,11 @@ export default function ChartsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // States for custom labels
+  const [customTitle, setCustomTitle] = useState("");
+  const [customXLabel, setCustomXLabel] = useState("");
+  const [customYLabel, setCustomYLabel] = useState("");
+
   const run = async () => {
     setLoading(true);
     setError(null);
@@ -35,6 +40,42 @@ export default function ChartsPanel() {
       else if (chartType === "boxplot" || chartType === "violin") res = await getBoxplot({ ...base, color: color || undefined });
       else res = await getBar({ ...base, y: y || undefined, color: color || undefined });
       setPlotData(res.data);
+
+      // Auto-generate beautiful defaults
+      const xMeta = session.columns.find((c) => c.name === x);
+      const xLabelText = xMeta?.label || xMeta?.name || x;
+      
+      const yMeta = y ? session.columns.find((c) => c.name === y) : null;
+      const yLabelText = yMeta ? (yMeta.label || yMeta.name || y) : "Count";
+      
+      const colorMeta = color ? session.columns.find((c) => c.name === color) : null;
+      const colorLabelText = colorMeta ? (colorMeta.label || colorMeta.name || color) : "";
+
+      let autoTitle = "";
+      let autoX = "";
+      let autoY = "";
+
+      if (chartType === "histogram") {
+        autoTitle = `Distribution of ${xLabelText}`;
+        autoX = xLabelText;
+        autoY = "Count";
+      } else if (chartType === "scatter") {
+        autoTitle = `${yLabelText} vs ${xLabelText}`;
+        autoX = xLabelText;
+        autoY = yLabelText;
+      } else if (chartType === "boxplot" || chartType === "violin") {
+        autoTitle = colorLabelText ? `Distribution of ${xLabelText} by ${colorLabelText}` : `Distribution of ${xLabelText}`;
+        autoX = colorLabelText || "Overall";
+        autoY = xLabelText;
+      } else if (chartType === "bar") {
+        autoTitle = y ? `${yLabelText} by ${xLabelText}` : `Count by ${xLabelText}`;
+        autoX = xLabelText;
+        autoY = yLabelText;
+      }
+
+      setCustomTitle(autoTitle);
+      setCustomXLabel(autoX);
+      setCustomYLabel(autoY);
     } catch (e: any) {
       setError(e.response?.data?.detail ?? "Error generating chart");
     } finally {
@@ -43,13 +84,13 @@ export default function ChartsPanel() {
   };
 
   const chartRef = useRef<any>(null);
-  const traces = plotData ? buildTraces(plotData, chartType, pal, td) : null;
+  const traces = plotData ? buildTraces(plotData, chartType, pal, td, session) : null;
 
   return (
     <div className="flex gap-4 h-full">
       {/* Controls */}
-      <div className="w-60 flex-shrink-0 space-y-4">
-        <div className="panel space-y-3">
+      <div className="w-60 flex-shrink-0 space-y-4 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 120px)" }}>
+        <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           <h3 className="text-sm font-semibold text-gray-700">Chart Type</h3>
           {["histogram", "scatter", "boxplot", "violin", "bar"].map((t) => (
             <label key={t} className="flex items-center gap-2 cursor-pointer">
@@ -60,7 +101,7 @@ export default function ChartsPanel() {
           ))}
         </div>
 
-        <div className="panel space-y-3">
+        <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           <div>
             <label className="text-xs text-gray-400 block mb-1">X axis</label>
@@ -94,19 +135,62 @@ export default function ChartsPanel() {
               <input type="range" min={5} max={100} value={bins} onChange={(e) => setBins(+e.target.value)} className="w-full accent-indigo-500" />
             </div>
           )}
-          <button className="btn-primary w-full" onClick={run} disabled={loading}>
+          <button className="btn-primary w-full mt-2" onClick={run} disabled={loading}>
             {loading ? "Generating…" : "Generate Chart"}
           </button>
-          {error && <p className="text-red-500 text-xs">{error}</p>}
+          {error && <p className="text-red-500 text-xs mt-2">{error}</p>}
         </div>
 
+        {/* Custom Labels Panel */}
+        {plotData && (
+          <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
+            <h3 className="text-sm font-semibold text-gray-700 border-b pb-2">Custom Labels</h3>
+            
+            {/* Custom Chart Title */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Chart Title</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Title..."
+              />
+            </div>
+
+            {/* Custom X Axis Label */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">X-Axis Label</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customXLabel}
+                onChange={(e) => setCustomXLabel(e.target.value)}
+                placeholder="X-axis label..."
+              />
+            </div>
+
+            {/* Custom Y Axis Label */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Y-Axis Label</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customYLabel}
+                onChange={(e) => setCustomYLabel(e.target.value)}
+                placeholder="Y-axis label..."
+              />
+            </div>
+          </div>
+        )}
+
         {/* Chart guidance */}
-        <div className="panel bg-gray-50 border-gray-200">
+        <div className="panel bg-gray-50 border-gray-200 p-4 rounded-2xl">
           <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1">Tip</p>
           <p className="text-xs text-gray-600 leading-relaxed">{
             chartType === "histogram" ? "Shows the frequency distribution of a single numeric variable. The KDE (kernel density) overlay estimates the smooth probability density. Skewed histograms suggest using median instead of mean." :
-            chartType === "scatter" ? "Reveals relationships between two continuous variables. The regression line and R\u00B2 show linear fit strength. Add a Color variable to see group-specific patterns." :
-            chartType === "boxplot" ? "Compares distributions across groups. The box shows Q1\u2013Q3 (IQR), the line is the median, whiskers extend to 1.5\u00D7IQR. Points beyond whiskers are outliers." :
+            chartType === "scatter" ? "Reveals relationships between two continuous variables. The regression line and R² show linear fit strength. Add a Color variable to see group-specific patterns." :
+            chartType === "boxplot" ? "Compares distributions across groups. The box shows Q1–Q3 (IQR), the line is the median, whiskers extend to 1.5×IQR. Points beyond whiskers are outliers." :
             chartType === "violin" ? "Combines a box plot with a kernel density estimate. The wider the violin, the more data points at that value. Better than box plots for showing bimodal or skewed distributions." :
             "Shows counts or aggregated values for categories. Use for comparing frequencies across groups. Add a Color variable for stacked/grouped comparisons."
           }</p>
@@ -114,14 +198,28 @@ export default function ChartsPanel() {
       </div>
 
       {/* Plot area */}
-      <div className="flex-1 panel min-h-0 relative">
+      <div className="flex-1 panel min-h-0 relative bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
         {traces ? (
           <>
-          <PlotExporter plotRef={chartRef} title={`Chart_${chartType}_${x}`} />
+          <div className="absolute right-4 top-4 z-10">
+            <PlotExporter plotRef={chartRef} title={`Chart_${chartType}_${x}`} />
+          </div>
           <Plot
             ref={chartRef}
             data={traces}
-            layout={{ ...layout, title: { text: plotData?.x ?? "", font: { color: "#374151" } }, autosize: true }}
+            layout={{
+              ...layout,
+              title: { text: customTitle || plotData?.x || "", font: { color: "#374151", size: 13, weight: "bold" } },
+              xaxis: {
+                ...(layout.xaxis as any),
+                title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
+              },
+              yaxis: {
+                ...(layout.yaxis as any),
+                title: customYLabel ? { text: customYLabel, font: { size: 11 } } : undefined,
+              },
+              autosize: true
+            }}
             style={{ width: "100%", height: "100%" }}
             useResizeHandler
             config={{ responsive: true, displayModeBar: true, displaylogo: false }}
@@ -137,7 +235,7 @@ export default function ChartsPanel() {
   );
 }
 
-function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: number; markerSize: number; markerOpacity: number }): any[] | null {
+function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: number; markerSize: number; markerOpacity: number }, session: any): any[] | null {
   if (!d) return null;
 
   if (d.type === "histogram") {
@@ -163,12 +261,14 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
 
   if (d.type === "scatter") {
     if (d.color) {
+      const colorColMeta = session.columns.find((c: any) => c.name === d.color);
+      const colorLabels = colorColMeta?.value_labels ?? {};
       const groups = [...new Set(d.points.map((p: any) => p[d.color]))];
       return [
         ...groups.map((g, i) => ({
           type: "scatter",
           mode: "markers",
-          name: String(g),
+          name: colorLabels[String(g)] ?? String(g),
           x: d.points.filter((p: any) => p[d.color] === g).map((p: any) => p[d.x]),
           y: d.points.filter((p: any) => p[d.color] === g).map((p: any) => p[d.y]),
           marker: { color: C[i % C.length], size: td.markerSize, opacity: td.markerOpacity },
@@ -199,11 +299,14 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
   }
 
   if (d.type === "boxplot") {
+    const colorColMeta = session.columns.find((c: any) => c.name === d.color);
+    const colorLabels = colorColMeta?.value_labels ?? {};
+    
     if (chartType === "violin") {
       return d.groups.map((g: any, i: number) => ({
         type: "violin",
         y: g.values,
-        name: g.group,
+        name: colorLabels[String(g.group)] ?? g.group,
         box: { visible: true },
         meanline: { visible: true },
         line: { color: C[i % C.length] },
@@ -217,7 +320,7 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
     return d.groups.map((g: any, i: number) => ({
       type: "box",
       y: g.values,
-      name: g.group,
+      name: colorLabels[String(g.group)] ?? g.group,
       marker: { color: C[i % C.length] },
       boxpoints: d.groups[0].values.length < 500 ? "outliers" : false,
       text: g.row_indices?.map((idx: number) => `Row ${idx + 1}`),
@@ -226,9 +329,11 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
   }
 
   if (d.type === "bar") {
+    const xColMeta = session.columns.find((c: any) => c.name === d.x);
+    const xLabels = xColMeta?.value_labels ?? {};
     return [{
       type: "bar",
-      x: d.data.map((r: any) => r.label),
+      x: d.data.map((r: any) => xLabels[String(r.label)] ?? r.label),
       y: d.data.map((r: any) => r.value),
       marker: { color: C[0] },
     }];
@@ -236,3 +341,4 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
 
   return null;
 }
+
