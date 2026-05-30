@@ -223,7 +223,12 @@ export default function FactorPCAPanel() {
               <option key={c}>{c}</option>
             ))}
           </select>
-          <p className="text-[10px] text-gray-400">Hold Ctrl/Cmd to multi-select.</p>
+          <div className="flex items-center justify-between mt-1 text-[10px]">
+            <span className="text-gray-400">Hold Ctrl/Cmd to multi-select.</span>
+            <span className={`font-semibold ${items.length < 3 ? "text-amber-600 bg-amber-50" : "text-emerald-600 bg-emerald-50"} px-1.5 py-0.5 rounded`}>
+              Selected: {items.length} / 3 min
+            </span>
+          </div>
 
           <div className="space-y-1.5 pt-2">
             <label className="text-xs font-medium text-gray-600 block">Extraction</label>
@@ -302,7 +307,7 @@ export default function FactorPCAPanel() {
           <button
             className="btn-primary w-full mt-3 py-1.5"
             onClick={run}
-            disabled={loading || items.length < 3}
+            disabled={loading}
           >
             {loading ? "Computing..." : "Run Factor Analysis"}
           </button>
