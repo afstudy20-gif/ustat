@@ -33,6 +33,10 @@ export default function ThreeCol({
   const leftCol = useResizableRightCol(`${storageKey}.left`, 340, 200, 560, "left");
   const rightCol = useResizableRightCol(`${storageKey}.right`, 380, 240, 720, "right");
 
+  React.useEffect(() => {
+    window.dispatchEvent(new Event("resize"));
+  }, [leftCol.w, rightCol.w]);
+
   // Width applied via CSS variables; Tailwind `xl:w-[var(--…)]` activates only
   // above the xl breakpoint so mobile / tablet keeps the stacked layout.
   const styleVars = {
