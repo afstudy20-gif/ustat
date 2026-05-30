@@ -3,7 +3,7 @@
  * Plotly is imported lazily inside the handler so this file adds no extra
  * top-level dependency on plotly.js (the chart component already loads it).
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
 
 type ExportFmt = "png" | "svg" | "tiff" | "jpeg";
@@ -12,18 +12,36 @@ interface Props {
   plotRef: React.RefObject<any>;
   title?: string;
   className?: string;
+  defaultWidth?: number;
+  defaultHeight?: number;
 }
 
-export default function PlotExporter({ plotRef, title = "chart", className = "" }: Props) {
+export default function PlotExporter({
+  plotRef,
+  title = "chart",
+  className = "",
+  defaultWidth,
+  defaultHeight,
+}: Props) {
   const [open, setOpen]       = useState(false);
-  const [width, setWidth]     = useState(1200);
-  const [height, setHeight]   = useState(700);
+  const [width, setWidth]     = useState(defaultWidth ?? 1200);
+  const [height, setHeight]   = useState(defaultHeight ?? 700);
   const [fmt, setFmt]         = useState<ExportFmt>("png");
   const [dpi, setDpi]         = useState(300);
   const [busy, setBusy]       = useState(false);
+  
+  useEffect(() => {
+    if (defaultWidth) setWidth(defaultWidth);
+  }, [defaultWidth]);
+
+  useEffect(() => {
+    if (defaultHeight) setHeight(defaultHeight);
+  }, [defaultHeight]);
+
   // "Copied to clipboard" pill is shown for ~1.5s on success so the user
   // doesn't have to guess whether the click did anything.
   const [copyToast, setCopyToast] = useState<string | null>(null);
+
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40) || "chart";
   const getEl = (): HTMLElement | null => {

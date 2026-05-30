@@ -32,7 +32,18 @@ export default function SubgroupBarPanel() {
   const [loading, setLoading] = useState(false);
   const [chartTitle, setChartTitle] = useState("");
 
+  // States for custom labels
+  const [customTitle, setCustomTitle] = useState("");
+  const [customYLabel, setCustomYLabel] = useState("");
+  const [customXLabel, setCustomXLabel] = useState("");
+
+  // States for dimensions
+  const [chartWidth, setChartWidth] = useState<number>(800);
+  const [chartHeight, setChartHeight] = useState<number>(500);
+  const [isAutoWidth, setIsAutoWidth] = useState<boolean>(true);
+
   const chartRef = useRef<any>(null);
+  const plotContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-switch mode or fetch unique values when Y column changes
   useEffect(() => {
@@ -70,6 +81,32 @@ export default function SubgroupBarPanel() {
     }
   }, [yMode, yCol, session.session_id, uniqueValues.length]);
 
+  // ResizeObserver to sync manual drag-resize with states and exporter
+  useEffect(() => {
+    const el = plotContainerRef.current;
+    if (!el) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          // If the element has inline style width (manually dragged), update width & disable autoWidth
+          if (el.style.width) {
+            setIsAutoWidth(false);
+            setChartWidth(Math.round(width));
+          } else {
+            // Keep tracking responsive width in state so exporter has correct value
+            setChartWidth(Math.round(width));
+          }
+          setChartHeight(Math.round(height));
+        }
+      }
+    });
+
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   const run = async () => {
     if (!yCol || !subgroupCol || !xaxisCol) {
       setError("Please configure Y-axis, Subgroup, and X-axis variables.");
@@ -99,7 +136,14 @@ export default function SubgroupBarPanel() {
       // Auto-generate a beautiful descriptive title
       const modeText = yMode === "percentage" ? `% Use / Event Rate of ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
       const colorText = colorCol ? ` by ${colorCol}` : "";
-      setChartTitle(`${modeText} in Subgroups of ${subgroupCol}${colorText}`);
+      const autoTitle = `${modeText} in Subgroups of ${subgroupCol}${colorText}`;
+      
+      const autoYAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
+      
+      setChartTitle(autoTitle);
+      setCustomTitle(autoTitle);
+      setCustomYLabel(autoYAxisTitle);
+      setCustomXLabel(""); // Reset X custom label or let user overwrite
     } catch (e: any) {
       setError(e.response?.data?.detail ?? "Error generating subgroup chart");
     } finally {
@@ -115,11 +159,13 @@ export default function SubgroupBarPanel() {
   const yColLabels = yColMeta?.value_labels ?? {};
   const targetValueLabel = yColLabels[targetValue] ?? targetValue;
   const yAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
+  
   const fullLayout = plotData ? {
     ...layout,
-    title: { text: chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
+    title: { text: customTitle || chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
     xaxis: {
       ...layout.xaxis,
+      title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
       type: "multicategory",
       showgrid: showGrid,
       gridcolor: showGrid ? "#e5e7eb" : "transparent",
@@ -129,7 +175,7 @@ export default function SubgroupBarPanel() {
     },
     yaxis: {
       ...layout.yaxis,
-      title: { text: yAxisTitle, font: { size: 11 } },
+      title: { text: customYLabel || yAxisTitle, font: { size: 11 } },
       showgrid: showGrid,
       gridcolor: showGrid ? "#e5e7eb" : "transparent",
       tickfont: { size: 10 },
@@ -148,9 +194,11 @@ export default function SubgroupBarPanel() {
   } : null;
 
   return (
-    <div className="flex gap-4 h-full">
+    <div className="flex gap-4 h-full items-start">
       {/* Controls panel */}
       <div className="w-72 flex-shrink-0 space-y-4 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 120px)" }}>
+        
+        {/* Main Settings Panel */}
         <div className="panel space-y-4">
           <h3 className="text-sm font-semibold text-gray-800 border-b pb-2">Subgroup Bar Settings</h3>
           
@@ -260,6 +308,109 @@ export default function SubgroupBarPanel() {
           {error && <p className="text-red-500 text-xs font-medium leading-relaxed">{error}</p>}
         </div>
 
+        {/* Custom Labels & Dimensions Panel */}
+        {plotData && (
+          <div className="panel space-y-3.5">
+            <h3 className="text-sm font-semibold text-gray-800 border-b pb-2">Custom Labels & Dimensions</h3>
+            
+            {/* Custom Chart Title */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Chart Title</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                placeholder="Title..."
+              />
+            </div>
+
+            {/* Custom Y Axis Label */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">Y-Axis Label</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customYLabel}
+                onChange={(e) => setCustomYLabel(e.target.value)}
+                placeholder="Y-axis label..."
+              />
+            </div>
+
+            {/* Custom X Axis Label */}
+            <div>
+              <label className="text-xs font-medium text-gray-500 block mb-1">X-Axis Label</label>
+              <input
+                type="text"
+                className="select w-full text-xs py-1 px-2 border rounded"
+                value={customXLabel}
+                onChange={(e) => setCustomXLabel(e.target.value)}
+                placeholder="X-axis label..."
+              />
+            </div>
+
+            {/* Dimensions Control */}
+            <div className="pt-2 border-t border-gray-100 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-500">Auto Width (Responsive)</span>
+                <input
+                  type="checkbox"
+                  className="accent-indigo-500 h-3.5 w-3.5 rounded cursor-pointer"
+                  checked={isAutoWidth}
+                  onChange={(e) => {
+                    setIsAutoWidth(e.target.checked);
+                    if (e.target.checked && plotContainerRef.current) {
+                      // Remove inline style width so browser handles it responsively
+                      plotContainerRef.current.style.width = "";
+                    }
+                  }}
+                />
+              </div>
+
+              {!isAutoWidth && (
+                <div>
+                  <label className="text-xs font-medium text-gray-500 block mb-1">Chart Width: {chartWidth}px</label>
+                  <input
+                    type="range"
+                    min={400}
+                    max={1600}
+                    step={20}
+                    value={chartWidth}
+                    onChange={(e) => {
+                      setChartWidth(+e.target.value);
+                      if (plotContainerRef.current) {
+                        plotContainerRef.current.style.width = `${e.target.value}px`;
+                      }
+                    }}
+                    className="w-full accent-indigo-500 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Chart Height: {chartHeight}px</label>
+                <input
+                  type="range"
+                  min={300}
+                  max={1200}
+                  step={20}
+                  value={chartHeight}
+                  onChange={(e) => {
+                    setChartHeight(+e.target.value);
+                    if (plotContainerRef.current) {
+                      plotContainerRef.current.style.height = `${e.target.value}px`;
+                    }
+                  }}
+                  className="w-full accent-indigo-500 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+              <p className="text-[10px] text-gray-400 leading-snug">
+                💡 Drag the bottom-right corner of the chart panel to resize it manually. The export dimensions will automatically sync!
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Informational Guidance tip */}
         <div className="panel bg-indigo-50/50 border-indigo-100 p-3.5 space-y-2">
           <p className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider">Nested Subgroup Chart Guidance</p>
@@ -267,22 +418,34 @@ export default function SubgroupBarPanel() {
             This specialized visualization uses a **multicategory hierarchical X-axis** to display summary statistics nested across three distinct grouping variables:
           </p>
           <ul className="text-xs text-gray-600 list-disc list-inside space-y-1">
-            <li>**Outer Subgroup**: Splits the chart into separate visual categories (e.g., Clinical subgroups).</li>
-            <li>**Inner Subgroup**: Shows secondary groupings nested within each main subgroup (e.g., Time points).</li>
-            <li>**Legend Variable**: Renders side-by-side grouped colored bars (e.g., Intervention groups).</li>
+            <li>**Outer Subgroup**: Splits the chart into separate visual categories.</li>
+            <li>**Inner Subgroup**: Shows secondary groupings nested within each main subgroup.</li>
+            <li>**Legend Variable**: Renders side-by-side grouped colored bars.</li>
           </ul>
-          <p className="text-xs text-gray-600 leading-relaxed">
-            Error bars show precision of estimates (standard error, standard deviation, or confidence intervals). Exact counts (N) are visible on hover.
-          </p>
         </div>
       </div>
 
-      {/* Plot area */}
-      <div className="flex-1 panel min-h-0 relative flex flex-col justify-between">
+      {/* Plot area with custom sizing and resizing handle */}
+      <div className="flex-1 min-w-0" style={{ maxWidth: "100%" }}>
         {traces ? (
-          <>
+          <div 
+            ref={plotContainerRef}
+            className="panel relative flex flex-col justify-between bg-white border border-gray-200 shadow-sm"
+            style={{ 
+              width: isAutoWidth ? "100%" : `${chartWidth}px`, 
+              height: `${chartHeight}px`,
+              resize: "both",
+              overflow: "hidden",
+              maxWidth: "100%",
+            }}
+          >
             <div className="absolute right-4 top-4 z-10">
-              <PlotExporter plotRef={chartRef} title={`SubgroupBarChart_${yCol}_by_${subgroupCol}`} />
+              <PlotExporter 
+                plotRef={chartRef} 
+                title={`SubgroupBarChart_${yCol}_by_${subgroupCol}`} 
+                defaultWidth={chartWidth}
+                defaultHeight={chartHeight}
+              />
             </div>
             <div className="flex-1 min-h-0">
               <Plot
@@ -294,9 +457,9 @@ export default function SubgroupBarPanel() {
                 config={{ responsive: true, displayModeBar: true, displaylogo: false }}
               />
             </div>
-          </>
+          </div>
         ) : (
-          <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8 text-center space-y-2">
+          <div className="panel h-96 flex flex-col items-center justify-center text-gray-400 p-8 text-center space-y-2 bg-white border border-gray-200 shadow-sm">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
             </svg>
