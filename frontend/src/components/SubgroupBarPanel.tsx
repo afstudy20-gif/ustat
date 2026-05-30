@@ -91,8 +91,13 @@ export default function SubgroupBarPanel() {
       });
       setPlotData(res.data);
       
+      // Resolve target value label if available
+      const yColMeta = session.columns.find((c) => c.name === yCol);
+      const yColLabels = yColMeta?.value_labels ?? {};
+      const targetValueLabel = yColLabels[targetValue] ?? targetValue;
+
       // Auto-generate a beautiful descriptive title
-      const modeText = yMode === "percentage" ? `% Use / Event Rate of ${yCol} (${targetValue})` : `Mean of ${yCol}`;
+      const modeText = yMode === "percentage" ? `% Use / Event Rate of ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
       const colorText = colorCol ? ` by ${colorCol}` : "";
       setChartTitle(`${modeText} in Subgroups of ${subgroupCol}${colorText}`);
     } catch (e: any) {
@@ -103,10 +108,13 @@ export default function SubgroupBarPanel() {
   };
 
   // Build Plotly-ready traces
-  const traces = plotData ? buildPlotlyTraces(plotData, pal) : null;
+  const traces = plotData ? buildPlotlyTraces(plotData, pal, session) : null;
 
   // Layout Configuration
-  const yAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValue})` : `Mean of ${yCol}`;
+  const yColMeta = session.columns.find((c) => c.name === yCol);
+  const yColLabels = yColMeta?.value_labels ?? {};
+  const targetValueLabel = yColLabels[targetValue] ?? targetValue;
+  const yAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
   const fullLayout = plotData ? {
     ...layout,
     title: { text: chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
@@ -301,15 +309,28 @@ export default function SubgroupBarPanel() {
   );
 }
 
-function buildPlotlyTraces(plotData: any, pal: string[]) {
-  if (!plotData || !plotData.traces) return [];
+function buildPlotlyTraces(plotData: any, pal: string[], session: any) {
+  if (!plotData || !plotData.traces || !session) return [];
+
+  const subgroupColMeta = session.columns.find((c: any) => c.name === plotData.subgroup_col);
+  const xaxisColMeta = session.columns.find((c: any) => c.name === plotData.xaxis_col);
+  const colorColMeta = session.columns.find((c: any) => c.name === plotData.color_col);
+
+  const subgroupLabels = subgroupColMeta?.value_labels ?? {};
+  const xaxisLabels = xaxisColMeta?.value_labels ?? {};
+  const colorLabels = colorColMeta?.value_labels ?? {};
+
   return plotData.traces.map((t: any, i: number) => {
-    // Multicategory axis requires [[outer], [inner]]
-    const xArray = [t.x_subgroup, t.x_xaxis];
+    // Map raw values to user-defined value labels if they exist
+    const mappedSubgroup = t.x_subgroup.map((v: any) => subgroupLabels[String(v)] ?? String(v));
+    const mappedXaxis = t.x_xaxis.map((v: any) => xaxisLabels[String(v)] ?? String(v));
+    const mappedName = colorLabels[t.name] ?? t.name;
+
+    const xArray = [mappedSubgroup, mappedXaxis];
     
     return {
       type: "bar",
-      name: t.name,
+      name: mappedName,
       x: xArray,
       y: t.y,
       error_y: {
@@ -332,7 +353,7 @@ function buildPlotlyTraces(plotData: any, pal: string[]) {
         `<b>%{x}</b><br>` +
         `Summary Value: %{y:.2f}${plotData.y_mode === 'percentage' ? '%' : ''}<br>` +
         (plotData.error_type !== 'none' ? `Error (${plotData.error_type.toUpperCase()}): %{error_y.array:.2f}<br>` : '') +
-        `Sample Size (N): %{customdata}<extra>${t.name}</extra>`,
+        `Sample Size (N): %{customdata}<extra>${mappedName}</extra>`,
     };
   });
 }
