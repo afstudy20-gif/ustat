@@ -936,8 +936,8 @@ export default function IPTWPanel() {
               <p className="text-xs font-bold text-amber-800">⚠ Key Assumptions</p>
               {[
                 ["Positivity", "Every subject must have a non-zero probability of receiving both treatment options. Extreme weights (close to 0 or 1 PS) can destabilize the estimator."],
-                ["Stabilisation", "Stabilised weights rescale the raw weights by the marginal probability of treatment, drastically reducing standard error inflation."],
-                ["Exchangeability", "Assumes all confounding factors are measured and properly adjusted for in the propensity score model."],
+                ["Consistency (SUTVA)", "Assumes a subject's observed outcome under a given treatment is their true potential outcome under that treatment, with no interference between subjects and no multiple versions of treatment."],
+                ["Exchangeability", "Assumes all confounding factors are measured and properly adjusted for in the propensity score model (no unmeasured confounding)."],
               ].map(([title, body]) => (
                 <div key={title} className="flex gap-1.5 text-[10px] text-amber-700">
                   <span className="flex-shrink-0 font-semibold">{title}:</span>
