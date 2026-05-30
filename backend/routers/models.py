@@ -7,7 +7,7 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from services import store
 from services.impute import apply_imputation
 from services.rcs_basis import (
@@ -221,6 +221,126 @@ def _linear_results_text(outcome, coefs, model):
             preds.append(f'{c["variable"]} (B = {c["estimate"]:.3f}, SE = {c["se"]:.3f}, p = {p_s})')
         parts.append("Significant predictors: " + "; ".join(preds) + ".")
     return " ".join(parts)
+
+
+# ── Delta-scaling MNAR sensitivity ───────────────────────────────────────────
+
+class DeltaSensitivityRequest(BaseModel):
+    session_id: str
+    model: str = "linear"               # 'linear' | 'logistic'
+    outcome: str
+    predictors: List[str]
+    # Numeric predictors whose IMPUTED (originally-missing) cells are scaled by
+    # each delta. Defaults to every numeric predictor that actually has missing
+    # values.
+    delta_cols: Optional[List[str]] = None
+    deltas: List[float] = [0.9, 1.1]
+    imputation: str = "mice"            # must impute (mean/median/mice), not listwise
+
+
+def _fit_effects(df: pd.DataFrame, model: str, outcome: str, predictors: List[str]):
+    """Fit linear (OLS) or logistic (GLM-Binomial) and return per-predictor
+    effect sizes — raw coefficient B for linear, odds ratio exp(β) for logistic.
+    """
+    X_enc = _encode_design(df, predictors, None)
+    X = sm.add_constant(X_enc, has_constant="add")
+    y = pd.to_numeric(df[outcome], errors="coerce").astype(float)
+    if model == "logistic":
+        res = sm.GLM(y, X, family=sm.families.Binomial()).fit()
+        eff = {v: float(np.exp(res.params[v])) for v in res.params.index if v != "const"}
+        return eff, "OR"
+    res = sm.OLS(y, X).fit()
+    eff = {v: float(res.params[v]) for v in res.params.index if v != "const"}
+    return eff, "B"
+
+
+@router.post("/delta_sensitivity")
+def delta_sensitivity(req: DeltaSensitivityRequest):
+    df_full = _get_df(req.session_id)
+    if req.model not in ("linear", "logistic"):
+        raise HTTPException(status_code=422, detail="model must be 'linear' or 'logistic'.")
+    if req.imputation in ("listwise", "none", "", None):
+        raise HTTPException(
+            status_code=422,
+            detail="Delta-scaling needs an imputing method (mean/median/mice); listwise leaves no imputed values to scale.",
+        )
+    if not req.deltas:
+        raise HTTPException(status_code=422, detail="Provide at least one delta.")
+    for c in [req.outcome] + req.predictors:
+        if c not in df_full.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+
+    if req.delta_cols:
+        delta_cols = [c for c in req.delta_cols if c in req.predictors]
+    else:
+        delta_cols = [
+            c for c in req.predictors
+            if pd.api.types.is_numeric_dtype(df_full[c]) and bool(df_full[c].isna().any())
+        ]
+    if not delta_cols:
+        raise HTTPException(
+            status_code=422,
+            detail="No numeric predictor with missing values to delta-scale. Pass delta_cols explicitly.",
+        )
+
+    if req.model == "logistic":
+        yv = set(pd.to_numeric(df_full[req.outcome], errors="coerce").dropna().unique().tolist())
+        if not yv.issubset({0, 1}) or len(yv) < 2:
+            raise HTTPException(status_code=422, detail="Logistic outcome must be binary 0/1.")
+
+    masks_full = {c: df_full[c].isna() for c in delta_cols}
+    base_df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation)
+    if len(base_df) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows after imputation (got {len(base_df)}).")
+    masks = {c: masks_full[c].reindex(base_df.index).fillna(False).to_numpy() for c in delta_cols}
+    n_scaled = {c: int(m.sum()) for c, m in masks.items()}
+
+    base_eff, eff_label = _fit_effects(base_df, req.model, req.outcome, req.predictors)
+
+    scenarios = []
+    for d in req.deltas:
+        dd = base_df.copy()
+        for c in delta_cols:
+            m = masks[c]
+            if not m.any():
+                continue
+            col_vals = pd.to_numeric(dd[c], errors="coerce").to_numpy(dtype=float)
+            col_vals[m] = col_vals[m] * float(d)
+            dd[c] = col_vals
+        try:
+            eff, _ = _fit_effects(dd, req.model, req.outcome, req.predictors)
+        except Exception:
+            eff = {}
+        scenarios.append({"delta": float(d), "effects": {k: round(v, 6) for k, v in eff.items()}})
+
+    variables = list(base_eff.keys())
+    table = []
+    for v in variables:
+        row: Dict[str, Any] = {"variable": v, "base": round(base_eff[v], 6)}
+        for s in scenarios:
+            ev = s["effects"].get(v)
+            row[f"delta_{s['delta']}"] = ev if ev is not None else None
+        table.append(row)
+
+    return {
+        "method": "delta_sensitivity",
+        "model": req.model,
+        "effect_label": eff_label,            # 'B' (linear) | 'OR' (logistic)
+        "imputation": req.imputation,
+        "delta_cols": delta_cols,
+        "n_scaled_per_col": n_scaled,
+        "deltas": [float(d) for d in req.deltas],
+        "base": {v: round(base_eff[v], 6) for v in variables},
+        "scenarios": scenarios,
+        "table": table,
+        "note": (
+            "MNAR sensitivity by delta-scaling: values imputed for originally-missing "
+            "cells in the listed columns are multiplied by Δ before refitting. Δ < 1 "
+            "simulates true values below the imputed estimate, Δ > 1 above it. Effect "
+            "estimates that stay stable across Δ support robustness to a "
+            "missing-not-at-random mechanism."
+        ),
+    }
 
 
 def _add_pairwise_interactions(

@@ -38,6 +38,7 @@ export const getBar = (data: object) => api.post("/api/charts/bar", data);
 export const getGroupedBar = (data: object) => api.post("/api/charts/grouped_bar", data);
 
 export const runLinear   = (data: object) => api.post("/api/models/linear", data);
+export const runDeltaSensitivity = (data: object) => api.post("/api/models/delta_sensitivity", data);
 export const runRCS      = (data: object) => api.post("/api/models/rcs", data);
 export const runLogistic = (data: object) => api.post("/api/models/logistic", data);
 export const runFirthLogistic = (data: object) => api.post("/api/models/firth_logistic", data);

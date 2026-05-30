@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, getSparklines } from "../api";
+import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, getSparklines, runDeltaSensitivity } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -1528,6 +1528,30 @@ export default function ModelsPanel() {
   // Linear-only: per-categorical reference level + missing-indicator method.
   const [referenceLevels, setReferenceLevels] = useState<Record<string, string>>({});
   const [missingIndicator, setMissingIndicator] = useState<string[]>([]);
+  // MNAR delta-scaling sensitivity (linear).
+  const [deltaStr, setDeltaStr] = useState("0.9, 1.1");
+  const [deltaResult, setDeltaResult] = useState<any>(null);
+  const [deltaLoading, setDeltaLoading] = useState(false);
+  const [deltaError, setDeltaError] = useState<string | null>(null);
+  const runDelta = async () => {
+    setDeltaLoading(true); setDeltaError(null); setDeltaResult(null);
+    try {
+      const deltas = deltaStr.split(",").map((s) => parseFloat(s.trim())).filter((v) => Number.isFinite(v));
+      const r = await runDeltaSensitivity({
+        session_id: session.session_id,
+        model: "linear",
+        outcome,
+        predictors,
+        deltas: deltas.length ? deltas : [0.9, 1.1],
+        imputation: imputation && imputation !== "listwise" ? imputation : "mice",
+      });
+      setDeltaResult(r.data);
+    } catch (e: any) {
+      setDeltaError(e.response?.data?.detail ?? "δ-sensitivity failed");
+    } finally {
+      setDeltaLoading(false);
+    }
+  };
   const levelsOf = (col: string): string[] => {
     const s = new Set<string>();
     for (const row of session.preview) {
@@ -1962,6 +1986,52 @@ export default function ModelsPanel() {
                     <span className="text-gray-600">{p}{missingCounts[p] ? <span className="text-amber-500"> · {missingCounts[p]} missing</span> : null}</span>
                   </label>
                 ))}
+              </div>
+              {/* MNAR delta-scaling sensitivity */}
+              <div className="space-y-1 pt-2 border-t border-gray-100">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                  MNAR δ-sensitivity
+                  <Tip wide text="Refits the linear model after multiplying the IMPUTED values (originally-missing cells) of numeric predictors by each δ. δ<1 = true values below the imputed estimate, δ>1 = above. Stable coefficients across δ support robustness to a missing-not-at-random mechanism. Needs an imputing method; listwise is auto-switched to MICE." />
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <input className="select text-xs py-1 flex-1" value={deltaStr}
+                    onChange={(e) => setDeltaStr(e.target.value)} placeholder="0.9, 1.1" />
+                  <button onClick={runDelta} disabled={deltaLoading || predictors.length === 0}
+                    className="text-xs px-2 py-1 rounded border border-indigo-300 text-indigo-600 hover:bg-indigo-50 disabled:opacity-40 transition-colors">
+                    {deltaLoading ? "…" : "Run δ"}
+                  </button>
+                </div>
+                {deltaError && <p className="text-red-400 text-[10px]">{deltaError}</p>}
+                {deltaResult && (
+                  <div className="overflow-x-auto mt-1">
+                    <table className="text-[10px] w-full">
+                      <thead>
+                        <tr className="text-gray-400">
+                          <th className="text-left pr-2">Var</th>
+                          <th className="text-right px-1">base</th>
+                          {deltaResult.scenarios.map((s: any) => (
+                            <th key={s.delta} className="text-right px-1">δ{s.delta}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deltaResult.table.map((row: any) => (
+                          <tr key={row.variable} className="border-t border-gray-100">
+                            <td className="text-left pr-2 font-mono text-gray-600 truncate max-w-[72px]" title={row.variable}>{row.variable}</td>
+                            <td className="text-right px-1">{Number(row.base).toFixed(3)}</td>
+                            {deltaResult.scenarios.map((s: any) => {
+                              const v = s.effects?.[row.variable];
+                              return <td key={s.delta} className="text-right px-1">{v == null ? "–" : Number(v).toFixed(3)}</td>;
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[9px] text-gray-400 mt-1">
+                      {deltaResult.effect_label} · scaled: {Object.entries(deltaResult.n_scaled_per_col).map(([k, v]) => `${k}=${v}`).join(", ") || "none"}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
