@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Terminal, Save, Search, Layers, Scale } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Save, Search, Layers, Scale } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
@@ -48,7 +48,6 @@ import TimeSeriesPanel from "./components/TimeSeriesPanel";
 import MetaPanel from "./components/MetaPanel";
 import WeightedStatsPanel from "./components/WeightedStatsPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
-import CodePanel from "./components/CodePanel";
 import FactorPCAPanel from "./components/FactorPCAPanel";
 import BayesianPanel from "./components/BayesianPanel";
 
@@ -61,14 +60,13 @@ const TABS = [
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
   { id: "visual",      label: "Visual",      icon: Shapes },
-  { id: "compute",     label: "Compute",     icon: Calculator },
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "iptw",        label: "IPTW",        icon: Scale },
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
   { id: "factor",      label: "Factor",      icon: Grid3x3 },
   { id: "bayesian",    label: "Bayesian",    icon: Scale },
-  { id: "code",        label: "Code",        icon: Terminal },
+  { id: "compute",     label: "Compute",     icon: Calculator },
 ];
 
 // Searchable catalog of every test / model / analysis exposed by the app,
@@ -723,14 +721,13 @@ export default function App() {
           {activeTab === "models"      && <ModelsCombo />}
           {activeTab === "visual"      && <VisualChartsCombo />}
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
-          {activeTab === "compute"     && <ComputeCombo />}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
           {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><IPTWPanel /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
           {activeTab === "factor"      && <div className="flex-1 overflow-y-auto"><FactorPCAPanel /></div>}
           {activeTab === "bayesian"    && <div className="flex-1 overflow-y-auto"><BayesianPanel /></div>}
-          {activeTab === "code"        && <div className="flex-1 overflow-y-auto"><CodePanel /></div>}
+          {activeTab === "compute"     && <ComputeCombo />}
         </ErrorBoundary>
       </main>
     </div>
