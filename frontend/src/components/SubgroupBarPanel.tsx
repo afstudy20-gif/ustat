@@ -36,6 +36,10 @@ export default function SubgroupBarPanel() {
   const [customYLabel, setCustomYLabel] = useState("");
   const [customXLabel, setCustomXLabel] = useState("");
 
+  // States for legend
+  const [showLegend, setShowLegend] = useState<boolean>(true);
+  const [customLegendLabels, setCustomLegendLabels] = useState<Record<string, string>>({});
+
   // States for dimensions
   const [chartWidth, setChartWidth] = useState<number>(800);
   const [chartHeight, setChartHeight] = useState<number>(500);
@@ -151,7 +155,7 @@ export default function SubgroupBarPanel() {
   };
 
   // Build Plotly-ready traces
-  const traces = plotData ? buildPlotlyTraces(plotData, pal, session) : null;
+  const traces = plotData ? buildPlotlyTraces(plotData, pal, session, customLegendLabels) : null;
 
   // Layout Configuration
   const yColMeta = session.columns.find((c) => c.name === yCol);
@@ -164,6 +168,7 @@ export default function SubgroupBarPanel() {
     width: chartWidth - 32,
     height: chartHeight - 32,
     title: { text: customTitle || chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
+    showlegend: showLegend,
     xaxis: {
       ...(layout.xaxis as any),
       title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
@@ -349,6 +354,49 @@ export default function SubgroupBarPanel() {
                 placeholder="X-axis label..."
               />
             </div>
+
+            {/* Show/Hide Legend */}
+            <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+              <span className="text-xs font-medium text-gray-500">Show Legend</span>
+              <input
+                type="checkbox"
+                className="accent-indigo-500 h-3.5 w-3.5 rounded cursor-pointer"
+                checked={showLegend}
+                onChange={(e) => setShowLegend(e.target.checked)}
+              />
+            </div>
+
+            {/* Custom Legend Labels */}
+            {colorCol && plotData?.traces && showLegend && (
+              <div className="space-y-2 pt-2 border-t border-gray-100">
+                <span className="text-xs font-semibold text-gray-700 block">Custom Legend Labels</span>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {plotData.traces.map((t: any) => {
+                    const rawVal = String(t.name);
+                    const colorColMeta = session.columns.find((c) => c.name === colorCol);
+                    const colorLabels = colorColMeta?.value_labels ?? {};
+                    const defaultLabel = colorLabels[rawVal] ?? rawVal;
+                    return (
+                      <div key={rawVal} className="flex items-center gap-2">
+                        <span className="text-[10px] text-gray-500 min-w-16 truncate" title={rawVal}>{rawVal}:</span>
+                        <input
+                          type="text"
+                          className="select flex-1 text-[11px] py-0.5 px-2 border rounded focus:outline-none focus:border-indigo-400 bg-white"
+                          value={customLegendLabels[rawVal] ?? ""}
+                          onChange={(e) => {
+                            setCustomLegendLabels((prev) => ({
+                              ...prev,
+                              [rawVal]: e.target.value,
+                            }));
+                          }}
+                          placeholder={defaultLabel}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Dimensions Control */}
             <div className="pt-2 border-t border-gray-100 space-y-3">
@@ -555,7 +603,7 @@ export default function SubgroupBarPanel() {
   );
 }
 
-function buildPlotlyTraces(plotData: any, pal: string[], session: any) {
+function buildPlotlyTraces(plotData: any, pal: string[], session: any, customLegendLabels: Record<string, string>) {
   if (!plotData || !plotData.traces || !session) return [];
 
   const subgroupColMeta = session.columns.find((c: any) => c.name === plotData.subgroup_col);
@@ -570,7 +618,7 @@ function buildPlotlyTraces(plotData: any, pal: string[], session: any) {
     // Map raw values to user-defined value labels if they exist
     const mappedSubgroup = t.x_subgroup.map((v: any) => subgroupLabels[String(v)] ?? String(v));
     const mappedXaxis = t.x_xaxis.map((v: any) => xaxisLabels[String(v)] ?? String(v));
-    const mappedName = colorLabels[t.name] ?? t.name;
+    const mappedName = customLegendLabels[String(t.name)] || colorLabels[t.name] || String(t.name);
 
     const xArray = [mappedSubgroup, mappedXaxis];
     
