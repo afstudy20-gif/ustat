@@ -1525,6 +1525,17 @@ export default function ModelsPanel() {
   const [glmInteractions, setGlmInteractions] = useState<Array<[string, string]>>([]);
   const [glmIxA, setGlmIxA] = useState<string>("");
   const [glmIxB, setGlmIxB] = useState<string>("");
+  // Linear-only: per-categorical reference level + missing-indicator method.
+  const [referenceLevels, setReferenceLevels] = useState<Record<string, string>>({});
+  const [missingIndicator, setMissingIndicator] = useState<string[]>([]);
+  const levelsOf = (col: string): string[] => {
+    const s = new Set<string>();
+    for (const row of session.preview) {
+      const v = row[col];
+      if (v != null && v !== "") s.add(String(v));
+    }
+    return [...s].sort();
+  };
 
   // ── New feature state ─────────────────────────────────────────────────────
   const [selectedCoefIdx, setSelectedCoefIdx] = useState<number | null>(null);
@@ -1606,7 +1617,11 @@ export default function ModelsPanel() {
       let res: any;
       const sf = buildScaleFactors();
       const interactions = glmInteractions.length > 0 ? glmInteractions : undefined;
-      if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE, interactions });
+      if (model === "linear") res = await runLinear({
+        session_id: sid, outcome, predictors, imputation, robust_se: robustSE, interactions,
+        reference_levels: Object.keys(referenceLevels).length ? referenceLevels : undefined,
+        missing_indicator: missingIndicator.length ? missingIndicator : undefined,
+      });
       else if (model === "logistic") res = await runLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, robust_se: robustSE, interactions });
       else if (model === "firth") res = await runFirthLogistic({ session_id: sid, outcome, predictors, scale_factors: sf, imputation, interactions });
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
@@ -1905,6 +1920,49 @@ export default function ModelsPanel() {
                     className="text-[10px] text-gray-400 hover:text-red-500 underline">clear all</button>
                 </div>
               )}
+            </div>
+          )}
+          {/* Linear-only: reference level + missing-indicator method */}
+          {model === "linear" && predictors.length > 0 && (
+            <div className="panel space-y-2">
+              <p className="text-xs text-gray-500 font-medium flex items-center gap-1">
+                Categorical &amp; missing
+                <Tip wide text="Reference level: choose which category of a categorical predictor is the baseline that the others are contrasted against (e.g. '0 cups/day'). Missing-indicator method: instead of dropping rows with a missing value, keep them — the column is imputed and an extra <col>__missing dummy (1 = was missing) lets the model absorb informative missingness." />
+              </p>
+              {predictors.filter((p) => !numCols.includes(p)).length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-gray-400 uppercase tracking-wider">Reference level</p>
+                  {predictors.filter((p) => !numCols.includes(p)).map((p) => (
+                    <div key={p} className="flex items-center gap-2">
+                      <span className="text-xs text-gray-600 w-24 truncate" title={p}>{p}</span>
+                      <select
+                        className="select text-xs py-1 flex-1"
+                        value={referenceLevels[p] ?? ""}
+                        onChange={(e) => setReferenceLevels((prev) => {
+                          const next = { ...prev };
+                          if (e.target.value) next[p] = e.target.value; else delete next[p];
+                          return next;
+                        })}
+                      >
+                        <option value="">auto (first level)</option>
+                        {levelsOf(p).map((l) => <option key={l} value={l}>{l}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-1">
+                <p className="text-[10px] text-gray-400 uppercase tracking-wider">Missing-indicator method</p>
+                {predictors.map((p) => (
+                  <label key={p} className="flex items-center gap-2 text-xs cursor-pointer">
+                    <input type="checkbox" className="accent-indigo-500"
+                      checked={missingIndicator.includes(p)}
+                      onChange={() => setMissingIndicator((prev) =>
+                        prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p])} />
+                    <span className="text-gray-600">{p}{missingCounts[p] ? <span className="text-amber-500"> · {missingCounts[p]} missing</span> : null}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           <MissingGuard
