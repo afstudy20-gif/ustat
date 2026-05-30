@@ -820,7 +820,19 @@ export default function DescriptivePanel() {
     setSummary(null);
     setSummaryLoading(true);
     api.get(`/api/stats/${session.session_id}/column_summary`, { params: { column: colName, kind } })
-      .then((r) => setSummary(r.data))
+      .then((r) => {
+        const rawSummary = r.data;
+        if (rawSummary && rawSummary.type === "categorical" && rawSummary.categories) {
+          const colMeta = session.columns.find((c) => c.name === colName);
+          const vLabels = colMeta?.value_labels ?? {};
+          
+          rawSummary.categories = rawSummary.categories.map((c: any) => ({
+            ...c,
+            value: vLabels[String(c.value)] ?? c.value,
+          }));
+        }
+        setSummary(rawSummary);
+      })
       .finally(() => setSummaryLoading(false));
   }, [session?.session_id]);
 

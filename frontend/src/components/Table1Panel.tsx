@@ -297,7 +297,86 @@ export default function Table1Panel() {
         selected_stats: Array.from(selectedStats),
         normality_mode: (groupCol && withinGroupNormality) ? "within_group" : "overall",
       });
-      setResult(res.data);
+
+      const rawResult = res.data as T1Result;
+      if (rawResult) {
+        // 1. Map group labels
+        if (rawResult.group_column) {
+          const groupColMeta = session.columns.find((c) => c.name === rawResult.group_column);
+          const groupLabels = groupColMeta?.value_labels ?? {};
+          
+          rawResult.group_labels = rawResult.group_labels.map((g) => {
+            const mapped = groupLabels[String(g)];
+            return mapped !== undefined ? mapped : g;
+          });
+          
+          // Map group_ns keys
+          const group_ns: Record<string, number> = {};
+          Object.entries(rawResult.group_ns).forEach(([g, n]) => {
+            const mapped = groupLabels[String(g)] ?? g;
+            group_ns[mapped] = n;
+          });
+          rawResult.group_ns = group_ns;
+        }
+        
+        // 2. Map row variables categories & group stats
+        rawResult.rows = rawResult.rows.map((row) => {
+          const colMeta = session.columns.find((c) => c.name === row.variable);
+          const vLabels = colMeta?.value_labels ?? {};
+          
+          // Map group stats keys for numeric and categorical
+          if (rawResult.group_column) {
+            const groupColMeta = session.columns.find((c) => c.name === rawResult.group_column);
+            const groupLabels = groupColMeta?.value_labels ?? {};
+            
+            const group_stats: Record<string, string> = {};
+            Object.entries(row.group_stats).forEach(([g, val]) => {
+              const mapped = groupLabels[String(g)] ?? g;
+              group_stats[mapped] = val;
+            });
+            row.group_stats = group_stats;
+            
+            if (row.stat_rows) {
+              row.stat_rows = row.stat_rows.map((sr) => {
+                const gs: Record<string, string> = {};
+                Object.entries(sr.group_stats).forEach(([g, val]) => {
+                  const mapped = groupLabels[String(g)] ?? g;
+                  gs[mapped] = val;
+                });
+                return { ...sr, group_stats: gs };
+              });
+            }
+          }
+          
+          // Map sub-rows categories
+          if (row.type === "categorical" && row.sub_rows) {
+            row.sub_rows = row.sub_rows.map((sr) => {
+              const mappedCat = vLabels[String(sr.category)] ?? sr.category;
+              
+              const gs: Record<string, string> = {};
+              if (rawResult.group_column) {
+                const groupColMeta = session.columns.find((c) => c.name === rawResult.group_column);
+                const groupLabels = groupColMeta?.value_labels ?? {};
+                
+                Object.entries(sr.group_stats).forEach(([g, val]) => {
+                  const mapped = groupLabels[String(g)] ?? g;
+                  gs[mapped] = val;
+                });
+              }
+              
+              return {
+                ...sr,
+                category: mappedCat,
+                group_stats: gs,
+              };
+            });
+          }
+          
+          return row;
+        });
+      }
+
+      setResult(rawResult);
     } catch (e: any) {
       setError(e.response?.data?.detail ?? e.message ?? "Error running Table 1");
     } finally { setLoading(false); }
