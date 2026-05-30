@@ -460,12 +460,94 @@ export default function SubgroupBarPanel() {
             </div>
           </div>
         ) : (
-          <div className="panel h-96 flex flex-col items-center justify-center text-gray-400 p-8 text-center space-y-2 bg-white border border-gray-200 shadow-sm">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-            <span className="text-sm font-medium text-gray-500">Configure and generate a nested subgroup bar chart</span>
-            <span className="text-xs text-gray-400 max-w-sm">Select Y-axis values, subgroups and inner variables on the left panel to recreate clinical publications charts.</span>
+          <div className="panel min-h-[480px] flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-white border border-gray-200 shadow-sm rounded-2xl relative overflow-hidden">
+            {/* High-Fidelity SVG Preview Illustration */}
+            <div className="w-full max-w-lg mb-6 opacity-85 hover:opacity-100 transition-opacity duration-300 bg-slate-50/50 p-4 rounded-xl border border-slate-100 shadow-inner">
+              <svg width="100%" height="200" viewBox="0 0 450 200" fill="none" xmlns="http://www.w3.org/2000/svg" className="mx-auto select-none">
+                <defs>
+                  <linearGradient id="grad1" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#6366f1" />
+                    <stop offset="100%" stopColor="#4f46e5" />
+                  </linearGradient>
+                  <linearGradient id="grad2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#06b6d4" />
+                    <stop offset="100%" stopColor="#0891b2" />
+                  </linearGradient>
+                </defs>
+
+                {/* Grid Lines */}
+                <line x1="40" y1="30" x2="410" y2="30" stroke="#f1f5f9" strokeWidth="1" />
+                <line x1="40" y1="65" x2="410" y2="65" stroke="#f1f5f9" strokeWidth="1" />
+                <line x1="40" y1="100" x2="410" y2="100" stroke="#f1f5f9" strokeWidth="1" />
+                <line x1="40" y1="135" x2="410" y2="135" stroke="#f1f5f9" strokeWidth="1" />
+
+                {/* Y-Axis Line */}
+                <line x1="40" y1="20" x2="40" y2="170" stroke="#cbd5e1" strokeWidth="1.5" />
+                {/* X-Axis Line */}
+                <line x1="40" y1="170" x2="410" y2="170" stroke="#cbd5e1" strokeWidth="1.5" />
+
+                {/* Group 1 (Subgroup A) */}
+                {/* Category 1 */}
+                <rect x="75" y="70" width="14" height="100" rx="2" fill="url(#grad1)" />
+                <rect x="91" y="90" width="14" height="80" rx="2" fill="url(#grad2)" />
+                <line x1="82" y1="50" x2="82" y2="70" stroke="#475569" strokeWidth="1.2" />
+                <line x1="78" y1="50" x2="86" y2="50" stroke="#475569" strokeWidth="1.2" />
+                <line x1="98" y1="75" x2="98" y2="90" stroke="#475569" strokeWidth="1.2" />
+                <line x1="94" y1="75" x2="102" y2="75" stroke="#475569" strokeWidth="1.2" />
+
+                {/* Category 2 */}
+                <rect x="145" y="40" width="14" height="130" rx="2" fill="url(#grad1)" />
+                <rect x="161" y="60" width="14" height="110" rx="2" fill="url(#grad2)" />
+                <line x1="152" y1="25" x2="152" y2="40" stroke="#475569" strokeWidth="1.2" />
+                <line x1="148" y1="25" x2="156" y2="25" stroke="#475569" strokeWidth="1.2" />
+                <line x1="168" y1="45" x2="168" y2="60" stroke="#475569" strokeWidth="1.2" />
+                <line x1="164" y1="45" x2="172" y2="45" stroke="#475569" strokeWidth="1.2" />
+
+                <text x="125" y="178" fill="#94a3b8" fontSize="8" fontFamily="system-ui" textAnchor="middle">Category A</text>
+
+                {/* Subgroup 1 Bracket */}
+                <line x1="68" y1="184" x2="182" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <line x1="68" y1="180" x2="68" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <line x1="182" y1="180" x2="182" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <text x="125" y="194" fill="#64748b" fontSize="8" fontWeight="bold" fontFamily="system-ui" textAnchor="middle">Subgroup 1 (e.g., Male)</text>
+
+                {/* Group 2 (Subgroup B) */}
+                {/* Category 1 */}
+                <rect x="255" y="85" width="14" height="85" rx="2" fill="url(#grad1)" />
+                <rect x="271" y="55" width="14" height="115" rx="2" fill="url(#grad2)" />
+                <line x1="262" y1="70" x2="262" y2="85" stroke="#475569" strokeWidth="1.2" />
+                <line x1="258" y1="70" x2="266" y2="70" stroke="#475569" strokeWidth="1.2" />
+                <line x1="278" y1="40" x2="278" y2="55" stroke="#475569" strokeWidth="1.2" />
+                <line x1="274" y1="40" x2="282" y2="40" stroke="#475569" strokeWidth="1.2" />
+
+                {/* Category 2 */}
+                <rect x="325" y="115" width="14" height="55" rx="2" fill="url(#grad1)" />
+                <rect x="341" y="100" width="14" height="70" rx="2" fill="url(#grad2)" />
+                <line x1="332" y1="105" x2="332" y2="115" stroke="#475569" strokeWidth="1.2" />
+                <line x1="328" y1="105" x2="336" y2="105" stroke="#475569" strokeWidth="1.2" />
+                <line x1="348" y1="88" x2="348" y2="100" stroke="#475569" strokeWidth="1.2" />
+                <line x1="344" y1="88" x2="352" y2="88" stroke="#475569" strokeWidth="1.2" />
+
+                <text x="305" y="178" fill="#94a3b8" fontSize="8" fontFamily="system-ui" textAnchor="middle">Category B</text>
+
+                {/* Subgroup 2 Bracket */}
+                <line x1="248" y1="184" x2="362" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <line x1="248" y1="180" x2="248" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <line x1="362" y1="180" x2="362" y2="184" stroke="#94a3b8" strokeWidth="1" />
+                <text x="305" y="194" fill="#64748b" fontSize="8" fontWeight="bold" fontFamily="system-ui" textAnchor="middle">Subgroup 2 (e.g., Female)</text>
+
+                {/* Legend */}
+                <rect x="315" y="10" width="80" height="26" rx="4" fill="white" stroke="#e2e8f0" strokeWidth="1" />
+                <rect x="321" y="15" width="6" height="6" rx="1.5" fill="url(#grad1)" />
+                <text x="331" y="21" fill="#475569" fontSize="7" fontFamily="system-ui">Level 1</text>
+                <rect x="361" y="15" width="6" height="6" rx="1.5" fill="url(#grad2)" />
+                <text x="371" y="21" fill="#475569" fontSize="7" fontFamily="system-ui">Level 2</text>
+              </svg>
+            </div>
+            <span className="text-sm font-bold text-slate-800 tracking-tight">Configure and Generate a Nested Subgroup Bar Chart</span>
+            <p className="text-xs text-slate-400 max-w-md mt-1.5 leading-relaxed">
+              This advanced clinical visualization uses a <strong>multicategory hierarchical X-axis</strong>. Select a continuous Y-axis variable, a primary subgroup (outer categories), and an inner variable to instantly generate publication-ready comparative charts with 95% Confidence Intervals.
+            </p>
           </div>
         )}
       </div>
