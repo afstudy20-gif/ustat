@@ -57,14 +57,19 @@ export default function ReliabilityPanel() {
             {/* Main result card */}
             <div className="panel">
               <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-gray-900">Cronbach's Alpha — Reliability Report</h4>
-                <ResultExporter title="Cronbach_Alpha" headers={result.export_rows?.[0]} rows={result.export_rows?.slice(1)} />
+                <h4 className="font-semibold text-gray-900">Scale Reliability Report</h4>
+                <ResultExporter title="Reliability_Analysis" headers={result.export_rows?.[0]} rows={result.export_rows?.slice(1)} />
               </div>
 
-              <div className="flex items-center gap-4 mb-4">
-                <div className={`text-3xl font-bold px-4 py-2 rounded-xl ${alphaColor(result.alpha)}`}>
-                  \u03B1 = {result.alpha?.toFixed(3)}
+              <div className="flex flex-wrap items-center gap-4 mb-4">
+                <div className={`text-2xl font-bold px-4 py-2 rounded-xl ${alphaColor(result.alpha)}`}>
+                  α = {result.alpha?.toFixed(3)}
                 </div>
+                {result.omega !== undefined && result.omega !== null && (
+                  <div className={`text-2xl font-bold px-4 py-2 rounded-xl ${alphaColor(result.omega)}`}>
+                    ω = {result.omega?.toFixed(3)}
+                  </div>
+                )}
                 <div>
                   <p className="text-sm font-medium text-gray-700">{result.interpretation}</p>
                   <p className="text-xs text-gray-400">{result.k} items, n = {result.n}</p>

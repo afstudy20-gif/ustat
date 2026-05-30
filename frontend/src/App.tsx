@@ -49,6 +49,8 @@ import MetaPanel from "./components/MetaPanel";
 import WeightedStatsPanel from "./components/WeightedStatsPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import CodePanel from "./components/CodePanel";
+import FactorPCAPanel from "./components/FactorPCAPanel";
+import BayesianPanel from "./components/BayesianPanel";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -64,6 +66,8 @@ const TABS = [
   { id: "iptw",        label: "IPTW",        icon: Scale },
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
+  { id: "factor",      label: "Factor",      icon: Grid3x3 },
+  { id: "bayesian",    label: "Bayesian",    icon: Scale },
   { id: "code",        label: "Code",        icon: Terminal },
 ];
 
@@ -188,6 +192,15 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "Cronbach’s alpha", tab: "tests", aliases: ["reliability"] },
   { name: "Fleiss’ kappa", tab: "tests", aliases: ["agreement"] },
   { name: "ICC", tab: "tests", aliases: ["intraclass correlation"] },
+
+  // Factor Analysis / PCA
+  { name: "Principal Component Analysis (PCA)", tab: "factor", aliases: ["pca", "faktör analizi", "scree plot", "loadings", "varimax", "promax"] },
+  { name: "Exploratory Factor Analysis (EFA)", tab: "factor", aliases: ["efa", "factor analysis", "kmo", "bartlett"] },
+
+  // Bayesian
+  { name: "Bayesian T-test", tab: "bayesian", aliases: ["bayes", "bayesian t test", "jzs", "bf10"] },
+  { name: "Bayesian Correlation", tab: "bayesian", aliases: ["bayesian pearson", "rho prior"] },
+  { name: "Bayesian Regression", tab: "bayesian", aliases: ["bayesian multiple regression", "bic bf"] },
 ];
 
 /** Download via fetch + blob + anchor click. Iframe-based downloads swallow
@@ -525,6 +538,12 @@ export default function App() {
             </span>
           </div>
 
+          {caseFilter && caseFilter.conditions && caseFilter.conditions.length > 0 && (
+            <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 font-semibold rounded-lg px-2 py-1 text-[10px] animate-pulse flex-shrink-0" title="All active analyses are automatically filtered by this subset.">
+              🧹 Filter Active ({caseFilter.selected.toLocaleString()})
+            </div>
+          )}
+
           {/* Test / analysis search. Type a name (e.g. "ROC", "Cox", "Firth",
               "Jonckheere") to find which tab it lives in; click a result
               to jump there. Aliases include short codes and Turkish names
@@ -709,6 +728,8 @@ export default function App() {
           {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><IPTWPanel /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
+          {activeTab === "factor"      && <div className="flex-1 overflow-y-auto"><FactorPCAPanel /></div>}
+          {activeTab === "bayesian"    && <div className="flex-1 overflow-y-auto"><BayesianPanel /></div>}
           {activeTab === "code"        && <div className="flex-1 overflow-y-auto"><CodePanel /></div>}
         </ErrorBoundary>
       </main>

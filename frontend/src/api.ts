@@ -205,6 +205,17 @@ export const selectCases = (sessionId: string, conditions: object[]) =>
 export const clearCases  = (sessionId: string) =>
   api.delete(`/api/sessions/${sessionId}/select_cases`);
 
+// Factor Analysis / PCA
+export const runFactorPCA = (data: object) => api.post("/api/factor/factor_pca", data);
+
+// Bayesian Statistics
+export const runBayesian = (data: object) => api.post("/api/bayesian", data);
+
+// Advanced Cleaning & Imputation
+export const runDropMissing = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/drop_missing`, data);
+export const runCleanOutliers = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/clean_outliers`, data);
+export const runFindReplace = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/find_replace`, data);
+
 // ── Code runner ────────────────────────────────────────────────────────────
 
 export interface CodeRunnerStatus {

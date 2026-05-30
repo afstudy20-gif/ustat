@@ -54,6 +54,25 @@ def cronbach(req: CronbachRequest):
     total_var = df_items.sum(axis=1).var(ddof=1)
     alpha = float((k / (k - 1)) * (1 - item_vars.sum() / total_var))
 
+    # ── McDonald's Omega (ω) ─────────────────────────────────────────────
+    try:
+        from sklearn.decomposition import FactorAnalysis
+        # Standardize the data so we get standardized loadings
+        df_scaled = (df_items - df_items.mean()) / df_items.std(ddof=1)
+        # Drop columns with zero variance if any
+        df_scaled = df_scaled.loc[:, df_scaled.var(ddof=1) > 0]
+        if df_scaled.shape[1] >= 2:
+            fa = FactorAnalysis(n_components=1, random_state=42, max_iter=500)
+            fa.fit(df_scaled.values)
+            loadings = np.clip(fa.components_[0], -0.999, 0.999)
+            num = np.sum(loadings)**2
+            den = num + np.sum(1.0 - loadings**2)
+            omega = float(num / den) if den > 0 else None
+        else:
+            omega = None
+    except Exception:
+        omega = None
+
     # ── Item-total correlations ──────────────────────────────────────────
     total = df_items.sum(axis=1)
     item_total_r = {col: float(df_items[col].corr(total - df_items[col])) for col in req.items}
@@ -126,20 +145,24 @@ def cronbach(req: CronbachRequest):
 
     # ── R code ───────────────────────────────────────────────────────────
     items_str = ", ".join(f'"{it}"' for it in req.items)
-    r_code = f'library(psych)\nalpha(data[, c({items_str})])'
+    r_code = f'library(psych)\nalpha(data[, c({items_str})])\nomega(data[, c({items_str})])'
 
     return {
         "test": "Cronbach's Alpha Reliability Analysis",
         "alpha": round(alpha, 4),
+        "omega": round(omega, 4) if omega is not None else None,
         "n": n,
         "k": k,
         "significant": alpha > 0.7,  # conventional threshold for acceptable
-        "effect_sizes": [{"name": "Cronbach's alpha", "value": round(alpha, 4), "magnitude": interpretation}],
+        "effect_sizes": [
+            {"name": "Cronbach's alpha", "value": round(alpha, 4), "magnitude": interpretation},
+            *( [{"name": "McDonald's omega", "value": round(omega, 4), "magnitude": interpretation}] if omega is not None else [] )
+        ],
         "assumptions": [],
         "item_stats": item_stats,
         "scale_summary": scale_summary,
         "interpretation": interpretation,
-        "result_text": result_text,
+        "result_text": result_text + (f" McDonald's omega was {omega:.3f}." if omega is not None else ""),
         "export_rows": export_rows,
         "r_code": r_code,
     }

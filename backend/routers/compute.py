@@ -1218,3 +1218,106 @@ def unique_values(session_id: str, col_name: str):
         raise HTTPException(status_code=404, detail=f"Column '{col_name}' not found")
     vals = sorted(df[col_name].dropna().unique().tolist(), key=lambda x: (str(type(x).__name__), x))
     return {"values": [str(v) for v in vals[:200]]}
+
+
+# ── Advanced Data Cleaning & Imputation ───────────────────────────────────────
+
+class DropMissingRequest(BaseModel):
+    columns: List[str]
+
+
+@router.post("/{session_id}/drop_missing")
+def drop_missing(session_id: str, req: DropMissingRequest):
+    df = _get_df(session_id)
+    for c in req.columns:
+        if c not in df.columns:
+            raise HTTPException(status_code=404, detail=f"Column '{c}' not found")
+    df = df.copy()
+    n_before = len(df)
+    df = df.dropna(subset=req.columns).reset_index(drop=True)
+    n_deleted = n_before - len(df)
+    store.save(session_id, df)
+    store.log_action(session_id, "drop_missing", {"columns": req.columns, "n_deleted": n_deleted})
+    return {"deleted": n_deleted, "remaining_rows": len(df)}
+
+
+class OutliersRequest(BaseModel):
+    columns: List[str]
+    method: str = "iqr"  # iqr | zscore
+    threshold: float = 1.5  # 1.5 * IQR or 3.0 * SD
+
+
+@router.post("/{session_id}/clean_outliers")
+def clean_outliers(session_id: str, req: OutliersRequest):
+    df = _get_df(session_id)
+    df = df.copy()
+    n_before = len(df)
+    
+    keep_mask = np.ones(len(df), dtype=bool)
+    for c in req.columns:
+        if c not in df.columns:
+            continue
+        col = pd.to_numeric(df[c], errors="coerce")
+        if req.method == "iqr":
+            q1 = col.quantile(0.25)
+            q3 = col.quantile(0.75)
+            iqr = q3 - q1
+            low = q1 - req.threshold * iqr
+            high = q3 + req.threshold * iqr
+            keep_mask &= (col.isna() | ((col >= low) & (col <= high)))
+        else:  # zscore
+            mean = col.mean()
+            std = col.std(ddof=1)
+            if std > 0:
+                z = np.abs((col - mean) / std)
+                keep_mask &= (col.isna() | (z <= req.threshold))
+                
+    df = df[keep_mask].reset_index(drop=True)
+    n_deleted = n_before - len(df)
+    store.save(session_id, df)
+    store.log_action(session_id, "clean_outliers", {"columns": req.columns, "method": req.method, "n_deleted": n_deleted})
+    return {"deleted": n_deleted, "remaining_rows": len(df)}
+
+
+class FindReplaceRequest(BaseModel):
+    columns: List[str]
+    find_value: str
+    replace_value: str
+
+
+@router.post("/{session_id}/find_replace")
+def find_replace(session_id: str, req: FindReplaceRequest):
+    df = _get_df(session_id)
+    df = df.copy()
+    replaced_count = 0
+    
+    for c in req.columns:
+        if c not in df.columns:
+            continue
+        
+        # Try to coerce find/replace values if column is numeric
+        f_val: Any = req.find_value
+        r_val: Any = req.replace_value
+        
+        if pd.api.types.is_numeric_dtype(df[c]):
+            try:
+                f_val = float(req.find_value)
+                if f_val == int(f_val):
+                    f_val = int(f_val)
+            except ValueError:
+                pass
+            try:
+                r_val = float(req.replace_value)
+                if r_val == int(r_val):
+                    r_val = int(r_val)
+            except ValueError:
+                if req.replace_value == "" or req.replace_value.lower() == "nan":
+                    r_val = np.nan
+                    
+        # Count replacements
+        replaced_count += int((df[c] == f_val).sum())
+        df[c] = df[c].replace(f_val, r_val)
+        
+    store.save(session_id, df)
+    store.log_action(session_id, "find_replace", {"columns": req.columns, "replaced_count": replaced_count})
+    return {"replaced_count": replaced_count}

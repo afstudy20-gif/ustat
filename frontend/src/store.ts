@@ -108,6 +108,11 @@ interface AppState {
   // Descriptive tab UI state
   descriptiveTab: "histogram" | "boxplot" | "violin" | "qq";
   setDescriptiveTab: (tab: "histogram" | "boxplot" | "violin" | "qq") => void;
+
+  // Session History for Unified R Replication Code
+  sessionHistory: { action: string; params: any }[];
+  logAction: (action: string, params: any) => void;
+  clearHistory: () => void;
 }
 
 const loadTheme = (): PlotTheme => {
@@ -124,6 +129,9 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
+  sessionHistory: [],
+  logAction: (action, params) => set((state) => ({ sessionHistory: [...state.sessionHistory, { action, params }] })),
+  clearHistory: () => set({ sessionHistory: [] }),
   setSession: (s) => set((state) => {
     // Preserve UI state (decimal formatting, table1, filters, undo/redo
     // depth) across same-session refreshes (rename, dtype flip, refresh
@@ -142,6 +150,7 @@ export const useStore = create<AppState>((set) => ({
       undoDepth: 0,
       redoDepth: 0,
       columnDecimals: {},
+      sessionHistory: [],
     };
   }),
   setActiveTab: (t) => set({ activeTab: t }),
