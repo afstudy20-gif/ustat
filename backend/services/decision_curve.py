@@ -91,6 +91,81 @@ def _standardized_net_benefit(nb: np.ndarray, prevalence: float) -> np.ndarray:
     return nb / prevalence
 
 
+def clinical_utility_curve(
+    y: np.ndarray,
+    p: np.ndarray,
+    thresholds: np.ndarray,
+) -> Dict[str, Any]:
+    """Vickers-style clinical utility: net benefit plus interventions avoided per 100."""
+    y = np.asarray(y, dtype=float)
+    p = np.asarray(p, dtype=float)
+    thresholds = np.asarray(thresholds, dtype=float)
+    model_nb = _compute_net_benefit(y, p, thresholds)
+    all_nb = _compute_net_benefit(y, np.ones_like(p), thresholds)
+    rows = []
+    for pt, nb, nb_all in zip(thresholds, model_nb, all_nb):
+        odds = pt / max(1.0 - pt, 1e-8)
+        interventions_avoided = ((nb - nb_all) / odds) * 100.0 if odds > 0 else 0.0
+        rows.append({
+            "threshold": round(float(pt), 5),
+            "net_benefit": round(float(nb), 6),
+            "net_benefit_gain_vs_treat_all": round(float(nb - nb_all), 6),
+            "interventions_avoided_per_100": round(float(interventions_avoided), 4),
+        })
+    return {
+        "method": "Vickers clinical utility curve",
+        "points": rows,
+        "summary": {
+            "max_interventions_avoided_per_100": round(float(max([r["interventions_avoided_per_100"] for r in rows], default=0.0)), 4),
+        },
+    }
+
+
+def bootstrap_corrected_dca(
+    y: np.ndarray,
+    p: np.ndarray,
+    *,
+    thresholds: np.ndarray,
+    n_boot: int = 200,
+    random_state: int = 42,
+) -> Dict[str, Any]:
+    """
+    Bootstrap optimism correction for DCA curves.
+
+    This follows the Vickers/Harrell apparent-minus-optimism idea using the
+    provided predictions as the scoring rule. It avoids refitting unknown source
+    models, so it is suitable for precomputed ML/joint/multistate predictions.
+    """
+    y = np.asarray(y, dtype=float)
+    p = np.asarray(p, dtype=float)
+    thresholds = np.asarray(thresholds, dtype=float)
+    if len(y) < 30 or len(np.unique(y)) < 2:
+        return {"available": False, "reason": "Need at least 30 rows and both outcome classes."}
+
+    rng = np.random.default_rng(random_state)
+    apparent = _compute_net_benefit(y, p, thresholds)
+    optimism = []
+    n = len(y)
+    for _ in range(max(1, int(n_boot))):
+        idx = rng.choice(n, n, replace=True)
+        in_bag_nb = _compute_net_benefit(y[idx], p[idx], thresholds)
+        optimism.append(in_bag_nb - apparent)
+    opt = np.nanmean(np.asarray(optimism), axis=0)
+    corrected = apparent - opt
+    return {
+        "available": True,
+        "n_boot": int(n_boot),
+        "thresholds": [round(float(t), 5) for t in thresholds],
+        "apparent_net_benefit": [round(float(v), 6) for v in apparent],
+        "optimism": [round(float(v), 6) for v in opt],
+        "optimism_corrected_net_benefit": [round(float(v), 6) for v in corrected],
+        "summary": {
+            "max_corrected_net_benefit": round(float(np.max(corrected)), 6),
+            "threshold_at_max_corrected": round(float(thresholds[int(np.argmax(corrected))]), 5),
+        },
+    }
+
+
 def decision_curve_analysis_binary(
     y: np.ndarray,
     p: np.ndarray,
@@ -212,6 +287,7 @@ def decision_curve_analysis_binary(
         "test": "Decision Curve Analysis",
         "mode": "binary",
         "curves": curves,
+        "clinical_utility": clinical_utility_curve(y, p, thresholds),
         "summary": summary,
         "assumptions": assumptions,
         "warnings": warnings,
@@ -250,7 +326,8 @@ def decision_curve_analysis_survival(
         raise ValueError("duration, event, and risk must have identical length")
 
     if time_horizon is None:
-        time_horizon = float(np.percentile(duration[event == 1], 75))
+        event_times = duration[event == 1]
+        time_horizon = float(np.percentile(event_times if len(event_times) else duration, 75))
 
     # Approximate event probability by the chosen horizon (Kaplan-Meier style indicator)
     event_by_h = ((duration <= time_horizon) & (event == 1)).astype(float)
@@ -278,3 +355,30 @@ def decision_curve_analysis_survival(
             f"Event probability approximated at t = {time_horizon:.1f} using monotonic transform of risk score."
         )
     return res
+
+
+def add_bootstrap_correction_to_dca(
+    result: Dict[str, Any],
+    y: np.ndarray,
+    p: np.ndarray,
+    *,
+    thresholds: Optional[np.ndarray] = None,
+    n_boot: int = 200,
+    random_state: int = 42,
+) -> Dict[str, Any]:
+    """Attach bootstrap-corrected DCA without mutating the input result."""
+    out = dict(result)
+    if thresholds is None:
+        curves = result.get("curves", {})
+        if isinstance(curves, dict) and "thresholds" in curves:
+            thresholds = np.asarray(curves["thresholds"], dtype=float)
+        else:
+            thresholds = np.linspace(0.01, 0.99, 101)
+    out["bootstrap_corrected_dca"] = bootstrap_corrected_dca(
+        y,
+        p,
+        thresholds=np.asarray(thresholds, dtype=float),
+        n_boot=n_boot,
+        random_state=random_state,
+    )
+    return out

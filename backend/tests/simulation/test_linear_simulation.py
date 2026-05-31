@@ -18,6 +18,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from tests.conftest import make_session
+from services.simulation_generators import generate_linear_data
 
 
 @pytest.mark.simulation
@@ -26,9 +27,6 @@ def test_linear_recovers_coefficients(client):
     Basic simulation check: does the linear regression endpoint
     recover the true coefficients reasonably well?
     """
-    # Lazy import to avoid collection-time import issues
-    from services.simulation_generators import generate_linear_data
-
     df, truth = generate_linear_data(n=800, seed=42)
     sid = make_session(df, "sim_linear_1")
 

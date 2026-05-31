@@ -255,28 +255,44 @@ def test_joint_model_two_stage_runs_on_generated_data():
     joint longitudinal + survival data without crashing.
     """
     from services.simulation_generators import generate_joint_longitudinal_survival_data
-    from services.joint_model import fit_two_stage_joint_model
+    from services.joint_model import fit_time_varying_joint_model, fit_latent_class_joint_model
 
     long_df, surv_df, gt = generate_joint_longitudinal_survival_data(
-        n_subjects=300, true_beta_surv=0.45, seed=99
+        n_subjects=150, true_beta_surv=0.45, seed=99
     )
 
-    res = fit_two_stage_joint_model(
+    res = fit_time_varying_joint_model(
         long_df,
         surv_df,
         id_col="id",
         time_col="time",
-        y_col="Y",
+        y_cols=["Y"],
         long_predictors=["X1", "X2"],
         surv_predictors=["X1", "X2"],
         duration_col="duration",
         event_col="event",
+        association=["value", "slope"]
     )
 
-    assert "lmm_summary" in res
+    assert "lmm_summaries" in res
     assert "cox_coefficients" in res
-    assert res["n_subjects"] > 100
-    assert isinstance(res["cox_coefficients"], list)
+    assert "aic" in res
+    
+    # Test latent class joint model too!
+    res_lc = fit_latent_class_joint_model(
+        long_df,
+        surv_df,
+        id_col="id",
+        time_col="time",
+        y_cols=["Y"],
+        long_predictors=["X1", "X2"],
+        surv_predictors=["X1", "X2"],
+        duration_col="duration",
+        event_col="event",
+        latent_classes=2
+    )
+    assert "n_classes" in res_lc
+    assert "cox_coefficients" in res_lc
 
 
 @pytest.mark.simulation

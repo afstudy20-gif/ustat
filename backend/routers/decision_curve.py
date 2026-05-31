@@ -11,8 +11,13 @@ from typing import List, Optional
 from services import store
 from services.impute import apply_imputation
 from services.decision_curve import (
+    add_bootstrap_correction_to_dca,
     decision_curve_analysis_binary,
     decision_curve_analysis_survival,
+)
+from services.external_validation import (
+    evaluate_external_validation,
+    transportability_analysis,
 )
 
 router = APIRouter()
@@ -321,6 +326,8 @@ class DCARequest(BaseModel):
 
     threshold_range: List[float] = [0.01, 0.99]
     n_thresholds: int = 100
+    bootstrap_corrected: bool = False
+    n_boot: int = 200
     imputation: str = "listwise"
 
 
@@ -357,6 +364,10 @@ def dca(req: DCARequest):
         raise HTTPException(400, "Need at least 20 complete observations for DCA.")
 
     # ── Resolve y and p (or risk) ─────────────────────────────────────────────
+    dca_y = None
+    dca_p = None
+    dca_thresholds = np.linspace(req.threshold_range[0], req.threshold_range[1], req.n_thresholds)
+
     if req.duration_col and req.event_col and req.risk_col:
         # Survival mode (Phase 13 highlight)
         duration = df[req.duration_col].values
@@ -374,6 +385,11 @@ def dca(req: DCARequest):
         service_res["duration_col"] = req.duration_col
         service_res["event_col"] = req.event_col
         service_res["risk_col"] = req.risk_col
+        event_times = df.loc[df[req.event_col] == 1, req.duration_col]
+        horizon = req.time_horizon or float(np.percentile(event_times if len(event_times) else df[req.duration_col], 75))
+        dca_y = ((df[req.duration_col].values <= horizon) & (df[req.event_col].values == 1)).astype(float)
+        risk = df[req.risk_col].values
+        dca_p = 1 / (1 + np.exp(-0.8 * (risk - np.median(risk))))
 
     elif (req.probability_col or req.risk_col) and req.outcome:
         # Pre-computed probability / risk mode (best for feeding from survival ML benchmark)
@@ -391,6 +407,8 @@ def dca(req: DCARequest):
         service_res["probability_col"] = req.probability_col
         service_res["risk_col"] = req.risk_col
         service_res["outcome"] = req.outcome
+        dca_y = np.asarray(y, dtype=float)
+        dca_p = np.asarray(p_or_risk, dtype=float)
 
     elif req.outcome and req.predictors:
         # Traditional mode (backward compat)
@@ -404,11 +422,22 @@ def dca(req: DCARequest):
         service_res["mode"] = "logistic_fitted"
         service_res["predictors"] = req.predictors
         service_res["outcome"] = req.outcome
+        dca_y = np.asarray(y, dtype=float)
+        dca_p = np.asarray(probs, dtype=float)
     else:
         raise HTTPException(400, "Provide either (outcome + predictors), (outcome + probability_col/risk_col), or (duration_col + event_col + risk_col)")
 
     if "error" in service_res:
         raise HTTPException(400, service_res["error"])
+
+    if req.bootstrap_corrected and dca_y is not None and dca_p is not None:
+        service_res = add_bootstrap_correction_to_dca(
+            service_res,
+            dca_y,
+            dca_p,
+            thresholds=dca_thresholds,
+            n_boot=req.n_boot,
+        )
 
     # Common enrichment
     service_res["n"] = len(df)
@@ -427,3 +456,125 @@ def dca(req: DCARequest):
     service_res["r_code"] = "library(dcurves)  # or rms::val.prob / dca package"
 
     return service_res
+
+
+class IntegratedExtValDCARequest(BaseModel):
+    session_id: str                         # validation / target cohort
+    duration_col: str
+    event_col: str
+    prediction_col: str                     # LP, risk score, event probability, state probability, CIF
+    dev_session_id: Optional[str] = None
+    covariates: Optional[List[str]] = None
+    survival_prob_cols: Optional[List[str]] = None
+    time_points: Optional[List[float]] = None
+    time_horizon: Optional[float] = None
+    threshold_range: List[float] = [0.01, 0.50]
+    n_thresholds: int = 100
+    bootstrap_corrected_dca: bool = True
+    n_boot: int = 200
+    flexible_calibration: bool = True
+    prediction_source: str = "precomputed"  # survival_ml | joint_model | multistate | fine_gray | precomputed
+    competing_risk_status_col: Optional[str] = None
+    competing_risk_event_code: int = 1
+    predicted_cif_col: Optional[str] = None
+    imputation: str = "listwise"
+
+
+@router.post("/integrated_extval_dca")
+def integrated_extval_dca(req: IntegratedExtValDCARequest):
+    """
+    One-call integration: model predictions -> External Validation -> DCA.
+
+    Designed for Survival ML, joint-model dynamic predictions, multistate state
+    probabilities, Fine-Gray CIFs, or any precomputed prediction column.
+    """
+    val_full = _get_df(req.session_id)
+    needed = [req.duration_col, req.event_col, req.prediction_col]
+    if req.survival_prob_cols:
+        needed.extend(req.survival_prob_cols)
+    if req.competing_risk_status_col:
+        needed.append(req.competing_risk_status_col)
+    if req.predicted_cif_col:
+        needed.append(req.predicted_cif_col)
+    if req.covariates:
+        needed.extend(req.covariates)
+    needed = list(dict.fromkeys(needed))
+    missing = [c for c in needed if c not in val_full.columns]
+    if missing:
+        raise HTTPException(400, f"Columns not found: {missing}")
+    val_df = apply_imputation(val_full, needed, req.imputation)
+    if len(val_df) < 20:
+        raise HTTPException(400, "Need at least 20 complete validation observations.")
+
+    survival_probs = None
+    if req.survival_prob_cols:
+        survival_probs = val_df[req.survival_prob_cols].to_numpy(dtype=float)
+
+    transport = None
+    weights = None
+    if req.dev_session_id and req.covariates:
+        dev_full = _get_df(req.dev_session_id)
+        dev_needed = [c for c in req.covariates if c in dev_full.columns]
+        dev_df = apply_imputation(dev_full, dev_needed + ([req.event_col] if req.event_col in dev_full.columns else []), req.imputation)
+        transport = transportability_analysis(
+            dev_df,
+            val_df,
+            req.covariates,
+            duration_col=req.duration_col,
+            event_col=req.event_col,
+            predicted_lp_col=req.prediction_col,
+        )
+        weights = transport.get("weights") if transport else None
+
+    extval = evaluate_external_validation(
+        val_df,
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+        predicted_lp_col=req.prediction_col,
+        survival_probs=survival_probs,
+        time_points=req.time_points,
+        sample_weight=weights,
+        flexible_calibration=req.flexible_calibration,
+        calibration_time_horizon=req.time_horizon,
+        competing_risk_status_col=req.competing_risk_status_col,
+        competing_risk_event_code=req.competing_risk_event_code,
+        predicted_cif_col=req.predicted_cif_col,
+    )
+
+    dca_res = decision_curve_analysis_survival(
+        duration=val_df[req.duration_col].to_numpy(dtype=float),
+        event=val_df[req.event_col].to_numpy(dtype=int),
+        risk=val_df[req.prediction_col].to_numpy(dtype=float),
+        time_horizon=req.time_horizon,
+        n_thresholds=req.n_thresholds,
+        threshold_range=tuple(req.threshold_range),
+    )
+    if req.bootstrap_corrected_dca and "error" not in dca_res:
+        event_times = val_df.loc[val_df[req.event_col] == 1, req.duration_col]
+        horizon = req.time_horizon or float(np.percentile(event_times if len(event_times) else val_df[req.duration_col], 75))
+        y = ((val_df[req.duration_col].to_numpy(dtype=float) <= horizon) & (val_df[req.event_col].to_numpy(dtype=int) == 1)).astype(float)
+        risk = val_df[req.prediction_col].to_numpy(dtype=float)
+        p = 1 / (1 + np.exp(-0.8 * (risk - np.median(risk))))
+        thresholds = np.linspace(req.threshold_range[0], req.threshold_range[1], req.n_thresholds)
+        dca_res = add_bootstrap_correction_to_dca(dca_res, y, p, thresholds=thresholds, n_boot=req.n_boot)
+
+    return {
+        "test": "Integrated External Validation + Decision Curve Analysis",
+        "prediction_source": req.prediction_source,
+        "n_validation": int(len(val_df)),
+        "external_validation": extval,
+        "decision_curve": dca_res,
+        "transportability": {k: v for k, v in (transport or {}).items() if k != "weights"} if transport else None,
+        "pipeline": {
+            "prediction_col": req.prediction_col,
+            "survival_prob_cols": req.survival_prob_cols or [],
+            "prediction_to_extval": True,
+            "prediction_to_dca": True,
+            "iptw_weighted_validation": bool(weights is not None),
+            "bootstrap_corrected_dca": bool(req.bootstrap_corrected_dca),
+        },
+        "result_text": (
+            f"Integrated validation/DCA pipeline for {req.prediction_source} predictions "
+            f"on n={len(val_df)} validation observations."
+        ),
+    }

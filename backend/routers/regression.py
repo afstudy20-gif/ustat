@@ -196,14 +196,17 @@ def linear_regression(req: LinearRequest):
 
     vifs = _compute_vif(X)
 
+    r_squared_val = None
+    pooled_from_imputations = False
+
     if use_mice_pooled and 'pooled' in locals():
         # Use Rubin's pooled results
         coefs = pooled.get("coefficients", [])
         # Attach VIF where possible
         for c in coefs:
             c["vif"] = vifs.get(c["variable"])
-        result["r_squared"] = pooled.get("r_squared")
-        result["pooled_from_imputations"] = True
+        r_squared_val = pooled.get("r_squared")
+        pooled_from_imputations = True
     else:
         ci = model.conf_int()
         coefs = []
@@ -261,7 +264,7 @@ def linear_regression(req: LinearRequest):
         "n": int(model.nobs),
         "n_excluded": n_excluded,
         "imputation": req.imputation or "listwise",
-        "r_squared": float(model.rsquared),
+        "r_squared": r_squared_val if r_squared_val is not None else float(model.rsquared),
         "adj_r_squared": float(model.rsquared_adj),
         "f_stat": float(model.fvalue),
         "f_p": float(model.f_pvalue),
@@ -274,6 +277,9 @@ def linear_regression(req: LinearRequest):
         "predictor_info": predictor_info,
         "result_text": _linear_results_text(req.outcome, coefs, model),
     }
+
+    if pooled_from_imputations:
+        result["pooled_from_imputations"] = True
 
     result = add_assumption_warnings_to_result(result, assumption_report)
 
@@ -888,10 +894,10 @@ def logistic_regression(req: LogisticRequest):
             "wald": round(wald, 4),
             "df": 1,
             "p": float(model.pvalues[var]),
-            "odds_ratio": float(np.exp(est)),
+            "odds_ratio": float(np.exp(est)) if np.isfinite(np.exp(est)) else None,
             "z": z_val,
-            "or_ci_low": float(np.exp(ci.loc[var, 0])),
-            "or_ci_high": float(np.exp(ci.loc[var, 1])),
+            "or_ci_low": float(np.exp(ci.loc[var, 0])) if np.isfinite(np.exp(ci.loc[var, 0])) else None,
+            "or_ci_high": float(np.exp(ci.loc[var, 1])) if np.isfinite(np.exp(ci.loc[var, 1])) else None,
             "vif": vifs.get(str(var)),
         })
 

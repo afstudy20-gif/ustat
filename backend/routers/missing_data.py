@@ -3,11 +3,11 @@ import numpy as np
 import pandas as pd
 from scipy import stats as sp
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
 
 from services import store
-from services.impute import apply_imputation
+from services.impute import add_survival_auxiliary_variables, apply_imputation, apply_passive_imputation
 
 router = APIRouter()
 
@@ -355,5 +355,203 @@ def imputation_compare(req: ImputationCompareRequest):
             "# Compare imputation strategies\n"
             f"imp <- mice(data[, c({', '.join(repr(c) for c in req.columns)})], method = 'pmm', m = 5)\n"
             "complete(imp, 1)"
+        ),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 4. MNAR SENSITIVITY / ADVANCED IMPUTATION DIAGNOSTICS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MNARSensitivityRequest(BaseModel):
+    session_id: str
+    columns: List[str]
+    outcome_col: Optional[str] = None
+    predictors: List[str] = Field(default_factory=list)
+    model_type: str = "logistic"  # linear | logistic | cox
+    delta_values: List[float] = Field(default_factory=lambda: [-2, -1, 0, 1, 2])
+    n_imputations: int = 5
+    max_iter: int = 10
+    passive_formulas: Dict[str, str] = Field(default_factory=dict)
+    duration_col: Optional[str] = None
+    event_col: Optional[str] = None
+    selection_predictors: List[str] = Field(default_factory=list)
+    auxiliary_candidates: Optional[List[str]] = None
+    run_heckman: bool = True
+    run_isni: bool = True
+    run_survival_mnar: bool = True
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/mnar_sensitivity")
+def mnar_sensitivity(req: MNARSensitivityRequest):
+    df_full = _get_df(req.session_id)
+    needed = list(dict.fromkeys(
+        req.columns
+        + ([req.outcome_col] if req.outcome_col else [])
+        + req.predictors
+        + req.selection_predictors
+        + ([req.duration_col, req.event_col] if req.duration_col and req.event_col else [])
+        + (req.auxiliary_candidates or [])
+    ))
+    missing = [c for c in needed if c and c not in df_full.columns]
+    if missing:
+        raise HTTPException(400, f"Columns not found: {missing}")
+    if not req.columns:
+        raise HTTPException(400, "Select at least one variable with missing data.")
+
+    df = df_full.copy()
+    if req.duration_col and req.event_col:
+        df = add_survival_auxiliary_variables(df, req.duration_col, req.event_col)
+
+    from services.missing_data import (
+        auxiliary_variable_guidance,
+        congeniality_assessment,
+        mice_convergence_diagnostics,
+        mice_multiple,
+        posterior_predictive_check,
+    )
+    from services.missing_data_sensitivity import (
+        delta_adjustment_sensitivity,
+        heckman_selection_model,
+        isni_index,
+        pattern_mixture_delta_model,
+        survival_mnar_sensitivity,
+    )
+
+    imputation_cols = list(dict.fromkeys(req.columns + req.predictors + ([req.outcome_col] if req.outcome_col else [])))
+    if req.duration_col and req.event_col:
+        imputation_cols.extend([req.duration_col, req.event_col, "__surv_aux_log_time", "__surv_aux_nelson_aalen"])
+    imputation_cols = [c for c in dict.fromkeys(imputation_cols) if c in df.columns]
+
+    mice_result = mice_multiple(
+        df,
+        imputation_cols,
+        n_imputations=max(2, req.n_imputations),
+        max_iter=req.max_iter,
+    )
+    passive_preview = apply_passive_imputation(mice_result.imputed_datasets[0], req.passive_formulas)
+    pmm = pattern_mixture_delta_model(
+        df,
+        imputation_cols,
+        delta_values=req.delta_values,
+        n_imputations=max(2, req.n_imputations),
+        passive_formulas=req.passive_formulas,
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+    )
+    model_delta = None
+    if req.outcome_col and req.predictors:
+        try:
+            model_delta = delta_adjustment_sensitivity(
+                df,
+                outcome=req.outcome_col,
+                predictors=req.predictors,
+                model_type=req.model_type if req.model_type in {"linear", "logistic", "cox"} else "logistic",
+                delta_range=(min(req.delta_values), max(req.delta_values)),
+                n_steps=len(req.delta_values),
+                duration_col=req.duration_col,
+                event_col=req.event_col,
+            )
+        except Exception as exc:
+            model_delta = {"available": False, "reason": str(exc)}
+
+    heckman = {"available": False, "reason": "Heckman not requested or outcome/predictors missing."}
+    if req.run_heckman and req.outcome_col and req.predictors:
+        heckman = heckman_selection_model(
+            df,
+            outcome_col=req.outcome_col,
+            outcome_predictors=req.predictors,
+            selection_predictors=req.selection_predictors or req.predictors,
+        )
+
+    isni = {"available": False, "reason": "ISNI not requested or outcome/predictors missing."}
+    if req.run_isni and req.outcome_col and req.predictors:
+        isni = isni_index(df, req.outcome_col, req.predictors, missing_cols=req.columns)
+        isni["available"] = True
+
+    survival_mnar = {"available": False, "reason": "Survival MNAR not requested or duration/event/predictors missing."}
+    if req.run_survival_mnar and req.duration_col and req.event_col and req.predictors:
+        survival_mnar = survival_mnar_sensitivity(
+            df,
+            req.duration_col,
+            req.event_col,
+            req.predictors,
+            censoring_delta_values=req.delta_values,
+        )
+
+    convergence = mice_convergence_diagnostics(mice_result, df, imputation_cols)
+    ppc = posterior_predictive_check(mice_result, df, imputation_cols)
+    aux = auxiliary_variable_guidance(
+        df,
+        req.columns,
+        candidate_cols=req.auxiliary_candidates,
+    )
+    congeniality = congeniality_assessment(
+        imputation_cols,
+        [c for c in [req.outcome_col, req.duration_col, req.event_col] + req.predictors if c],
+        passive_formulas=req.passive_formulas,
+    )
+
+    passive_cols = {}
+    for target in req.passive_formulas:
+        if target in passive_preview.columns:
+            vals = pd.to_numeric(passive_preview[target], errors="coerce")
+            passive_cols[target] = {
+                "n_nonmissing": int(vals.notna().sum()),
+                "mean": round(float(vals.mean()), 6) if vals.notna().any() else None,
+            }
+
+    warnings = []
+    high_rhat = [
+        c for c, v in convergence.get("variables", {}).items()
+        if v.get("r_hat_proxy") is not None and v.get("r_hat_proxy") > 1.1
+    ]
+    if high_rhat:
+        warnings.append(f"Potential MICE convergence concern for: {', '.join(high_rhat)}.")
+    if survival_mnar.get("available"):
+        warnings.append("Survival MNAR sensitivity uses informative-censoring weight shifts; interpret as scenario analysis.")
+    if heckman.get("selection_bias_signal"):
+        warnings.append("Heckman inverse Mills ratio suggests possible selection bias.")
+
+    return {
+        "test": "MNAR Missing Data Sensitivity Analysis",
+        "n": int(len(df_full)),
+        "columns": req.columns,
+        "pattern_mixture_model": pmm,
+        "model_delta_sensitivity": model_delta,
+        "heckman_selection_model": heckman,
+        "isni": isni,
+        "mice_convergence_diagnostics": convergence,
+        "imputation_model_diagnostics": ppc,
+        "congeniality_assessment": congeniality,
+        "passive_imputation": {
+            "formulas": req.passive_formulas,
+            "preview": passive_cols,
+        },
+        "survival_specific_imputation": {
+            "enabled": bool(req.duration_col and req.event_col),
+            "auxiliary_variables": [c for c in ["__surv_aux_log_time", "__surv_aux_nelson_aalen"] if c in df.columns],
+        },
+        "auxiliary_variable_guidance": aux,
+        "survival_mnar_sensitivity": survival_mnar,
+        "warnings": warnings,
+        "assumptions": [
+            {"name": "MAR reference imputation", "met": True,
+             "detail": "Delta-adjusted pattern-mixture scenarios start from MAR MICE imputations."},
+            {"name": "MNAR scenario analysis", "met": True,
+             "detail": "Delta values encode unverifiable assumptions about missing outcomes/covariates."},
+            {"name": "Heckman exclusion restriction", "met": bool(req.selection_predictors),
+             "detail": "Selection models are stronger with predictors of missingness not already in the outcome equation."},
+        ],
+        "result_text": (
+            f"MNAR sensitivity analysis ran for {len(req.columns)} variable(s) across "
+            f"{len(req.delta_values)} delta scenario(s), with {req.n_imputations} imputation chains."
+        ),
+        "r_code": (
+            "library(mice)\n"
+            "# Pattern-mixture delta adjustment: mice(...); complete(); shift missing cells by delta\n"
+            "# Heckman: sampleSelection::selection(...)\n"
+            "# Survival auxiliaries: include Nelson-Aalen cumulative hazard and log time in imputation model"
         ),
     }

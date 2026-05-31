@@ -623,3 +623,208 @@ def generate_dca_binary_data(
         "n": n,
     }
     return df, ground_truth
+
+
+def generate_cure_fraction_data(
+    n: int = 500,
+    cure_fraction: float = 0.3,
+    true_beta_event: np.ndarray | None = None,
+    true_beta_cure: np.ndarray | None = None,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Generate survival data with a cure fraction (mixture cure model).
+    A proportion of subjects are "cured" and never experience the event.
+    """
+    rng = np.random.default_rng(seed)
+    if true_beta_event is None:
+        true_beta_event = np.array([0.6, -0.4, 0.5])
+    if true_beta_cure is None:
+        true_beta_cure = np.array([-0.5, 0.8, -0.3])
+
+    X = rng.normal(0, 1, size=(n, len(true_beta_event)))
+    
+    # Logistic model for cure probability
+    # logit(pi) = beta_0 + X @ beta_cure
+    # We calibrate beta_0 to achieve the desired average cure fraction
+    beta_0 = np.log(cure_fraction / (1.0 - cure_fraction))
+    logit_cure = beta_0 + X @ true_beta_cure
+    pi = 1.0 / (1.0 + np.exp(-logit_cure))
+    
+    # 1 = cured, 0 = susceptible
+    cured = rng.binomial(1, pi)
+    
+    # Event times for susceptibles
+    lp_event = X @ true_beta_event
+    shape = 1.5
+    scale = 80.0
+    u = rng.uniform(1e-8, 1.0, n)
+    t_event = scale * (-np.log(u)) ** (1.0 / shape) * np.exp(-lp_event)
+    
+    # Cured subjects have infinite event time
+    t_actual = np.where(cured == 1, 99999.0, t_event)
+    
+    # Censoring
+    censor_time = rng.exponential(120.0, n)
+    observed_time = np.minimum(t_actual, censor_time)
+    event = (t_actual <= censor_time).astype(int)
+    
+    cols = [f"X{i+1}" for i in range(len(true_beta_event))]
+    df = pd.DataFrame(X, columns=cols)
+    df["duration"] = observed_time
+    df["event"] = event
+    df["cured"] = cured  # ground truth indicator
+    
+    ground_truth = {
+        "true_beta_event": true_beta_event.tolist(),
+        "true_beta_cure": true_beta_cure.tolist(),
+        "base_cure_fraction": cure_fraction,
+        "actual_cure_fraction": float(np.mean(cured)),
+        "censoring_rate": float(1.0 - event.mean()),
+        "model": "mixture_cure",
+    }
+    return df, ground_truth
+
+
+def generate_interval_censored_data(
+    n: int = 500,
+    true_beta: np.ndarray | None = None,
+    inspection_times: list[float] | None = None,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Generate interval-censored survival data.
+    The exact event time T is only known to fall within an inspection interval (L, R].
+    """
+    rng = np.random.default_rng(seed)
+    if true_beta is None:
+        true_beta = np.array([0.5, -0.7])
+    if inspection_times is None:
+        inspection_times = [0.0, 10.0, 25.0, 45.0, 70.0, 100.0]
+
+    X = rng.normal(0, 1, size=(n, len(true_beta)))
+    lp = X @ true_beta
+    
+    # Weibull event times
+    shape = 1.4
+    scale = 50.0
+    u = rng.uniform(1e-8, 1.0, n)
+    t = scale * (-np.log(u)) ** (1.0 / shape) * np.exp(-lp)
+    
+    # Place T in intervals
+    left = np.zeros(n)
+    right = np.zeros(n)
+    
+    for i in range(n):
+        ti = t[i]
+        # Find which interval
+        if ti <= inspection_times[1]:
+            left[i] = 0.0
+            right[i] = inspection_times[1]
+        elif ti > inspection_times[-1]:
+            left[i] = inspection_times[-1]
+            right[i] = np.inf  # Right-censored
+        else:
+            for j in range(1, len(inspection_times) - 1):
+                if inspection_times[j] < ti <= inspection_times[j+1]:
+                    left[i] = inspection_times[j]
+                    right[i] = inspection_times[j+1]
+                    break
+                    
+    cols = [f"X{i+1}" for i in range(len(true_beta))]
+    df = pd.DataFrame(X, columns=cols)
+    df["left"] = left
+    df["right"] = right
+    df["true_time"] = t  # for validation only
+    
+    ground_truth = {
+        "true_beta": true_beta.tolist(),
+        "inspection_times": inspection_times,
+        "censoring_rate": float(np.isinf(right).mean()),
+        "model": "interval_censored",
+    }
+    return df, ground_truth
+
+
+def generate_left_truncated_data(
+    n: int = 500,
+    true_beta: np.ndarray | None = None,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Generate left-truncated (delayed entry) survival data.
+    Subjects only enter the study if their event time T is greater than their entry time E.
+    """
+    rng = np.random.default_rng(seed)
+    if true_beta is None:
+        true_beta = np.array([0.7, -0.5])
+
+    X_list = []
+    entry_list = []
+    exit_list = []
+    event_list = []
+    
+    observed_count = 0
+    shape = 1.4
+    scale = 70.0
+    
+    while observed_count < n:
+        # Simulate a batch of candidates
+        batch_size = max(100, n - observed_count)
+        X_batch = rng.normal(0, 1, size=(batch_size, len(true_beta)))
+        lp_batch = X_batch @ true_beta
+        
+        # Left-truncation entry times
+        entry_batch = rng.uniform(0.0, 35.0, batch_size)
+        
+        # Event times
+        u = rng.uniform(1e-8, 1.0, batch_size)
+        t_batch = scale * (-np.log(u)) ** (1.0 / shape) * np.exp(-lp_batch)
+        
+        # Keep if survived until entry time (T > E)
+        observed_mask = t_batch > entry_batch
+        
+        n_observed = observed_mask.sum()
+        if n_observed > 0:
+            X_obs = X_batch[observed_mask]
+            entry_obs = entry_batch[observed_mask]
+            t_obs = t_batch[observed_mask]
+            
+            # Censoring time (must be after entry)
+            censor_obs = entry_obs + rng.exponential(80.0, n_observed)
+            
+            exit_obs = np.minimum(t_obs, censor_obs)
+            event_obs = (t_obs <= censor_obs).astype(int)
+            
+            # Slice if we exceeded target count n
+            available = n - observed_count
+            if n_observed > available:
+                X_obs = X_obs[:available]
+                entry_obs = entry_obs[:available]
+                exit_obs = exit_obs[:available]
+                event_obs = event_obs[:available]
+                n_observed = available
+                
+            X_list.append(X_obs)
+            entry_list.append(entry_obs)
+            exit_list.append(exit_obs)
+            event_list.append(event_obs)
+            observed_count += n_observed
+
+    X = np.vstack(X_list)
+    entry = np.concatenate(entry_list)
+    exit_time = np.concatenate(exit_list)
+    event = np.concatenate(event_list)
+    
+    cols = [f"X{i+1}" for i in range(len(true_beta))]
+    df = pd.DataFrame(X, columns=cols)
+    df["entry"] = entry
+    df["exit"] = exit_time
+    df["event"] = event
+    
+    ground_truth = {
+        "true_beta": true_beta.tolist(),
+        "censoring_rate": float(1.0 - event.mean()),
+        "model": "left_truncated",
+    }
+    return df, ground_truth

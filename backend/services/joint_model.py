@@ -49,29 +49,26 @@ def _extract_lmm_predictions(
     Computes value, slope, and area at each row's `time_col` based on the fitted LMM.
     """
     preds = df[[id_col, time_col]].copy()
-    
     re_dict = mdf.random_effects
-    X = mdf.model.exog
-    Z = mdf.model.exog_re
     
-    values = []
-    group_indices = mdf.model.group_indices
-    y_pred = np.zeros(len(df))
-    
-    # Reconstruct predictions: X*beta + Z*b
-    for group_name, re_vals in re_dict.items():
-        if group_name in group_indices:
-            idx = group_indices[group_name]
-            X_g = X[idx]
-            Z_g = Z[idx]
-            y_pred[idx] = np.dot(X_g, mdf.params) + np.dot(Z_g, re_vals)
-            
-    preds['value'] = y_pred
-    
-    if "slope" in association or "area" in association:
-        if not spline:
-            # linear: slope = beta_1 + b_1
-            time_fixed_eff = mdf.params.get(time_col, 0.0)
+    if not spline:
+        int_fixed_eff = mdf.params.get("Intercept", 0.0)
+        time_fixed_eff = mdf.params.get(time_col, 0.0)
+        
+        # 1. value = (Intercept + random_intercept) + (slope_fixed + random_slope) * t
+        y_pred = []
+        for _, row in df.iterrows():
+            g = row[id_col]
+            t = row[time_col]
+            re_vals = re_dict.get(g, pd.Series())
+            b0 = re_vals.get("Group", 0.0)  # statsmodels names intercept RE "Group"
+            b1 = re_vals.get(time_col, 0.0)
+            val = (int_fixed_eff + b0) + (time_fixed_eff + b1) * t
+            y_pred.append(val)
+        preds['value'] = y_pred
+        
+        # 2. slope = beta_1 + b_1
+        if "slope" in association:
             slopes = []
             for g in df[id_col]:
                 re_vals = re_dict.get(g, pd.Series())
@@ -79,26 +76,30 @@ def _extract_lmm_predictions(
                 slopes.append(time_fixed_eff + time_re_eff)
             preds['slope'] = slopes
             
-            # area = (beta_0+b_0)*t + 0.5*(beta_1+b_1)*t^2
-            int_fixed_eff = mdf.params.get("Intercept", 0.0)
+        # 3. area = (beta_0+b_0)*t + 0.5*(beta_1+b_1)*t^2
+        if "area" in association:
             areas = []
-            for i, row in df.iterrows():
+            for _, row in df.iterrows():
                 g = row[id_col]
                 t = row[time_col]
                 re_vals = re_dict.get(g, pd.Series())
-                b0 = re_vals.get("Group", 0.0)  # statsmodels names intercept RE "Group"
+                b0 = re_vals.get("Group", 0.0)
                 b1 = re_vals.get(time_col, 0.0)
-                
                 a = (int_fixed_eff + b0) * t + 0.5 * (time_fixed_eff + b1) * (t**2)
                 areas.append(a)
             preds['area'] = areas
-        else:
-            # Fallback for spline: 0
-            if "slope" in association:
-                preds['slope'] = 0.0
-            if "area" in association:
-                preds['area'] = 0.0
-                
+    else:
+        # Spline case: use statsmodels predict for value, fallback to 0.0 for others
+        try:
+            preds['value'] = mdf.predict(df)
+        except Exception:
+            preds['value'] = 0.0
+            
+        if "slope" in association:
+            preds['slope'] = 0.0
+        if "area" in association:
+            preds['area'] = 0.0
+            
     return preds
 
 def _to_counting_process(
@@ -111,10 +112,10 @@ def _to_counting_process(
     """
     records = []
     
-    surv_df = surv_df.set_index(id_col, drop=False)
+    surv_df_idx = surv_df.set_index(id_col, drop=True)
     long_groups = long_df.groupby(id_col)
     
-    for id_val, s_row in surv_df.iterrows():
+    for id_val, s_row in surv_df_idx.iterrows():
         event_time = s_row[duration_col]
         event_status = s_row[event_col]
         
@@ -147,12 +148,13 @@ def _to_counting_process(
             
     cp_df = pd.DataFrame(records)
     
-    # Join baseline predictors
+    # Join baseline predictors - use original surv_df which is not indexed
     baseline_cols = [c for c in surv_df.columns if c not in [id_col, duration_col, event_col]]
     if baseline_cols:
         cp_df = cp_df.merge(surv_df[[id_col] + baseline_cols], on=id_col, how="left")
         
     return cp_df
+
 
 def fit_time_varying_joint_model(
     long_df: pd.DataFrame,

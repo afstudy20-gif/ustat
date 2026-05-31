@@ -172,12 +172,14 @@ def pool_linear_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
         # Simple t approximation
         t_stat = Q_bar / pooled_se if pooled_se > 0 else 0.0
+        p_val = 2 * (1 - scipy_stats.t.cdf(abs(t_stat), df)) if pooled_se > 0 else None
 
         pooled_coefs.append({
             "variable": var,
             "estimate": round(float(Q_bar), 6),
             "se": round(float(pooled_se), 6),
             "t": round(float(t_stat), 4),
+            "p": round(float(p_val), 6) if p_val is not None else None,
             "df": round(float(df), 1),
         })
 
@@ -342,3 +344,146 @@ def add_missing_data_diagnostics(result: dict, missing_info: dict) -> dict:
             "Consider using multiple imputation (mice)."
         )
     return result
+
+
+def mice_convergence_diagnostics(
+    imputation_result: ImputationResult,
+    original_df: pd.DataFrame,
+    cols: List[str],
+) -> Dict[str, Any]:
+    """
+    MICE convergence diagnostics using per-imputation traces and a Gelman-Rubin
+    R-hat style proxy over imputed values.
+    """
+    diagnostics = {}
+    for col in [c for c in cols if c in original_df.columns and pd.api.types.is_numeric_dtype(original_df[c])]:
+        miss_mask = original_df[col].isna()
+        traces = []
+        imputed_arrays = []
+        for i, df_imp in enumerate(imputation_result.imputed_datasets, start=1):
+            vals = pd.to_numeric(df_imp.loc[miss_mask, col], errors="coerce").dropna().to_numpy()
+            if len(vals) == 0:
+                continue
+            imputed_arrays.append(vals)
+            traces.append({
+                "imputation": i,
+                "mean": round(float(np.mean(vals)), 6),
+                "sd": round(float(np.std(vals, ddof=1)), 6) if len(vals) > 1 else 0.0,
+            })
+        rhat = None
+        if len(imputed_arrays) >= 2:
+            means = np.asarray([np.mean(v) for v in imputed_arrays], dtype=float)
+            within = float(np.mean([np.var(v, ddof=1) if len(v) > 1 else 0.0 for v in imputed_arrays]))
+            between = float(np.var(means, ddof=1))
+            if within > 1e-12:
+                rhat = float(np.sqrt((within + between) / within))
+        diagnostics[col] = {
+            "trace": traces,
+            "r_hat_proxy": round(rhat, 4) if rhat is not None and np.isfinite(rhat) else None,
+            "converged": bool(rhat is None or rhat < 1.1),
+        }
+    return {
+        "method": "MICE trace and Gelman-Rubin R-hat proxy",
+        "variables": diagnostics,
+        "warning": "R-hat is approximated from independent sklearn IterativeImputer chains, not full Bayesian MICE draws.",
+    }
+
+
+def posterior_predictive_check(
+    imputation_result: ImputationResult,
+    original_df: pd.DataFrame,
+    cols: List[str],
+) -> Dict[str, Any]:
+    """Compare observed and imputed distributions for imputation diagnostics."""
+    checks = []
+    for col in [c for c in cols if c in original_df.columns and pd.api.types.is_numeric_dtype(original_df[c])]:
+        obs = pd.to_numeric(original_df[col], errors="coerce").dropna().to_numpy()
+        miss_mask = original_df[col].isna()
+        imp_vals = []
+        for df_imp in imputation_result.imputed_datasets:
+            imp_vals.extend(pd.to_numeric(df_imp.loc[miss_mask, col], errors="coerce").dropna().tolist())
+        if len(obs) < 2 or len(imp_vals) < 2:
+            checks.append({"variable": col, "available": False, "reason": "Not enough observed/imputed values."})
+            continue
+        try:
+            ks_stat, ks_p = scipy_stats.ks_2samp(obs, np.asarray(imp_vals, dtype=float))
+        except Exception:
+            ks_stat, ks_p = np.nan, np.nan
+        checks.append({
+            "variable": col,
+            "available": True,
+            "observed_mean": round(float(np.mean(obs)), 6),
+            "imputed_mean": round(float(np.mean(imp_vals)), 6),
+            "mean_difference": round(float(np.mean(imp_vals) - np.mean(obs)), 6),
+            "ks_stat": round(float(ks_stat), 6) if np.isfinite(ks_stat) else None,
+            "ks_p": round(float(ks_p), 6) if np.isfinite(ks_p) else None,
+            "flag_distribution_shift": bool(np.isfinite(ks_p) and ks_p < 0.05),
+        })
+    return {"method": "posterior_predictive_distribution_check", "checks": checks}
+
+
+def congeniality_assessment(
+    imputation_cols: List[str],
+    analysis_cols: List[str],
+    passive_formulas: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Check whether imputation model variables cover the analysis model."""
+    imputation_set = set(imputation_cols)
+    analysis_set = set(analysis_cols)
+    missing_from_imputation = sorted(analysis_set - imputation_set)
+    passive_targets = set((passive_formulas or {}).keys())
+    return {
+        "congenial": len(set(missing_from_imputation) - passive_targets) == 0,
+        "analysis_variables_missing_from_imputation": missing_from_imputation,
+        "passive_variables": sorted(passive_targets),
+        "recommendation": (
+            "Include all analysis variables, outcome, exposure, interactions, and important auxiliaries in the imputation model."
+            if missing_from_imputation else
+            "Imputation model covers the listed analysis variables."
+        ),
+    }
+
+
+def auxiliary_variable_guidance(
+    df: pd.DataFrame,
+    target_cols: List[str],
+    candidate_cols: Optional[List[str]] = None,
+    *,
+    top_k: int = 10,
+) -> Dict[str, Any]:
+    """
+    Rank auxiliary variables by association with missingness indicators and
+    observed target values.
+    """
+    candidate_cols = candidate_cols or [c for c in df.columns if c not in target_cols]
+    rows = []
+    for target in [c for c in target_cols if c in df.columns]:
+        miss = df[target].isna().astype(float)
+        for cand in [c for c in candidate_cols if c in df.columns and c != target]:
+            if not pd.api.types.is_numeric_dtype(df[cand]):
+                continue
+            x = pd.to_numeric(df[cand], errors="coerce")
+            if x.notna().sum() < 10:
+                continue
+            try:
+                miss_corr = abs(float(np.corrcoef(miss.loc[x.notna()], x.dropna())[0, 1]))
+            except Exception:
+                miss_corr = 0.0
+            obs_mask = df[target].notna() & x.notna()
+            try:
+                value_corr = abs(float(np.corrcoef(pd.to_numeric(df.loc[obs_mask, target], errors="coerce"), x.loc[obs_mask])[0, 1]))
+            except Exception:
+                value_corr = 0.0
+            score = np.nan_to_num(miss_corr) + 0.5 * np.nan_to_num(value_corr)
+            rows.append({
+                "target": target,
+                "candidate": cand,
+                "missingness_corr_abs": round(float(np.nan_to_num(miss_corr)), 5),
+                "value_corr_abs": round(float(np.nan_to_num(value_corr)), 5),
+                "priority_score": round(float(score), 5),
+            })
+    rows.sort(key=lambda r: -r["priority_score"])
+    return {
+        "recommended_auxiliary_variables": rows[:top_k],
+        "method_note": "Prioritizes variables associated with missingness and observed target values.",
+    }

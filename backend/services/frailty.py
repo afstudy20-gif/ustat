@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -106,6 +107,61 @@ def _cluster_frailties_from_fit(
         frailty = 1.0 + (float(np.mean(ph)) - 1.0) * shrinkage
         cluster_frailties[cl] = round(max(0.05, min(10.0, frailty)), 4)
     return cluster_frailties
+
+
+def build_joint_frailty_frailtypack_spec(
+    *,
+    id_col: str,
+    start_col: str,
+    stop_col: str,
+    recurrent_event_col: str,
+    terminal_time_col: str,
+    terminal_event_col: str,
+    predictors: List[str],
+    terminal_predictors: Optional[List[str]] = None,
+    recurrent_data_name: str = "recurrent_data",
+    terminal_data_name: str = "terminal_data",
+) -> Dict[str, Any]:
+    """
+    Build an R/frailtypack integration spec for a joint frailty model with
+    recurrent and terminal events.
+
+    Python's lifelines stack does not provide a full penalized joint frailty
+    likelihood equivalent to frailtypack::frailtyPenal. Returning a concrete R
+    handoff keeps the endpoint useful without mislabeling an approximation as a
+    publication-grade joint frailty fit.
+    """
+    terminal_predictors = terminal_predictors if terminal_predictors is not None else predictors
+    rhs_recurrent = " + ".join(predictors) if predictors else "1"
+    rhs_terminal = " + ".join(terminal_predictors) if terminal_predictors else "1"
+    r_code = (
+        "library(frailtypack)\n"
+        "# recurrent_data must contain one row per recurrent-event interval.\n"
+        "# terminal_data must contain one row per subject with terminal-event follow-up.\n"
+        f"fit <- frailtyPenal(\n"
+        f"  formula = Surv({start_col}, {stop_col}, {recurrent_event_col}) ~ {rhs_recurrent} + cluster({id_col}) + "
+        f"terminal(Surv({terminal_time_col}, {terminal_event_col}) ~ {rhs_terminal}),\n"
+        f"  data = {recurrent_data_name},\n"
+        f"  recurrentAG = TRUE,\n"
+        f"  RandDist = \"Gamma\",\n"
+        f"  hazard = \"Splines\",\n"
+        f"  n.knots = 8,\n"
+        f"  kappa = c(1e6, 1e6)\n"
+        f")\n"
+        f"summary(fit)\n"
+        f"plot(fit, type.plot = \"Hazard\")\n"
+    )
+    return {
+        "available": shutil.which("Rscript") is not None,
+        "engine": "R frailtypack::frailtyPenal",
+        "model": "joint_frailty_recurrent_terminal",
+        "r_code": r_code,
+        "required_r_packages": ["frailtypack", "survival"],
+        "method_note": (
+            "Use this integration for informative terminal events/death. The Python endpoint "
+            "also reports diagnostics, but the full joint penalized likelihood is delegated to frailtypack."
+        ),
+    }
 
 
 def _theta_from_cluster_residuals(

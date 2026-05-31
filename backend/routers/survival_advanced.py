@@ -7,7 +7,7 @@ POST /mice              — MICE multiple imputation
 POST /fine_gray         — Fine-Gray competing risks (CIF curves)
 POST /landmark          — Landmark survival analysis
 POST /rmst              — Restricted Mean Survival Time (PH-free alternative)
-POST /recurrent_lwyy    — Recurrent events (LWYY / Andersen-Gill)
+POST /recurrent_lwyy    — Recurrent events (LWYY, WLW, MCF, diagnostics)
 POST /frailty           — Shared frailty Cox diagnostics (Phase 6)
 POST /multistate        — Multi-state / illness-death models (Phase 7)
 """
@@ -704,6 +704,195 @@ def evalue(req: EValueRequest):
     }
 
 
+# ── 3b. Causal Sensitivity Analysis (E-value + QBA + bounds) ────────────────
+
+
+class CausalSensitivityRequest(BaseModel):
+    observed_estimate: float = Field(1.0, gt=0)
+    ci_low: Optional[float] = Field(None, gt=0)
+    ci_high: Optional[float] = Field(None, gt=0)
+    measure: str = "rr"  # rr | or | hr
+    rare_outcome: bool = False
+    baseline_risk: Optional[float] = Field(None, ge=0.001, le=0.99)
+    smd: Optional[float] = None
+
+    confounding_strength: float = Field(2.0, gt=0)
+    prevalence_exposed: float = Field(0.5, ge=0, le=1)
+    prevalence_unexposed: float = Field(0.5, ge=0, le=1)
+    unmeasured_confounders: List[Dict[str, Any]] = Field(default_factory=list)
+
+    session_id: Optional[str] = None
+    treatment_col: Optional[str] = None
+    outcome_col: Optional[str] = None
+    monotone_treatment_response: bool = False
+    p_y1_treated: Optional[float] = Field(None, ge=0, le=1)
+    p_y1_control: Optional[float] = Field(None, ge=0, le=1)
+    p_treated: Optional[float] = Field(None, ge=0, le=1)
+
+    match_id_col: Optional[str] = None
+    rosenbaum_gamma_max: float = Field(3.0, gt=1)
+    rosenbaum_n_gamma: int = Field(60, ge=2, le=500)
+
+    negative_control_outcome_col: Optional[str] = None
+    negative_control_covariates: List[str] = Field(default_factory=list)
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/causal_sensitivity")
+def causal_sensitivity(req: CausalSensitivityRequest):
+    """
+    Causal sensitivity suite: E-value, QBA, Manski bounds, Rosenbaum bounds,
+    multi-confounder scenarios, SMD E-value, and negative-control screening.
+    """
+    measure = (req.measure or "rr").lower()
+    if measure not in {"rr", "or", "hr"}:
+        raise HTTPException(status_code=422, detail="measure must be rr, or, or hr")
+    if req.ci_low is not None and req.ci_high is not None and req.ci_low >= req.ci_high:
+        raise HTTPException(status_code=400, detail="ci_low must be < ci_high")
+
+    from services.causal_sensitivity import (
+        e_value,
+        e_value_for_smd,
+        manski_bounds_binary,
+        manski_bounds_from_data,
+        multi_confounder_sensitivity,
+        negative_control_analysis,
+        quantitative_bias_analysis,
+        rosenbaum_bounds_from_matched_data,
+    )
+
+    ev = e_value(
+        estimate=req.observed_estimate,
+        ci_low=req.ci_low,
+        ci_high=req.ci_high,
+        measure=measure,
+        rare_outcome=req.rare_outcome,
+        baseline_risk=req.baseline_risk,
+    )
+    qba = quantitative_bias_analysis(
+        observed_estimate=req.observed_estimate,
+        measure=measure,
+        confounding_strength=req.confounding_strength,
+        prevalence_exposed=req.prevalence_exposed,
+        prevalence_unexposed=req.prevalence_unexposed,
+    )
+    multi = multi_confounder_sensitivity(
+        req.observed_estimate,
+        req.unmeasured_confounders,
+        measure=measure,
+    ) if req.unmeasured_confounders else {"available": False, "reason": "No unmeasured_confounders array supplied."}
+    smd_ev = e_value_for_smd(req.smd, baseline_risk=req.baseline_risk or 0.1) if req.smd is not None else {
+        "available": False,
+        "reason": "No SMD supplied.",
+    }
+
+    manski: Dict[str, Any]
+    rosenbaum: Dict[str, Any] = {"applicable": False, "reason": "No matched data columns supplied."}
+    negative_control: Dict[str, Any] = {"available": False, "reason": "No negative control outcome supplied."}
+    df = None
+    if req.session_id:
+        df = _get_df(req.session_id)
+
+    if df is not None and req.treatment_col and req.outcome_col:
+        needed = [req.treatment_col, req.outcome_col]
+        if req.match_id_col:
+            needed.append(req.match_id_col)
+        if req.negative_control_outcome_col:
+            needed.append(req.negative_control_outcome_col)
+        needed.extend(req.negative_control_covariates or [])
+        missing = [c for c in set(needed) if c not in df.columns]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Columns not found: {sorted(missing)}")
+        from services.impute import apply_imputation
+        work = apply_imputation(df[list(dict.fromkeys(needed))], list(dict.fromkeys(needed)), req.imputation or "listwise")
+        manski = manski_bounds_from_data(
+            work,
+            req.treatment_col,
+            req.outcome_col,
+            monotone_treatment_response=req.monotone_treatment_response,
+        )
+        if req.match_id_col:
+            rosenbaum = rosenbaum_bounds_from_matched_data(
+                work,
+                req.match_id_col,
+                req.treatment_col,
+                req.outcome_col,
+                gamma_max=req.rosenbaum_gamma_max,
+                n_gamma=req.rosenbaum_n_gamma,
+            )
+        if req.negative_control_outcome_col:
+            negative_control = negative_control_analysis(
+                work,
+                req.treatment_col,
+                req.negative_control_outcome_col,
+                covariates=req.negative_control_covariates,
+            )
+    elif req.p_y1_treated is not None and req.p_y1_control is not None and req.p_treated is not None:
+        manski = manski_bounds_binary(
+            p_y1_treated=req.p_y1_treated,
+            p_y1_control=req.p_y1_control,
+            p_treated=req.p_treated,
+            monotone_treatment_response=req.monotone_treatment_response,
+        )
+        manski["available"] = True
+    else:
+        manski = {"available": False, "reason": "Supply session_id+treatment_col+outcome_col or Manski probabilities."}
+
+    warnings = []
+    if ev.get("e_value_point_estimate", 99) < 2:
+        warnings.append("Low E-value (<2); result is sensitive to weak unmeasured confounding.")
+    if rosenbaum.get("critical_gamma") is not None and rosenbaum.get("critical_gamma", 99) < 1.5:
+        warnings.append("Rosenbaum critical gamma is low; matched result may be sensitive to small hidden bias.")
+    if negative_control.get("flag_residual_bias"):
+        warnings.append("Negative control outcome is associated with treatment; residual bias signal detected.")
+
+    result_text = (
+        f"Causal sensitivity suite: E-value {ev.get('e_value_point_estimate')} for observed "
+        f"{measure.upper()}={req.observed_estimate}. QBA corrected estimate {qba.get('bias_corrected_estimate')}."
+    )
+    if manski.get("available"):
+        result_text += f" Manski ATE bounds: {manski.get('ate_bounds')}."
+
+    return {
+        "test": "Causal Sensitivity Analysis (E-value + QBA + Partial Identification)",
+        "e_value": ev,
+        "e_value_smd": smd_ev,
+        "quantitative_bias_analysis": qba,
+        "multi_confounder_sensitivity": multi,
+        "manski_bounds": manski,
+        "rosenbaum_bounds": rosenbaum,
+        "negative_control_analysis": negative_control,
+        "warnings": warnings,
+        "assumptions": [
+            {"name": "No unmeasured confounding", "met": False,
+             "detail": "Sensitivity methods quantify how violations could change inference."},
+            {"name": "Manski partial identification", "met": manski.get("available", False),
+             "detail": "Bounds avoid exchangeability assumptions but can be wide."},
+            {"name": "Rosenbaum matched-pair sensitivity", "met": rosenbaum.get("applicable", False),
+             "detail": "Requires clean 1:1 matched binary-outcome pairs."},
+        ],
+        "result_text": result_text,
+        "export_rows": [
+            ["Metric", "Value"],
+            ["Observed estimate", req.observed_estimate],
+            ["Measure", measure],
+            ["E-value point", ev.get("e_value_point_estimate")],
+            ["E-value CI", ev.get("e_value_ci")],
+            ["QBA bias factor", qba.get("bias_factor")],
+            ["QBA corrected estimate", qba.get("bias_corrected_estimate")],
+            ["Manski ATE bounds", manski.get("ate_bounds")],
+            ["Rosenbaum critical gamma", rosenbaum.get("critical_gamma")],
+            ["Negative control p", negative_control.get("p")],
+        ],
+        "r_code": (
+            "library(EValue)\n"
+            "# E-values: EValue::evalues.RR(est, lo, hi)\n"
+            "# Rosenbaum bounds: rbounds::psens(...)\n"
+            "# Partial identification: report Manski lower/upper bounds."
+        ),
+    }
+
+
 # ── 4. Landmark Analysis ────────────────────────────────────────────────────
 
 
@@ -1264,6 +1453,13 @@ class RecurrentLWYYRequest(BaseModel):
     event_col: str
     predictors: List[str]
     group_col: Optional[str] = None          # for the mean cumulative function plot
+    model_type: str = "lwyy"                 # lwyy | wlw | both | mcf_only
+    event_order_col: Optional[str] = None    # optional recurrence number for WLW strata
+    time_scale: str = "total"                # total | gap | calendar
+    terminal_time_col: Optional[str] = None
+    terminal_event_col: Optional[str] = None
+    include_negative_binomial: bool = False
+    include_joint_frailty_spec: bool = False
     imputation: Optional[str] = "listwise"
 
 
@@ -1286,33 +1482,235 @@ def _mcf(intervals: pd.DataFrame, start: str, stop: str, event: str) -> List[dic
     return pts
 
 
+def _rate_points_from_mcf(mcf: List[dict]) -> List[dict]:
+    pts: List[dict] = []
+    for prev, cur in zip(mcf[:-1], mcf[1:]):
+        dt = float(cur["t"]) - float(prev["t"])
+        if dt <= 0:
+            continue
+        rate = (float(cur["mcf"]) - float(prev["mcf"])) / dt
+        pts.append({"t": cur["t"], "rate": round(float(rate), 5)})
+    return pts
+
+
+def _recurrent_event_order(work: pd.DataFrame, id_col: str, stop_col: str, event_col: str, event_order_col: Optional[str]) -> pd.Series:
+    if event_order_col and event_order_col in work.columns:
+        order = pd.to_numeric(work[event_order_col], errors="coerce").fillna(1).astype(int)
+        return order.clip(lower=1)
+    ordered = work.sort_values([id_col, stop_col]).copy()
+    prior_events = ordered.groupby(id_col)[event_col].cumsum() - ordered[event_col].astype(int)
+    event_order = prior_events + 1
+    event_order = event_order.astype(int).clip(lower=1)
+    return event_order.reindex(work.index).fillna(1).astype(int)
+
+
+def _apply_recurrent_time_scale(work: pd.DataFrame, start_col: str, stop_col: str, time_scale: str) -> pd.DataFrame:
+    out = work.copy()
+    scale = (time_scale or "total").lower()
+    if scale == "gap":
+        out["__re_start__"] = 0.0
+        out["__re_stop__"] = pd.to_numeric(out[stop_col], errors="coerce") - pd.to_numeric(out[start_col], errors="coerce")
+    else:
+        out["__re_start__"] = pd.to_numeric(out[start_col], errors="coerce")
+        out["__re_stop__"] = pd.to_numeric(out[stop_col], errors="coerce")
+    return out[out["__re_stop__"] > out["__re_start__"]]
+
+
+def _cox_recurrent_coefficients(cph: Any) -> List[dict]:
+    summ = cph.summary
+    coefs: List[dict] = []
+    for var in cph.params_.index:
+        beta = float(cph.params_[var])
+        coefs.append({
+            "variable": str(var),
+            "estimate": round(beta, 6),
+            "rate_ratio": round(float(np.exp(beta)), 4),
+            "robust_se": round(float(summ.loc[var, "se(coef)"]), 6),
+            "z": round(float(summ.loc[var, "z"]), 4),
+            "p": round(float(summ.loc[var, "p"]), 6),
+            "rr_low": round(float(summ.loc[var, "exp(coef) lower 95%"]), 4),
+            "rr_high": round(float(summ.loc[var, "exp(coef) upper 95%"]), 4),
+        })
+    return coefs
+
+
+def _negative_binomial_recurrent_counts(
+    work: pd.DataFrame,
+    id_col: str,
+    start_col: str,
+    stop_col: str,
+    event_col: str,
+    enc: pd.DataFrame,
+) -> Dict[str, Any]:
+    try:
+        import statsmodels.api as sm
+
+        aligned = pd.concat([
+            work[[id_col, start_col, stop_col, event_col]].reset_index(drop=True),
+            enc.reset_index(drop=True),
+        ], axis=1).dropna()
+        cov_cols = list(enc.columns)
+        grouped = aligned.groupby(id_col)
+        counts = grouped[event_col].sum().astype(float)
+        followup = (grouped[stop_col].max() - grouped[start_col].min()).clip(lower=1e-8).astype(float)
+        X = grouped[cov_cols].first().astype(float)
+        X = sm.add_constant(X, has_constant="add")
+        model = sm.GLM(counts, X, family=sm.families.NegativeBinomial(), offset=np.log(followup))
+        fit = model.fit()
+        rows = []
+        for var in fit.params.index:
+            beta = float(fit.params[var])
+            rows.append({
+                "variable": str(var),
+                "estimate": round(beta, 6),
+                "rate_ratio": round(float(np.exp(beta)), 4),
+                "se": round(float(fit.bse[var]), 6),
+                "p": round(float(fit.pvalues[var]), 6),
+            })
+        return {
+            "available": True,
+            "model": "negative_binomial_event_count",
+            "n_subjects": int(len(counts)),
+            "coefficients": rows,
+            "aic": round(float(fit.aic), 4),
+            "method_note": "Subject-level event count model with log follow-up offset; useful as a robustness check, not a replacement for event-time models.",
+        }
+    except Exception as exc:
+        return {"available": False, "reason": str(exc)}
+
+
+def _informative_censoring_diagnostics(
+    work: pd.DataFrame,
+    id_col: str,
+    start_col: str,
+    stop_col: str,
+    event_col: str,
+    terminal_time_col: Optional[str],
+    terminal_event_col: Optional[str],
+) -> Dict[str, Any]:
+    if not terminal_time_col or not terminal_event_col:
+        return {"available": False, "reason": "terminal_time_col and terminal_event_col are required."}
+    if terminal_time_col not in work.columns or terminal_event_col not in work.columns:
+        return {"available": False, "reason": "Terminal-event columns are not present in the analysis dataframe."}
+    try:
+        from scipy.stats import mannwhitneyu, spearmanr
+
+        per_subject = work.groupby(id_col).agg(
+            recurrent_events=(event_col, "sum"),
+            followup=(stop_col, "max"),
+            start=(start_col, "min"),
+            terminal_time=(terminal_time_col, "max"),
+            terminal_event=(terminal_event_col, "max"),
+        )
+        per_subject["followup"] = (per_subject["followup"] - per_subject["start"]).clip(lower=1e-8)
+        per_subject["recurrent_rate"] = per_subject["recurrent_events"] / per_subject["followup"]
+        terminal_yes = per_subject.loc[per_subject["terminal_event"] == 1, "recurrent_rate"]
+        terminal_no = per_subject.loc[per_subject["terminal_event"] == 0, "recurrent_rate"]
+        p_group = None
+        if len(terminal_yes) >= 3 and len(terminal_no) >= 3:
+            p_group = float(mannwhitneyu(terminal_yes, terminal_no, alternative="two-sided").pvalue)
+        corr, corr_p = spearmanr(per_subject["terminal_time"], per_subject["recurrent_rate"], nan_policy="omit")
+        terminal_event_rate = float(per_subject["terminal_event"].mean())
+        return {
+            "available": True,
+            "method": "Ghosh-Lin style screening diagnostics",
+            "terminal_event_rate": round(terminal_event_rate, 4),
+            "recurrent_rate_by_terminal_event": {
+                "terminal_event": round(float(terminal_yes.mean()), 5) if len(terminal_yes) else None,
+                "no_terminal_event": round(float(terminal_no.mean()), 5) if len(terminal_no) else None,
+                "mann_whitney_p": round(p_group, 6) if p_group is not None else None,
+            },
+            "terminal_time_recurrent_rate_spearman": {
+                "rho": round(float(corr), 5) if np.isfinite(corr) else None,
+                "p": round(float(corr_p), 6) if np.isfinite(corr_p) else None,
+            },
+            "warning": "A small p-value suggests recurrent-event intensity may be associated with terminal events; consider joint frailty.",
+        }
+    except Exception as exc:
+        return {"available": False, "reason": str(exc)}
+
+
+def _recurrent_specific_diagnostics(
+    work: pd.DataFrame,
+    id_col: str,
+    event_col: str,
+) -> Dict[str, Any]:
+    event_rows = work[work[event_col] == 1].copy()
+    gap_times = (event_rows["__re_stop__"] - event_rows["__re_start__"]).astype(float)
+    event_counts = work.groupby(id_col)[event_col].sum().astype(float)
+    expected_count = float(event_counts.mean()) if len(event_counts) else 0.0
+    residuals = event_counts - expected_count
+    order_counts = event_rows["__event_order__"].value_counts().sort_index()
+    return {
+        "gap_time": {
+            "n_event_gaps": int(len(gap_times)),
+            "mean": round(float(gap_times.mean()), 5) if len(gap_times) else None,
+            "median": round(float(gap_times.median()), 5) if len(gap_times) else None,
+            "min": round(float(gap_times.min()), 5) if len(gap_times) else None,
+            "max": round(float(gap_times.max()), 5) if len(gap_times) else None,
+        },
+        "event_order_distribution": {str(int(k)): int(v) for k, v in order_counts.items()},
+        "subject_event_count_residuals": {
+            "expected_events_per_subject": round(expected_count, 5),
+            "mean": round(float(residuals.mean()), 5) if len(residuals) else None,
+            "sd": round(float(residuals.std(ddof=1)), 5) if len(residuals) > 1 else 0.0,
+            "outlier_count_abs_gt_2sd": int(np.sum(np.abs(residuals) > 2.0 * residuals.std(ddof=1))) if len(residuals) > 2 and residuals.std(ddof=1) > 0 else 0,
+        },
+    }
+
+
 @router.post("/recurrent_lwyy")
 def recurrent_lwyy(req: RecurrentLWYYRequest):
     from lifelines import CoxPHFitter
 
     df = _get_df(req.session_id)
+    model_type = (req.model_type or "lwyy").lower()
+    if model_type not in {"lwyy", "wlw", "both", "mcf_only"}:
+        raise HTTPException(status_code=422, detail="model_type must be lwyy, wlw, both, or mcf_only.")
+    time_scale = (req.time_scale or "total").lower()
+    if time_scale not in {"total", "gap", "calendar"}:
+        raise HTTPException(status_code=422, detail="time_scale must be total, gap, or calendar.")
+
     needed = [req.id_col, req.start_col, req.stop_col, req.event_col, *req.predictors]
     if req.group_col:
         needed.append(req.group_col)
+    if req.event_order_col:
+        needed.append(req.event_order_col)
+    if req.terminal_time_col:
+        needed.append(req.terminal_time_col)
+    if req.terminal_event_col:
+        needed.append(req.terminal_event_col)
+    needed = list(dict.fromkeys(needed))
     for c in needed:
         if c not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
-    if not req.predictors:
+    if not req.predictors and model_type != "mcf_only":
         raise HTTPException(status_code=422, detail="Select at least one predictor.")
 
     from services.impute import apply_imputation
     work = apply_imputation(df[needed], needed, req.imputation or "listwise").reset_index(drop=True)
 
     # Coerce the counting-process columns.
-    for c in [req.start_col, req.stop_col, req.event_col]:
+    numeric_cols = [req.start_col, req.stop_col, req.event_col]
+    if req.event_order_col:
+        numeric_cols.append(req.event_order_col)
+    if req.terminal_time_col:
+        numeric_cols.append(req.terminal_time_col)
+    if req.terminal_event_col:
+        numeric_cols.append(req.terminal_event_col)
+    for c in numeric_cols:
         work[c] = pd.to_numeric(work[c], errors="coerce")
     work = work.dropna(subset=[req.id_col, req.start_col, req.stop_col, req.event_col])
     work = work[work[req.stop_col] > work[req.start_col]]
+    work = _apply_recurrent_time_scale(work, req.start_col, req.stop_col, time_scale)
     if len(work) < 10:
         raise HTTPException(status_code=400, detail=f"Not enough usable intervals (need ≥ 10, got {len(work)}).")
     evset = set(np.unique(work[req.event_col].astype(int)))
     if evset - {0, 1}:
         raise HTTPException(status_code=422, detail="Event column must be 0/1 per interval (1 = event at the interval's stop time).")
+    work["__event_order__"] = _recurrent_event_order(
+        work, req.id_col, req.stop_col, req.event_col, req.event_order_col
+    )
 
     # Encode predictors: numeric stays, categorical → dummies (drop_first).
     pred_raw = work[req.predictors].copy()
@@ -1331,35 +1729,66 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
     cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
     enc = pd.concat([num_part, cat_part], axis=1).astype(float)
     cov_cols = [str(c) for c in enc.columns]
-    if not cov_cols:
+    if not cov_cols and model_type != "mcf_only":
         raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
 
     fit_df = pd.concat([
-        work[[req.id_col, req.start_col, req.stop_col, req.event_col]].reset_index(drop=True),
+        work[[req.id_col, "__re_start__", "__re_stop__", req.event_col, "__event_order__"]].reset_index(drop=True),
         enc.reset_index(drop=True),
     ], axis=1).dropna()
 
-    cph = CoxPHFitter()
-    try:
-        cph.fit(fit_df, duration_col=req.stop_col, event_col=req.event_col,
-                entry_col=req.start_col, cluster_col=req.id_col, robust=True, show_progress=False)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"LWYY fit failed: {exc}")
+    lwyy_result: Optional[Dict[str, Any]] = None
+    wlw_result: Optional[Dict[str, Any]] = None
+    cph: Optional[Any] = None
+    if model_type in {"lwyy", "both"}:
+        cph = CoxPHFitter()
+        try:
+            cph.fit(
+                fit_df[[req.id_col, "__re_start__", "__re_stop__", req.event_col] + cov_cols],
+                duration_col="__re_stop__",
+                event_col=req.event_col,
+                entry_col="__re_start__",
+                cluster_col=req.id_col,
+                robust=True,
+                show_progress=False,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"LWYY fit failed: {exc}")
+        lwyy_result = {
+            "model": "Lin-Wei-Yang-Ying marginal rate/means model",
+            "time_scale": time_scale,
+            "coefficients": _cox_recurrent_coefficients(cph),
+            "concordance": round(float(cph.concordance_index_), 4),
+        }
 
-    summ = cph.summary
-    coefs: List[dict] = []
-    for var in cph.params_.index:
-        beta = float(cph.params_[var])
-        coefs.append({
-            "variable": str(var),
-            "estimate": round(beta, 6),
-            "rate_ratio": round(float(np.exp(beta)), 4),
-            "robust_se": round(float(summ.loc[var, "se(coef)"]), 6),
-            "z": round(float(summ.loc[var, "z"]), 4),
-            "p": round(float(summ.loc[var, "p"]), 6),
-            "rr_low": round(float(summ.loc[var, "exp(coef) lower 95%"]), 4),
-            "rr_high": round(float(summ.loc[var, "exp(coef) upper 95%"]), 4),
-        })
+    if model_type in {"wlw", "both"}:
+        wlw_cph = CoxPHFitter()
+        try:
+            wlw_cph.fit(
+                fit_df[[req.id_col, "__re_start__", "__re_stop__", req.event_col, "__event_order__"] + cov_cols],
+                duration_col="__re_stop__",
+                event_col=req.event_col,
+                entry_col="__re_start__",
+                cluster_col=req.id_col,
+                strata=["__event_order__"],
+                robust=True,
+                show_progress=False,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"WLW fit failed: {exc}")
+        wlw_result = {
+            "model": "Wei-Lin-Weissfeld marginal model",
+            "time_scale": time_scale,
+            "event_order_source": req.event_order_col or "computed from subject event history",
+            "n_event_strata": int(fit_df["__event_order__"].nunique()),
+            "coefficients": _cox_recurrent_coefficients(wlw_cph),
+            "concordance": round(float(wlw_cph.concordance_index_), 4),
+            "method_note": "WLW fits event-order-specific marginal risk sets with robust subject-clustered variance.",
+        }
+        if cph is None:
+            cph = wlw_cph
+
+    coefs = (lwyy_result or wlw_result or {}).get("coefficients", [])
 
     n_subjects = int(work[req.id_col].nunique())
     n_events = int((work[req.event_col] == 1).sum())
@@ -1367,35 +1796,51 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
     ev_per = work.groupby(req.id_col)[req.event_col].sum()
     # total follow-up = sum over subjects of (max stop − min start)
     grp_fu = work.groupby(req.id_col)
-    fu = grp_fu[req.stop_col].max() - grp_fu[req.start_col].min()
+    fu = grp_fu["__re_stop__"].max() - grp_fu["__re_start__"].min()
     total_fu = float(fu.sum())
 
     # Mean cumulative function — overall + by group.
     palette = ["#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#06b6d4"]
     traces = []
+    rate_traces = []
+    mcf_by_group: Dict[str, List[dict]] = {}
     if req.group_col:
         groups = sorted(work[req.group_col].dropna().unique().tolist(), key=lambda x: (isinstance(x, str), x))
         for gi, g in enumerate(groups):
             sub = work[work[req.group_col] == g]
-            pts = _mcf(sub, req.start_col, req.stop_col, req.event_col)
+            pts = _mcf(sub, "__re_start__", "__re_stop__", req.event_col)
+            mcf_by_group[str(g)] = pts
             traces.append({
                 "x": [p["t"] for p in pts], "y": [p["mcf"] for p in pts],
                 "type": "scatter", "mode": "lines", "name": f"{req.group_col} = {g}",
                 "line": {"color": palette[gi % len(palette)], "width": 2, "shape": "hv"},
             })
+            rate_pts = _rate_points_from_mcf(pts)
+            rate_traces.append({
+                "x": [p["t"] for p in rate_pts], "y": [p["rate"] for p in rate_pts],
+                "type": "scatter", "mode": "lines+markers", "name": f"{req.group_col} = {g}",
+                "line": {"color": palette[gi % len(palette)], "width": 2},
+            })
     else:
-        pts = _mcf(work, req.start_col, req.stop_col, req.event_col)
+        pts = _mcf(work, "__re_start__", "__re_stop__", req.event_col)
+        mcf_by_group["overall"] = pts
         traces.append({
             "x": [p["t"] for p in pts], "y": [p["mcf"] for p in pts],
             "type": "scatter", "mode": "lines", "name": "MCF",
             "line": {"color": palette[0], "width": 2, "shape": "hv"},
         })
+        rate_pts = _rate_points_from_mcf(pts)
+        rate_traces.append({
+            "x": [p["t"] for p in rate_pts], "y": [p["rate"] for p in rate_pts],
+            "type": "scatter", "mode": "lines+markers", "name": "Rate",
+            "line": {"color": palette[0], "width": 2},
+        })
 
     plot = {
         "data": traces,
         "layout": {
-            "title": "Mean cumulative function (expected events per subject)",
-            "xaxis": {"title": req.stop_col, "gridcolor": "#e5e7eb"},
+            "title": f"Mean cumulative function ({time_scale} time)",
+            "xaxis": {"title": f"{time_scale} time", "gridcolor": "#e5e7eb"},
             "yaxis": {"title": "Mean cumulative events", "gridcolor": "#e5e7eb"},
             "paper_bgcolor": "transparent", "plot_bgcolor": "#ffffff",
             "font": {"color": "#374151", "size": 12},
@@ -1404,37 +1849,99 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
             "legend": {"x": 0.02, "y": 0.98},
         },
     }
+    rate_plot = {
+        "data": rate_traces,
+        "layout": {
+            "title": f"Recurrent event rate function ({time_scale} time)",
+            "xaxis": {"title": f"{time_scale} time", "gridcolor": "#e5e7eb"},
+            "yaxis": {"title": "Incremental event rate", "gridcolor": "#e5e7eb"},
+            "paper_bgcolor": "transparent", "plot_bgcolor": "#ffffff",
+            "font": {"color": "#374151", "size": 12},
+            "margin": {"t": 40, "r": 20, "b": 50, "l": 60},
+            "showlegend": bool(req.group_col),
+        },
+    }
 
-    primary = coefs[0]
-    interp = (
-        f"LWYY recurrent-event model on {n_subjects} subjects with {n_events} events "
-        f"({ev_per.mean():.2f} events/subject; {n_events / total_fu * 100:.2f} events per 100 "
-        f"time-units of follow-up). Andersen-Gill point estimates with Lin-Wei-Yang-Ying "
-        f"cluster-robust SE. {primary['variable']}: rate ratio = {primary['rate_ratio']} "
-        f"(95% CI {primary['rr_low']}–{primary['rr_high']}, p = "
-        f"{'<0.001' if primary['p'] < 0.001 else round(primary['p'], 3)})."
-    )
+    if coefs:
+        primary = coefs[0]
+        interp = (
+            f"Recurrent-event {model_type.upper()} analysis on {n_subjects} subjects with {n_events} events "
+            f"({ev_per.mean():.2f} events/subject; {n_events / total_fu * 100:.2f} events per 100 "
+            f"time-units of follow-up, {time_scale} time scale). {primary['variable']}: rate ratio = {primary['rate_ratio']} "
+            f"(95% CI {primary['rr_low']}–{primary['rr_high']}, p = "
+            f"{'<0.001' if primary['p'] < 0.001 else round(primary['p'], 3)})."
+        )
+    else:
+        interp = (
+            f"MCF-only recurrent-event analysis on {n_subjects} subjects with {n_events} events "
+            f"({ev_per.mean():.2f} events/subject; {n_events / total_fu * 100:.2f} events per 100 "
+            f"time-units of follow-up, {time_scale} time scale)."
+        )
 
     assumptions = [
         {"name": "Recurrent-event structure", "met": True,
          "detail": f"Counting-process intervals (start, stop]; {len(work)} intervals across {n_subjects} subjects."},
-        {"name": "Robust variance (LWYY)", "met": True,
-         "detail": "Cluster-robust sandwich SE clustered on subject id — accounts for within-subject event correlation. No common-baseline-hazard or independent-increment assumption needed."},
+        {"name": "Calendar/gap/total time scale", "met": True,
+         "detail": f"Model time scale set to '{time_scale}'."},
         {"name": "Rate-ratio interpretation", "met": True,
          "detail": "exp(β) is the ratio of event rates (mean cumulative functions), not a single-event hazard ratio."},
     ]
+    if lwyy_result:
+        assumptions.append({"name": "Robust variance (LWYY)", "met": True,
+                            "detail": "Cluster-robust sandwich SE clustered on subject id accounts for within-subject event correlation."})
+    if wlw_result:
+        assumptions.append({"name": "WLW marginal risk sets", "met": True,
+                            "detail": "Event-order strata are used for Wei-Lin-Weissfeld marginal modeling."})
 
     export_rows = [["Variable", "Rate ratio", "95% CI low", "95% CI high", "β", "Robust SE", "z", "p"]]
     for c in coefs:
         export_rows.append([c["variable"], c["rate_ratio"], c["rr_low"], c["rr_high"],
                             c["estimate"], c["robust_se"], c["z"], c["p"]])
 
+    negative_binomial = (
+        _negative_binomial_recurrent_counts(work, req.id_col, "__re_start__", "__re_stop__", req.event_col, enc)
+        if req.include_negative_binomial and cov_cols
+        else {"available": False, "reason": "Negative binomial model not requested or no covariates available."}
+    )
+    informative_censoring = _informative_censoring_diagnostics(
+        work,
+        req.id_col,
+        "__re_start__",
+        "__re_stop__",
+        req.event_col,
+        req.terminal_time_col,
+        req.terminal_event_col,
+    )
+    recurrent_diagnostics = _recurrent_specific_diagnostics(work, req.id_col, req.event_col)
+    joint_frailty_spec = {"available": False, "reason": "Joint frailty frailtypack spec not requested."}
+    if req.include_joint_frailty_spec:
+        if req.terminal_time_col and req.terminal_event_col:
+            from services.frailty import build_joint_frailty_frailtypack_spec
+            joint_frailty_spec = build_joint_frailty_frailtypack_spec(
+                id_col=req.id_col,
+                start_col=req.start_col,
+                stop_col=req.stop_col,
+                recurrent_event_col=req.event_col,
+                terminal_time_col=req.terminal_time_col,
+                terminal_event_col=req.terminal_event_col,
+                predictors=req.predictors,
+            )
+        else:
+            joint_frailty_spec = {
+                "available": False,
+                "reason": "terminal_time_col and terminal_event_col are required for joint frailty.",
+            }
+
     r_code = (
         "library(survival)\n"
-        f"# LWYY = Andersen-Gill + robust cluster SE\n"
-        f"fit <- coxph(Surv({req.start_col}, {req.stop_col}, {req.event_col}) ~ "
-        f"{' + '.join(req.predictors)} + cluster({req.id_col}), data = data)\n"
-        f"summary(fit)"
+        f"# LWYY marginal rates/means model\n"
+        f"fit_lwyy <- coxph(Surv({req.start_col}, {req.stop_col}, {req.event_col}) ~ "
+        f"{' + '.join(req.predictors) if req.predictors else '1'} + cluster({req.id_col}), data = data)\n"
+        f"summary(fit_lwyy)\n\n"
+        f"# WLW marginal model with event-order strata\n"
+        f"fit_wlw <- coxph(Surv({req.start_col}, {req.stop_col}, {req.event_col}) ~ "
+        f"{' + '.join(req.predictors) if req.predictors else '1'} + strata(event_order) + cluster({req.id_col}), data = data)\n"
+        f"summary(fit_wlw)"
     )
 
     try:
@@ -1446,16 +1953,25 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
         pass
 
     return _safe({
-        "test": "Recurrent events — LWYY model",
-        "model": "Lin-Wei-Yang-Ying (modified Andersen-Gill, cluster-robust SE)",
+        "test": "Recurrent events analysis",
+        "model": model_type,
+        "time_scale": time_scale,
         "n_subjects": n_subjects,
         "n_events": n_events,
         "n_intervals": int(len(work)),
         "events_per_subject": round(float(ev_per.mean()), 4),
         "total_followup": round(total_fu, 4),
-        "concordance": round(float(cph.concordance_index_), 4),
+        "concordance": round(float(cph.concordance_index_), 4) if cph is not None else None,
         "coefficients": coefs,
+        "lwyy": lwyy_result,
+        "wlw": wlw_result,
+        "mcf": mcf_by_group,
+        "negative_binomial": negative_binomial,
+        "informative_censoring_diagnostics": informative_censoring,
+        "recurrent_diagnostics": recurrent_diagnostics,
+        "joint_frailty": joint_frailty_spec,
         "plot": plot,
+        "rate_plot": rate_plot,
         "assumptions": assumptions,
         "result_text": interp,
         "interpretation": interp,

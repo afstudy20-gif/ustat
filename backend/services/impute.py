@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from typing import List
+from typing import Dict, List, Optional
 
 
 def apply_imputation(df: pd.DataFrame, cols: List[str], strategy: str = "listwise") -> pd.DataFrame:
@@ -69,6 +69,55 @@ def apply_imputation(df: pd.DataFrame, cols: List[str], strategy: str = "listwis
     # Always drop rows still missing after imputation
     # (covers non-numeric columns and edge cases)
     return df.dropna(subset=valid_cols)
+
+
+def apply_passive_imputation(df: pd.DataFrame, formulas: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    """
+    Recompute derived variables after imputation.
+
+    Example: {"bmi": "weight / (height ** 2)"}. Expressions are evaluated with
+    pandas.eval against dataframe columns only.
+    """
+    if not formulas:
+        return df
+    out = df.copy()
+    for target, expr in formulas.items():
+        try:
+            out[target] = out.eval(expr)
+        except Exception:
+            continue
+    return out
+
+
+def add_survival_auxiliary_variables(
+    df: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    *,
+    prefix: str = "__surv_aux",
+) -> pd.DataFrame:
+    """
+    Add survival-specific auxiliary variables for imputation models:
+    log time and Nelson-Aalen cumulative hazard at each subject's follow-up.
+    """
+    out = df.copy()
+    if duration_col not in out.columns or event_col not in out.columns:
+        return out
+    duration = pd.to_numeric(out[duration_col], errors="coerce")
+    event = pd.to_numeric(out[event_col], errors="coerce").fillna(0).astype(int)
+    out[f"{prefix}_log_time"] = np.log(np.clip(duration.astype(float), 1e-8, None))
+    try:
+        from lifelines import NelsonAalenFitter
+
+        mask = duration.notna()
+        naf = NelsonAalenFitter()
+        naf.fit(duration[mask].astype(float), event_observed=event[mask].astype(int))
+        cumulative = naf.cumulative_hazard_at_times(duration.fillna(duration.median()).astype(float)).to_numpy()
+        out[f"{prefix}_nelson_aalen"] = np.asarray(cumulative, dtype=float)
+    except Exception:
+        order = duration.rank(method="average", pct=True)
+        out[f"{prefix}_nelson_aalen"] = -np.log(np.clip(1.0 - order.fillna(order.median()), 1e-6, 1.0))
+    return out
 
 
 def missing_info(df: pd.DataFrame, cols: List[str]) -> dict:
