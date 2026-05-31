@@ -1479,6 +1479,7 @@ class MultistateRequest(BaseModel):
     event_col: str = "event"
     predictors: List[str]
     imputation: Optional[str] = "listwise"
+    transition_model_type: Optional[str] = "cox"
 
 
 @router.post("/multistate")
@@ -1507,12 +1508,13 @@ def multistate(req: MultistateRequest):
         exit_col=req.exit_col,
         event_col=req.event_col,
         predictors=req.predictors,
+        transition_model_type=req.transition_model_type or "cox",
     )
 
     result["test"] = "Multi-State Transition Models (Phase 7)"
     result["result_text"] = (
         f"Multi-state analysis on {len(work)} transition records. "
-        f"Estimated {len(result.get('transitions_estimated', []))} transition(s) using cause-specific Cox models."
+        f"Estimated {len(result.get('transitions_estimated', []))} transition(s) using {result.get('model_type', 'cox')} models."
     )
     return result
 
@@ -1530,6 +1532,11 @@ class DynamicPredictionRequest(BaseModel):
     predictors: List[str]
     horizon: float = 5.0
     n_points: int = 20
+    transition_model_type: Optional[str] = "cox"
+    run_bootstrap: Optional[bool] = False
+    n_bootstrap: Optional[int] = 50
+    run_microsimulation: Optional[bool] = False
+    n_simulations: Optional[int] = 1000
 
 
 @router.post("/dynamic_prediction")
@@ -1567,14 +1574,23 @@ def dynamic_prediction(req: DynamicPredictionRequest):
         exit_col=req.exit_col,
         event_col=req.event_col,
         horizon_times=horizon_times,
+        transition_model_type=req.transition_model_type or "cox",
+        run_bootstrap=req.run_bootstrap or False,
+        n_bootstrap=req.n_bootstrap or 50,
+        run_microsimulation=req.run_microsimulation or False,
+        n_simulations=req.n_simulations or 1000,
     )
 
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
     # Enrich response (Phase 7 A)
+    model_name = "Cox (Markov)" if req.transition_model_type == "cox" else "Weibull (Semi-Markov)"
     assumptions = [
         {"name": "Landmark conditioning", "met": True,
          "detail": f"Predictions conditional on being in state {req.current_state} at t={req.landmark_time}."},
-        {"name": "Markov assumption", "met": True,
-         "detail": "Transition intensities depend only on current state and covariates (standard Markov multi-state model)."},
+        {"name": "Transition Model Type", "met": True,
+         "detail": f"Model is fitted using {model_name} framework."},
     ]
 
     warnings = []
@@ -1590,6 +1606,7 @@ def dynamic_prediction(req: DynamicPredictionRequest):
     result_text = (
         f"Dynamic multi-state prediction at landmark t={req.landmark_time} from state {req.current_state}. "
         f"Horizon = {req.horizon} time units using {n_at_risk} subjects still at risk. "
+        f"Model type: {model_name}. "
     )
     if err and "overall_mean_error" in err:
         result_text += f"Overall mean squared prediction error = {err['overall_mean_error']}."

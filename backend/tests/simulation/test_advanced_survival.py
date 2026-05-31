@@ -530,3 +530,67 @@ def test_external_validation_cohorts_generator():
     assert gt["covariate_shift"] > 0
     assert len(surv_df[surv_df["cohort"] == "development"]) == 200
     assert len(surv_df[surv_df["cohort"] == "validation"]) == 150
+
+
+@pytest.mark.simulation
+def test_multistate_weibull_and_advanced_features():
+    """
+    Phase 7 Gelişmiş Özellikler: Weibull geçiş modelleri, Bootstrap güven aralıkları,
+    Microsimulation ve formal Markov Assumption testi bir arada hatasız çalışmalıdır.
+    """
+    from services.simulation_generators import generate_multistate_data
+    from services.multistate import fit_multistate_transitions, dynamic_prediction_from_landmark
+    import numpy as np
+
+    df, _ = generate_multistate_data(n=250, seed=123)
+
+    # 1. Weibull geçişleri ve Markov Assumption Testini kontrol et
+    res_fit = fit_multistate_transitions(
+        df,
+        id_col="id",
+        from_state_col="from_state",
+        to_state_col="to_state",
+        entry_col="entry",
+        exit_col="exit",
+        event_col="event",
+        predictors=["X1", "X2"],
+        transition_model_type="weibull"
+    )
+
+    assert "transitions_estimated" in res_fit
+    assert "markov_assumption_tests" in res_fit
+    assert "1->2" in res_fit["markov_assumption_tests"]
+    assert res_fit["markov_assumption_tests"]["1->2"]["status"] == "Tested"
+    assert "shape_rho" in res_fit["results"]["0->1"]
+
+    # 2. Weibull tabanlı dynamic prediction, bootstrap ve microsimulation kontrol et
+    horizon = np.linspace(2.0, 6.0, 8)
+    res_pred = dynamic_prediction_from_landmark(
+        df,
+        landmark_time=2.0,
+        current_state=0,
+        predictors=["X1", "X2"],
+        id_col="id",
+        from_state_col="from_state",
+        to_state_col="to_state",
+        entry_col="entry",
+        exit_col="exit",
+        event_col="event",
+        horizon_times=horizon,
+        transition_model_type="weibull",
+        run_bootstrap=True,
+        n_bootstrap=10,
+        run_microsimulation=True,
+        n_simulations=400
+    )
+
+    assert "error" not in res_pred
+    assert "elos" in res_pred
+    assert "bootstrap" in res_pred
+    assert "lower" in res_pred["bootstrap"]
+    assert "microsimulation" in res_pred
+    assert "state_probabilities" in res_pred["microsimulation"]
+    assert len(res_pred["microsimulation"]["sample_paths"]) == 5
+    assert "prediction_error" in res_pred
+    assert "overall_mean_error" in res_pred["prediction_error"]
+
