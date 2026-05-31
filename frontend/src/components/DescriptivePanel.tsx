@@ -794,6 +794,8 @@ export default function DescriptivePanel() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"distribution" | "scatter">("distribution");
+  const chartTab = useStore((s) => s.descriptiveTab);
+  const setChartTab = useStore((s) => s.setDescriptiveTab);
 
   // For Scatter companions: which distribution plot to show next to scatter
   const [scatterCompanionType, setScatterCompanionType] = useState<"histogram" | "boxplot" | "violin" | "qq">("histogram");
@@ -1043,23 +1045,36 @@ export default function DescriptivePanel() {
       {/* ── Right: view area ── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-white">
 
-        {/* ── View tab switcher ── */}
-        <div className="flex items-center gap-1 px-4 py-2 border-b border-gray-200 flex-shrink-0 bg-gray-50">
-          {([
-            { id: "distribution", label: "📊 Distribution" },
-            { id: "scatter",      label: "⬡ Scatter Plot" },
-          ] as const).map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => setView(id)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors
-                ${view === id
-                  ? "bg-indigo-600 text-white"
-                  : "text-gray-500 hover:text-gray-700 hover:bg-gray-200"}`}
-            >
-              {label}
-            </button>
-          ))}
+        {/* ── Sub-tabs under Descriptive: Histogram | Box Plot | Violin | Q-Q Plot | Scatter Plot ── */}
+        <div className="flex items-center gap-1 px-4 py-1.5 border-b border-gray-200 flex-shrink-0 bg-gray-50 overflow-x-auto">
+          {[
+            { id: "histogram", label: "Histogram" },
+            { id: "boxplot",   label: "Box Plot" },
+            { id: "violin",    label: "Violin" },
+            { id: "qq",        label: "Q-Q Plot" },
+            { id: "scatter",   label: "Scatter Plot" },
+          ].map(({ id, label }) => {
+            const isActive = (id === "scatter" ? view === "scatter" : view === "distribution" && chartTab === id);
+            return (
+              <button
+                key={id}
+                onClick={() => {
+                  if (id === "scatter") {
+                    setView("scatter");
+                  } else {
+                    setView("distribution");
+                    setChartTab(id as any);
+                  }
+                }}
+                className={`px-3 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors
+                  ${isActive
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-gray-600 hover:text-gray-800 hover:bg-gray-200"}`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         {/* ── Scatter view: 4 distribution plots (Hist/Box/Violin/QQ) on the LEFT of the scatter, red draggable divider, no extra "Distribution" title ── */}
