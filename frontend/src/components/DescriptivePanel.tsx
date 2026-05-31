@@ -1080,95 +1080,83 @@ export default function DescriptivePanel() {
         {/* ── Scatter view: 4 distribution plots (Hist/Box/Violin/QQ) on the LEFT of the scatter, red draggable divider, no extra "Distribution" title ── */}
         {view === "scatter" && (
           <div className="flex h-full" style={{ minWidth: 0 }}>
-            {/* LEFT: The 4 plots (Histogram, Box, Violin, Q-Q) on the left of the scatter plot */}
+            {/* LEFT: The 4 plots (Histogram, Box, Violin, Q-Q) on the left of the scatter plot - bare plots only, no repeating titles (titles only in the top Descriptive sub-tabs) */}
             <div
               className="flex-shrink-0 min-h-0 overflow-hidden bg-gray-50 p-2 border-r border-gray-200"
               style={{ width: `${scatterLeftWidth}px` }}
             >
               {summary && summary.type === "numeric" ? (
                 <div className="grid grid-cols-2 grid-rows-2 gap-2 h-full">
-                  {/* Histogram */}
-                  <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Histogram</div>
-                    <div className="flex-1 p-1">
-                      <Plot
-                        data={[{
-                          x: summary.histogram?.map((b: any) => (b.bin_start + b.bin_end) / 2) || [],
-                          y: summary.histogram?.map((b: any) => b.count) || [],
-                          type: "bar",
-                          marker: { color: "#6366f1" },
-                        }]}
-                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
-                        style={{ width: "100%", height: "100%" }}
-                        useResizeHandler
-                      />
-                    </div>
+                  {/* Histogram - no title bar, just the plot */}
+                  <div className="border bg-white rounded overflow-hidden p-1">
+                    <Plot
+                      data={[{
+                        x: summary.histogram?.map((b: any) => (b.bin_start + b.bin_end) / 2) || [],
+                        y: summary.histogram?.map((b: any) => b.count) || [],
+                        type: "bar",
+                        marker: { color: "#6366f1" },
+                      }]}
+                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
+                      style={{ width: "100%", height: "100%" }}
+                      useResizeHandler
+                    />
                   </div>
 
                   {/* Box Plot */}
-                  <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Box Plot</div>
-                    <div className="flex-1 p-1">
-                      <Plot
-                        data={[{
-                          y: summary.raw_values || [],
-                          type: "box",
-                          name: selected,
-                          boxpoints: "outliers",
-                          marker: { color: "#6366f1" },
-                        }]}
-                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                        style={{ width: "100%", height: "100%" }}
-                        useResizeHandler
-                      />
-                    </div>
+                  <div className="border bg-white rounded overflow-hidden p-1">
+                    <Plot
+                      data={[{
+                        y: summary.raw_values || [],
+                        type: "box",
+                        name: selected,
+                        boxpoints: "outliers",
+                        marker: { color: "#6366f1" },
+                      }]}
+                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
+                      style={{ width: "100%", height: "100%" }}
+                      useResizeHandler
+                    />
                   </div>
 
                   {/* Violin */}
-                  <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Violin</div>
-                    <div className="flex-1 p-1">
-                      <Plot
-                        data={[{
-                          y: summary.raw_values || [],
-                          type: "violin",
-                          name: selected,
-                          box: { visible: true },
-                          meanline: { visible: true },
-                        }]}
-                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                        style={{ width: "100%", height: "100%" }}
-                        useResizeHandler
-                      />
-                    </div>
+                  <div className="border bg-white rounded overflow-hidden p-1">
+                    <Plot
+                      data={[{
+                        y: summary.raw_values || [],
+                        type: "violin",
+                        name: selected,
+                        box: { visible: true },
+                        meanline: { visible: true },
+                      }]}
+                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
+                      style={{ width: "100%", height: "100%" }}
+                      useResizeHandler
+                    />
                   </div>
 
                   {/* Q-Q Plot */}
-                  <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Q-Q Plot</div>
-                    <div className="flex-1 p-1">
-                      <Plot
-                        data={[
-                          {
-                            x: summary.qq?.map((p: any) => p.x) || [],
-                            y: summary.qq?.map((p: any) => p.y) || [],
-                            type: "scatter",
-                            mode: "markers",
-                            marker: { color: "#6366f1", size: 3 },
-                          },
-                          {
-                            x: summary.qq?.map((p: any) => p.x) || [],
-                            y: summary.qq?.map((p: any) => p.x) || [],
-                            type: "scatter",
-                            mode: "lines",
-                            line: { color: "#ef4444", dash: "dash" },
-                          },
-                        ]}
-                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                        style={{ width: "100%", height: "100%" }}
-                        useResizeHandler
-                      />
-                    </div>
+                  <div className="border bg-white rounded overflow-hidden p-1">
+                    <Plot
+                      data={[
+                        {
+                          x: summary.qq?.map((p: any) => p.x) || [],
+                          y: summary.qq?.map((p: any) => p.y) || [],
+                          type: "scatter",
+                          mode: "markers",
+                          marker: { color: "#6366f1", size: 3 },
+                        },
+                        {
+                          x: summary.qq?.map((p: any) => p.x) || [],
+                          y: summary.qq?.map((p: any) => p.x) || [],
+                          type: "scatter",
+                          mode: "lines",
+                          line: { color: "#ef4444", dash: "dash" },
+                        },
+                      ]}
+                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
+                      style={{ width: "100%", height: "100%" }}
+                      useResizeHandler
+                    />
                   </div>
                 </div>
               ) : (
