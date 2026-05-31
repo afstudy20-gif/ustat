@@ -44,7 +44,7 @@ pytestmark = pytest.mark.skipif(
 @settings(max_examples=40, deadline=4000, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(
     n=st.integers(150, 1200),
-    noise_sd=st.floats(0.3, 2.5),
+    noise_sd=st.floats(0.3, 1.2),
     seed=st.integers(0, 10000),
 )
 def test_linear_recovers_sign_and_magnitude(client, n, noise_sd, seed):

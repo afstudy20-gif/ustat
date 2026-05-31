@@ -1,0 +1,523 @@
+from __future__ import annotations
+
+from typing import Optional, List, Dict, Any
+import numpy as np
+import pandas as pd
+from scipy import stats as scipy_stats
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from loguru import logger
+
+from services import store
+from services.impute import apply_imputation
+
+router = APIRouter()
+
+
+def _get_df(session_id: str) -> pd.DataFrame:
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return df
+
+
+def _sanitize(obj):
+    """Recursively replace NaN/Inf floats with None in dicts/lists."""
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
+        return None
+    return obj
+
+
+# ── 1. GET Correlation Matrix ──────────────────────────────────────────────────
+
+@router.get("/{session_id}/correlation")
+def correlation(session_id: str, method: str = "pearson"):
+    df = _get_df(session_id)
+    num_df = df.select_dtypes(include="number")
+    corr = num_df.corr(method=method)
+    p_values = {}
+    for c1 in corr.columns:
+        p_values[c1] = {}
+        for c2 in corr.columns:
+            if c1 == c2:
+                p_values[c1][c2] = 0.0
+            else:
+                pair = num_df[[c1, c2]].dropna()
+                if len(pair) < 3 or pair[c1].std() == 0 or pair[c2].std() == 0:
+                    p_values[c1][c2] = None
+                    continue
+                s1, s2 = pair.values.T
+                try:
+                    if method == "pearson":
+                        _, p = scipy_stats.pearsonr(s1, s2)
+                    elif method == "spearman":
+                        _, p = scipy_stats.spearmanr(s1, s2)
+                    else:
+                        _, p = scipy_stats.kendalltau(s1, s2)
+                    p_values[c1][c2] = float(p)
+                except Exception as exc:
+                    logger.exception("Correlation matrix p-value calculation failed")
+                    p_values[c1][c2] = None
+    return {
+        "method": method,
+        "columns": corr.columns.tolist(),
+        "matrix": corr.round(4).where(pd.notnull(corr), None).to_dict(),
+        "p_values": p_values,
+    }
+
+
+# ── 2. POST Correlation Pair ───────────────────────────────────────────────────
+
+class CorrelationPairRequest(BaseModel):
+    session_id: str
+    var1: str
+    var2: str
+    method: Optional[str] = "auto"
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/correlation_pair")
+def correlation_pair(req: CorrelationPairRequest):
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    df = apply_imputation(df_full, [req.var1, req.var2], req.imputation or "listwise")
+    x = df[req.var1].astype(float).values
+    y = df[req.var2].astype(float).values
+    n = len(x)
+    n_excluded = n_total - n
+    if n < 3:
+        raise HTTPException(status_code=400, detail="Need at least 3 observations")
+
+    def _assess_normality(arr: np.ndarray) -> dict:
+        _n = len(arr)
+        skewness = float(scipy_stats.skew(arr))
+
+        if _n < 50:
+            stat, p_val = scipy_stats.shapiro(arr)
+            return {
+                "statistic": float(stat),
+                "p": float(p_val),
+                "normal": bool(p_val >= 0.05),
+                "skewness": skewness,
+                "test": "Shapiro-Wilk",
+                "bypass": None,
+            }
+
+        if _n <= 2000:
+            from statsmodels.stats.diagnostic import lilliefors as _lilliefors
+            stat, p_val = _lilliefors(arr, dist="norm")
+            return {
+                "statistic": float(stat),
+                "p": float(p_val),
+                "normal": bool(p_val >= 0.05),
+                "skewness": skewness,
+                "test": "Kolmogorov-Smirnov (Lilliefors)",
+                "bypass": None,
+            }
+
+        if abs(skewness) <= 1.5:
+            return {
+                "statistic": None,
+                "p": None,
+                "normal": True,
+                "skewness": skewness,
+                "test": "Skewness (CLT bypass)",
+                "bypass": "clt_skew",
+            }
+
+        from statsmodels.stats.diagnostic import lilliefors as _lilliefors
+        stat, p_val = _lilliefors(arr, dist="norm")
+        return {
+            "statistic": float(stat),
+            "p": float(p_val),
+            "normal": bool(p_val >= 0.05),
+            "skewness": skewness,
+            "test": "Kolmogorov-Smirnov (Lilliefors)",
+            "bypass": None,
+        }
+
+    norm1 = _assess_normality(x)
+    norm2 = _assess_normality(y)
+    normal1 = norm1["normal"]
+    normal2 = norm2["normal"]
+
+    _tests_used = {norm1["test"], norm2["test"]}
+    if any("Kolmogorov" in t or "Lilliefors" in t for t in _tests_used):
+        norm_test_name = "Kolmogorov-Smirnov (Lilliefors)"
+    elif "Shapiro-Wilk" in _tests_used:
+        norm_test_name = "Shapiro-Wilk"
+    else:
+        norm_test_name = "Skewness (CLT bypass)"
+
+    method = req.method or "auto"
+    if method == "auto":
+        use_pearson = normal1 and normal2
+    else:
+        use_pearson = method == "pearson"
+
+    if use_pearson:
+        r, p = scipy_stats.pearsonr(x, y)
+        method_used = "pearson"
+        label = "r"
+    else:
+        r, p = scipy_stats.spearmanr(x, y)
+        method_used = "spearman"
+        label = "ρ"
+
+    if abs(r) < 1.0:
+        z = np.arctanh(r)
+        se = 1.0 / np.sqrt(n - 3)
+        ci_low = float(np.tanh(z - 1.96 * se))
+        ci_high = float(np.tanh(z + 1.96 * se))
+    else:
+        ci_low, ci_high = float(r), float(r)
+
+    scatter_x = x.tolist()
+    scatter_y = y.tolist()
+
+    slope, intercept, *_ = scipy_stats.linregress(x, y)
+    x_line = np.linspace(x.min(), x.max(), 100)
+    y_line = slope * x_line + intercept
+
+    x_mean = x.mean()
+    ss_x = np.sum((x - x_mean) ** 2)
+    residuals = y - (slope * x + intercept)
+    s_err = np.sqrt(np.sum(residuals ** 2) / (n - 2))
+    t_crit = scipy_stats.t.ppf(0.975, df=n - 2)
+    ci_band = t_crit * s_err * np.sqrt(1 / n + (x_line - x_mean) ** 2 / ss_x)
+
+    p_str = "<0.001" if p < 0.001 else f"{p:.3f}"
+    strength = "strong" if abs(r) >= 0.7 else "moderate" if abs(r) >= 0.4 else "weak" if abs(r) >= 0.2 else "negligible"
+    direction = "positive" if r > 0 else "negative"
+
+    return {
+        "method": method_used,
+        "label": label,
+        "n": n,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation or "listwise",
+        "r": float(r),
+        "p": float(p),
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "normality_test": norm_test_name,
+        "normality": {
+            req.var1: norm1,
+            req.var2: norm2,
+        },
+        "scatter": {"x": scatter_x, "y": scatter_y},
+        "regression_line": {
+            "x": x_line.tolist(),
+            "y": y_line.tolist(),
+            "slope": float(slope),
+            "intercept": float(intercept),
+        },
+        "ci_band": {
+            "x": x_line.tolist(),
+            "y_upper": (y_line + ci_band).tolist(),
+            "y_lower": (y_line - ci_band).tolist(),
+        },
+        "result_text": (
+            f"{'Pearson' if method_used == 'pearson' else 'Spearman'} correlation analysis revealed a "
+            f"{strength} {direction} {'correlation' if p < 0.05 else 'but non-significant correlation'} "
+            f"between {req.var1} and {req.var2} ({label} = {r:.3f}, 95% CI: {ci_low:.3f}–{ci_high:.3f}, "
+            f"p = {p_str}, n = {n})."
+        ),
+    }
+
+
+# ── 3. POST Correlation Matrix ─────────────────────────────────────────────────
+
+class CorrelationMatrixRequest(BaseModel):
+    session_id: str
+    variables: List[str]
+    method: Optional[str] = "pearson"
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/correlation_matrix")
+def correlation_matrix_post(req: CorrelationMatrixRequest):
+    raw = _get_df(req.session_id)[req.variables].apply(pd.to_numeric, errors="coerce")
+    df = apply_imputation(raw, req.variables, req.imputation or "listwise")
+    if len(req.variables) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 variables")
+
+    method = req.method or "pearson"
+    corr = df.corr(method=method)
+
+    p_matrix: dict = {}
+    for c1 in req.variables:
+        p_matrix[c1] = {}
+        for c2 in req.variables:
+            if c1 == c2:
+                p_matrix[c1][c2] = None
+            else:
+                pair = df[[c1, c2]].dropna()
+                if len(pair) < 3 or pair[c1].std() == 0 or pair[c2].std() == 0:
+                    p_matrix[c1][c2] = None
+                    continue
+                try:
+                    if method == "spearman":
+                        _, pv = scipy_stats.spearmanr(pair[c1], pair[c2])
+                    elif method == "kendall":
+                        _, pv = scipy_stats.kendalltau(pair[c1], pair[c2])
+                    else:
+                        _, pv = scipy_stats.pearsonr(pair[c1], pair[c2])
+                    p_matrix[c1][c2] = float(pv)
+                except Exception as exc:
+                    logger.exception("Correlation matrix post p-value calculation failed")
+                    p_matrix[c1][c2] = None
+
+    warnings = []
+    vars_list = req.variables
+    for i in range(len(vars_list)):
+        for j in range(i + 1, len(vars_list)):
+            r_val = corr.loc[vars_list[i], vars_list[j]]
+            if abs(r_val) >= 0.70:
+                warnings.append({
+                    "var1": vars_list[i],
+                    "var2": vars_list[j],
+                    "r": float(r_val),
+                    "severity": "high" if abs(r_val) >= 0.90 else "moderate",
+                })
+
+    matrix_dict = {c: {r: (float(corr.loc[r, c]) if not pd.isna(corr.loc[r, c]) else None)
+                        for r in req.variables} for c in req.variables}
+
+    return {
+        "method": method,
+        "variables": req.variables,
+        "n": len(df),
+        "matrix": matrix_dict,
+        "p_matrix": p_matrix,
+        "multicollinearity_warnings": warnings,
+    }
+
+
+# ── 4. ICC ─────────────────────────────────────────────────────────────────────
+
+class ICCRequest(BaseModel):
+    session_id: str
+    rater1_col: str
+    rater2_col: str
+
+
+@router.post("/icc")
+def icc_endpoint(req: ICCRequest):
+    df = _get_df(req.session_id).dropna(subset=[req.rater1_col, req.rater2_col])
+    r1 = df[req.rater1_col].astype(float).values
+    r2 = df[req.rater2_col].astype(float).values
+    n = len(r1)
+    k = 2
+    if n < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 observations")
+
+    grand_mean = np.mean(np.stack([r1, r2]))
+    subject_means = (r1 + r2) / 2.0
+    rater_means = np.array([r1.mean(), r2.mean()])
+
+    SS_b = k * np.sum((subject_means - grand_mean) ** 2)
+    SS_r = n * np.sum((rater_means - grand_mean) ** 2)
+    SS_total = np.sum((r1 - grand_mean) ** 2) + np.sum((r2 - grand_mean) ** 2)
+    SS_e = SS_total - SS_b - SS_r
+
+    df_b = n - 1
+    df_r = k - 1
+    df_e = (n - 1) * (k - 1)
+
+    MS_b = SS_b / df_b
+    MS_r = SS_r / df_r if df_r > 0 else 0.0
+    MS_e = SS_e / df_e if df_e > 0 else 1e-9
+
+    icc_val = (MS_b - MS_e) / (MS_b + (k - 1) * MS_e + k * (MS_r - MS_e) / n)
+    icc_val = float(np.clip(icc_val, -1.0, 1.0))
+
+    F_lower = scipy_stats.f.ppf(0.975, df_b, df_e)
+    F_upper = scipy_stats.f.ppf(0.025, df_b, df_e)
+    F_obs = MS_b / MS_e if MS_e > 0 else 0.0
+    ci_low = float((F_obs / F_lower - 1) / (F_obs / F_lower + k - 1)) if F_lower > 0 else 0.0
+    ci_high = float((F_obs / F_upper - 1) / (F_obs / F_upper + k - 1)) if F_upper > 0 else 1.0
+    ci_low = float(np.clip(ci_low, -1.0, 1.0))
+    ci_high = float(np.clip(ci_high, -1.0, 1.0))
+
+    f_p = float(scipy_stats.f.sf(F_obs, df_b, df_e))
+
+    if icc_val >= 0.90:
+        interp = "Excellent"
+    elif icc_val >= 0.75:
+        interp = "Good"
+    elif icc_val >= 0.50:
+        interp = "Moderate"
+    else:
+        interp = "Poor"
+
+    means = ((r1 + r2) / 2).tolist()
+    diffs = (r1 - r2).tolist()
+    mean_diff = float(np.mean(r1 - r2))
+    sd_diff = float(np.std(r1 - r2, ddof=1))
+    loa_upper = mean_diff + 1.96 * sd_diff
+    loa_lower = mean_diff - 1.96 * sd_diff
+
+    return {
+        "icc": icc_val,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "f_stat": float(F_obs),
+        "f_p": f_p,
+        "n": n,
+        "interpretation": interp,
+        "bland_altman": {
+            "means": means,
+            "diffs": diffs,
+            "mean_diff": mean_diff,
+            "sd_diff": sd_diff,
+            "loa_upper": float(loa_upper),
+            "loa_lower": float(loa_lower),
+        },
+    }
+
+
+# ── 5. Cohen's Kappa ───────────────────────────────────────────────────────────
+
+class KappaRequest(BaseModel):
+    session_id: str
+    rater1_col: str
+    rater2_col: str
+
+
+@router.post("/cohens_kappa")
+def cohens_kappa(req: KappaRequest):
+    from sklearn.metrics import cohen_kappa_score, confusion_matrix as sk_confusion
+
+    df = _get_df(req.session_id).dropna(subset=[req.rater1_col, req.rater2_col])
+    r1 = df[req.rater1_col].astype(str).values
+    r2 = df[req.rater2_col].astype(str).values
+    n = len(r1)
+    if n < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 observations")
+
+    kappa = float(cohen_kappa_score(r1, r2))
+
+    labels = sorted(set(r1) | set(r2))
+    cm = sk_confusion(r1, r2, labels=labels)
+    po = float(np.trace(cm) / n)
+    row_sums = cm.sum(axis=1)
+    col_sums = cm.sum(axis=0)
+    po_denom = n ** 2
+    pe = float(np.sum(row_sums * col_sums) / po_denom) if po_denom > 0 else 0.0
+    se_denom = n * (1 - pe) ** 2
+    se = float(np.sqrt(po * (1 - po) / se_denom)) if se_denom > 0 else 0.0
+    ci_low = float(kappa - 1.96 * se)
+    ci_high = float(kappa + 1.96 * se)
+
+    if kappa >= 0.81:
+        interp = "Almost Perfect"
+    elif kappa >= 0.61:
+        interp = "Substantial"
+    elif kappa >= 0.41:
+        interp = "Moderate"
+    elif kappa >= 0.21:
+        interp = "Fair"
+    elif kappa >= 0.0:
+        interp = "Slight"
+    else:
+        interp = "Poor (< chance)"
+
+    return {
+        "kappa": kappa,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "se": se,
+        "n": n,
+        "po": po,
+        "pe": po,
+        "interpretation": interp,
+        "labels": labels,
+        "confusion_matrix": cm.tolist(),
+    }
+
+
+# ── 6. Fleiss Kappa ────────────────────────────────────────────────────────────
+
+class FleissKappaRequest(BaseModel):
+    session_id: str
+    rater_cols: List[str]
+
+
+@router.post("/fleiss_kappa")
+def fleiss_kappa_endpoint(req: FleissKappaRequest):
+    from statsmodels.stats.inter_rater import fleiss_kappa, aggregate_raters
+    if len(req.rater_cols) < 3:
+        raise HTTPException(status_code=422, detail="Fleiss κ requires ≥3 raters. Use Cohen's κ for 2 raters.")
+    df = _get_df(req.session_id).dropna(subset=req.rater_cols)
+    if len(df) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 subjects with complete ratings across all raters.")
+
+    raters = df[req.rater_cols].astype(str).values
+    table, categories = aggregate_raters(raters)
+
+    kappa = float(fleiss_kappa(table, method="fleiss"))
+    n_subjects, k_cats = table.shape
+    n_raters = int(table.sum(axis=1).mean())
+    p_j = table.sum(axis=0) / (n_subjects * n_raters)
+    p_e = float(np.sum(p_j ** 2))
+    if (1 - p_e) > 0 and n_subjects > 0 and n_raters > 1:
+        var_k = 2.0 / (n_subjects * n_raters * (n_raters - 1) * (1 - p_e) ** 2) * (
+            p_e - (2 * n_raters - 3) * p_e ** 2 + 2 * (n_raters - 2) * float(np.sum(p_j ** 3))
+        )
+        se = float(np.sqrt(max(var_k, 0.0)))
+    else:
+        se = 0.0
+    ci_low = float(kappa - 1.96 * se)
+    ci_high = float(kappa + 1.96 * se)
+
+    if kappa >= 0.81:
+        interp = "Almost Perfect"
+    elif kappa >= 0.61:
+        interp = "Substantial"
+    elif kappa >= 0.41:
+        interp = "Moderate"
+    elif kappa >= 0.21:
+        interp = "Fair"
+    elif kappa >= 0.0:
+        interp = "Slight"
+    else:
+        interp = "Poor (< chance)"
+
+    per_category = []
+    for j, cat in enumerate(categories):
+        p_j_val = float(p_j[j])
+        num = float(np.sum(table[:, j] * (table[:, j] - 1)))
+        den = float(np.sum(table.sum(axis=1) * (table.sum(axis=1) - 1)))
+        p_jbar = num / den if den > 0 else 0.0
+        if p_j_val > 0 and p_j_val < 1:
+            kj = (p_jbar - p_j_val ** 2) / (p_j_val * (1 - p_j_val))
+        else:
+            kj = None
+        per_category.append({
+            "category": str(cat),
+            "kappa": round(kj, 4) if kj is not None else None,
+            "prevalence": round(p_j_val, 4),
+        })
+
+    return {
+        "test": "Fleiss' κ",
+        "kappa": round(kappa, 4),
+        "ci_low": round(ci_low, 4),
+        "ci_high": round(ci_high, 4),
+        "se": round(se, 4),
+        "n_subjects": int(n_subjects),
+        "n_raters": int(n_raters),
+        "n_categories": int(k_cats),
+        "categories": [str(c) for c in categories],
+        "per_category": per_category,
+        "interpretation": interp,
+        "result_text": (
+            f"Fleiss' κ for {n_raters} raters on {n_subjects} subjects = {kappa:.3f} "
+            f"(95% CI {ci_low:.3f} to {ci_high:.3f}) — {interp.lower()} agreement (Landis & Koch)."
+        ),
+    }

@@ -13,6 +13,7 @@ Pure statsmodels (already a dependency). No pmdarima — the optional
 
 from __future__ import annotations
 
+import asyncio
 import math
 import warnings
 from typing import Any, Dict, List, Optional
@@ -21,6 +22,7 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from loguru import logger
 
 from services import store
 from services.impute import apply_imputation
@@ -104,8 +106,28 @@ def _fit_sarimax(y: pd.Series, order, seasonal_order):
         return model.fit(disp=False)
 
 
+def _auto_grid_search(y: pd.Series, seasonal):
+    best_aic, best, best_order = np.inf, None, None
+    for p in range(0, 3):
+        for d in range(0, 2):
+            for q in range(0, 3):
+                try:
+                    res = _fit_sarimax(y, (p, d, q), seasonal)
+                    if np.isfinite(res.aic) and res.aic < best_aic:
+                        best_aic, best, best_order = res.aic, res, (p, d, q)
+                except Exception as exc:
+                    logger.debug(
+                        "SARIMA grid candidate failed for order {} and seasonal {}: {}",
+                        (p, d, q),
+                        seasonal,
+                        exc,
+                    )
+                    continue
+    return best, best_order
+
+
 @router.post("/arima")
-def arima(req: ARIMARequest):
+async def arima(req: ARIMARequest):
     from statsmodels.stats.diagnostic import acorr_ljungbox
 
     y = _series(req.session_id, req.value_col, req.time_col, req.imputation)
@@ -115,22 +137,14 @@ def arima(req: ARIMARequest):
     grid_searched = False
     if req.auto:
         grid_searched = True
-        best_aic, best = np.inf, None
-        for p in range(0, 3):
-            for d in range(0, 2):
-                for q in range(0, 3):
-                    try:
-                        res = _fit_sarimax(y, (p, d, q), seasonal)
-                        if np.isfinite(res.aic) and res.aic < best_aic:
-                            best_aic, best, chosen_order = res.aic, res, (p, d, q)
-                    except Exception:
-                        continue
+        best, best_order = await asyncio.to_thread(_auto_grid_search, y, seasonal)
         if best is None:
             raise HTTPException(status_code=422, detail="Auto grid search failed to fit any model.")
         fit = best
+        chosen_order = best_order
     else:
         try:
-            fit = _fit_sarimax(y, chosen_order, seasonal)
+            fit = await asyncio.to_thread(_fit_sarimax, y, chosen_order, seasonal)
         except Exception as exc:
             raise HTTPException(status_code=422, detail=f"ARIMA fit failed: {exc}")
 
@@ -154,7 +168,8 @@ def arima(req: ARIMARequest):
         lag = min(10, max(1, len(resid) // 5))
         lb = acorr_ljungbox(resid, lags=[lag], return_df=True)
         lb_p = _safe(round(float(lb["lb_pvalue"].iloc[-1]), 6))
-    except Exception:
+    except Exception as exc:
+        logger.debug("Ljung-Box residual diagnostic failed: {}", exc)
         lb_p = None
 
     # In-sample fitted values
@@ -198,7 +213,7 @@ def arima(req: ARIMARequest):
             "seasonal_order": list(seasonal), "auto": grid_searched,
         })
     except Exception:
-        pass
+        logger.exception("Logging ARIMA action failed")
 
     # In-sample forecast accuracy (fitted vs observed)
     resid = (y - fitted).dropna()
@@ -290,7 +305,7 @@ def decompose(req: DecomposeRequest):
         store.log_action(req.session_id, "ts_decompose",
                          {"value_col": req.value_col, "period": period, "method": req.method})
     except Exception:
-        pass
+        logger.exception("Logging decomposition action failed")
 
     return _safe({
         "test": "Seasonal decomposition",
@@ -338,7 +353,8 @@ def stationarity(req: StationarityRequest):
         # KPSS: H0 = stationary. p < 0.05 → non-stationary.
         try:
             kpss_stat, kpss_p, *_ = kpss(y, regression="c", nlags="auto")
-        except Exception:
+        except Exception as exc:
+            logger.debug("KPSS stationarity diagnostic failed: {}", exc)
             kpss_stat, kpss_p = None, None
 
     acf_vals, acf_ci = acf(y, nlags=n_lags, alpha=0.05, fft=True)
@@ -364,7 +380,7 @@ def stationarity(req: StationarityRequest):
     try:
         store.log_action(req.session_id, "ts_stationarity", {"value_col": req.value_col})
     except Exception:
-        pass
+        logger.exception("Logging stationarity action failed")
 
     return _safe({
         "test": "Stationarity (ADF + KPSS)",

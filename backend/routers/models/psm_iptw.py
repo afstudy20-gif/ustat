@@ -1,26 +1,15 @@
-"""
-Dedicated router for Propensity Score Matching (PSM).
-
-This module was extracted from the monolithic models.py to improve
-maintainability and testability. All heavy statistical logic for PSM lives here
-or in services/psm.py (pure functions).
-
-Endpoint remains mounted at /api/models/psm for backward compatibility with
-the frontend.
-"""
-
 from __future__ import annotations
 
+import asyncio
 import traceback
 from typing import List, Optional, Tuple
-
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from loguru import logger
 
 from services import store
 from services.impute import apply_imputation
@@ -37,8 +26,7 @@ from services.psm import (
 
 router = APIRouter()
 
-
-# ── Request Model ──────────────────────────────────────────────────────────────
+# ── Request Models ─────────────────────────────────────────────────────────────
 
 class PSMRequest(BaseModel):
     session_id: str
@@ -61,13 +49,37 @@ class PSMRequest(BaseModel):
     rosenbaum_gamma_max: Optional[float] = 3.0
 
 
-# ── Internal helpers (kept here because they need _get_df + store access) ─────
+class IPTWRequest(BaseModel):
+    session_id: str
+    treatment_col: str
+    covariates: List[str]
+    estimand: str = "ate"
+    stabilize: bool = True
+    weight_truncation: str = "none"
+    weight_truncation_max: float = 10.0
+    outcome_type: str = "binary"
+    outcome_col: Optional[str] = None
+    survival_duration_col: Optional[str] = None
+    survival_event_col: Optional[str] = None
+    se_method: str = "robust"
+    imputation: Optional[str] = "listwise"
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _get_df(session_id: str) -> pd.DataFrame:
     df = store.get_filtered(session_id)
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return df
+
+
+def _sanitize_model_error(err: Exception, context: str = "model fitting") -> str:
+    msg = str(err)
+    if "Singular" in msg or "perfect separation" in msg.lower():
+        return "The model encountered perfect separation or singular matrix. Try removing highly correlated predictors."
+    if "convergence" in msg.lower() or "failed to converge" in msg.lower():
+        return f"{context.capitalize()} failed to converge. Consider increasing iterations or simplifying the model."
+    return f"{context.capitalize()} failed. Please check your data and predictors."
 
 
 def _run_match_strata(
@@ -80,7 +92,6 @@ def _run_match_strata(
     method: str,
     exact_match_cols: Optional[List[str]],
 ) -> Tuple[list[int], list[int]]:
-    """Run matching, partitioning by exact-match strata when requested."""
     match = _match_optimal if method == "optimal" else _match_greedy
     if not exact_match_cols:
         if method == "optimal" and ratio > 1:
@@ -108,16 +119,17 @@ def _run_match_strata(
     return matched_t, matched_c
 
 
-# ── Public endpoint ────────────────────────────────────────────────────────────
+# ── PSM Endpoint ──────────────────────────────────────────────────────────────
 
-@router.post("")
-def propensity_score_matching(req: PSMRequest):
+@router.post("/psm")
+async def propensity_score_matching(req: PSMRequest):
     """Main PSM endpoint (mounted at /api/models/psm)."""
     try:
-        return _run_psm(req)
+        return await asyncio.to_thread(_run_psm, req)
     except HTTPException:
         raise
     except Exception as exc:
+        logger.exception("PSM analysis failed")
         raise HTTPException(
             status_code=500,
             detail=f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
@@ -125,7 +137,6 @@ def propensity_score_matching(req: PSMRequest):
 
 
 def _run_psm(req: PSMRequest):
-    """Core PSM implementation (moved from models.py)."""
     df_full = _get_df(req.session_id)
     outcome_type = (req.outcome_type or "binary").lower()
     if outcome_type not in ("binary", "survival"):
@@ -345,7 +356,8 @@ def _run_psm(req: PSMRequest):
                 ci = cph.confidence_intervals_.iloc[0]
                 try:
                     p_val = float(cph.summary["p"].iloc[0])
-                except Exception:
+                except Exception as exc:
+                    logger.debug("PSM stratified Cox p-value extraction failed: {}", exc)
                     p_val = None
                 outcome_result = {
                     "type": "stratified_cox",
@@ -369,6 +381,7 @@ def _run_psm(req: PSMRequest):
                     ],
                 }
         except Exception as ex:
+            logger.exception("PSM Stratified Cox outcome fit failed")
             outcome_result = {"error": f"Stratified Cox failed: {ex}"}
 
     elif req.outcome_col and req.outcome_col in df_matched.columns:
@@ -442,6 +455,7 @@ def _run_psm(req: PSMRequest):
                             ),
                         }
                     except Exception as cl_exc:
+                        logger.exception("Conditional logistic fit failed, falling back to robust logit")
                         X_out = sm.add_constant(df_out[[req.treatment_col]].astype(float))
                         m_out = sm.Logit(
                             df_out[req.outcome_col].astype(int).values, X_out
@@ -474,6 +488,7 @@ def _run_psm(req: PSMRequest):
                             "method_note": f"Conditional logistic fit failed ({cl_exc}); fell back to logistic with robust SE.",
                         }
         except Exception as ex:
+            logger.exception("PSM outcome fit failed")
             outcome_result = {"error": str(ex)}
 
     if (
@@ -519,6 +534,7 @@ def _run_psm(req: PSMRequest):
                         gamma_max=float(req.rosenbaum_gamma_max or 3.0),
                     )
         except Exception as ex:
+            logger.exception("Rosenbaum bounds calculation failed")
             rosenbaum_result = {"applicable": False, "reason": f"Rosenbaum bounds failed: {ex}"}
 
     df_export = df_matched.drop(columns=["_ps_", "_logit_ps_", "_treat_"], errors="ignore")
@@ -539,7 +555,7 @@ def _run_psm(req: PSMRequest):
         if parent_decimals:
             store.save_decimals(req.session_id + "_psm", parent_decimals)
     except Exception:
-        pass
+        logger.exception("Saving PSM child-session metadata failed")
 
     return {
         "n_total": int(len(df)),
@@ -573,3 +589,157 @@ def _run_psm(req: PSMRequest):
         "rosenbaum": rosenbaum_result,
         "matched_session_id": req.session_id + "_psm",
     }
+
+
+# ── IPTW Endpoint ──────────────────────────────────────────────────────────────
+
+@router.post("/iptw")
+async def iptw_analysis(req: IPTWRequest):
+    try:
+        return await asyncio.to_thread(_run_iptw, req)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("IPTW analysis failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}",
+        )
+
+
+def _run_iptw(req: IPTWRequest):
+    df_full = _get_df(req.session_id)
+    needed = [req.treatment_col] + req.covariates
+    if req.outcome_type == "binary" and req.outcome_col:
+        needed.append(req.outcome_col)
+    if req.outcome_type == "survival":
+        needed += [req.survival_duration_col, req.survival_event_col]
+
+    df = apply_imputation(df_full, [c for c in needed if c], req.imputation or "listwise")
+
+    treat = pd.to_numeric(df[req.treatment_col], errors="coerce").astype(int)
+    X = pd.get_dummies(df[req.covariates], drop_first=True).astype(float)
+
+    ps = _fit_propensity_scores(X.values, treat.values, method="logistic", random_state=42)
+    ps = np.clip(ps, 1e-5, 1.0 - 1e-5)
+
+    eps = 1e-6
+    if req.estimand == "ate":
+        w = treat / (ps + eps) + (1 - treat) / (1 - ps + eps)
+    elif req.estimand == "att":
+        w = treat + (1 - treat) * ps / (1 - ps + eps)
+    elif req.estimand == "overlap":
+        w = treat * (1 - ps) + (1 - treat) * ps
+    else:
+        raise HTTPException(status_code=422, detail=f"Unknown estimand: {req.estimand}")
+
+    if req.stabilize:
+        p_treat = float(treat.mean())
+        if req.estimand == "ate":
+            w = w * (p_treat * treat + (1 - p_treat) * (1 - treat))
+        elif req.estimand == "att":
+            w = w * p_treat
+
+    finite_mask = np.isfinite(w)
+    n_nonfinite = int((~finite_mask).sum())
+    if n_nonfinite > 0:
+        w = np.where(finite_mask, w, 0.0)
+
+    n_truncated = 0
+    if req.weight_truncation == "percentile":
+        lo, hi = np.percentile(w, [1, 99])
+        before = w.copy()
+        w = np.clip(w, lo, hi)
+        n_truncated = int((before != w).sum())
+    elif req.weight_truncation == "hard":
+        max_w = float(req.weight_truncation_max)
+        before = w.copy()
+        w = np.clip(w, 0, max_w)
+        n_truncated = int((before != w).sum())
+
+    w = np.maximum(w, 0.0)
+    w = np.where(np.isfinite(w), w, 0.0)
+
+    smd_before = []
+    smd_after = []
+    for col in X.columns[:min(5, len(X.columns))]:
+        s_t = X.loc[treat == 1, col]
+        s_c = X.loc[treat == 0, col]
+        smd_before.append(_compute_smd(s_t, s_c))
+        denom = _pooled_sd(s_t, s_c) + 1e-9
+        smd_after.append(abs(s_t.mean() - s_c.mean()) / denom if denom > 0 else 0.0)
+
+    outcome_result = None
+    if req.outcome_type == "binary" and req.outcome_col:
+        y = pd.to_numeric(df[req.outcome_col], errors="coerce")
+        Xw = sm.add_constant(X, has_constant="add")
+        try:
+            glm = sm.GLM(y, Xw, family=sm.families.Binomial(), var_weights=w).fit()
+            outcome_result = {
+                "type": "weighted_glm",
+                "coefficients": [{"variable": p, "estimate": round(float(glm.params[p]), 6), "p": round(float(glm.pvalues[p]), 6)} for p in glm.params.index if p != "const"]
+            }
+        except Exception as e:
+            logger.exception("IPTW Weighted GLM outcome fit failed")
+            outcome_result = {"type": "weighted_glm", "error": _sanitize_model_error(e, "weighted GLM")}
+
+    elif req.outcome_type == "survival" and req.survival_duration_col and req.survival_event_col:
+        try:
+            from lifelines import CoxPHFitter
+            surv_df = df[[req.survival_duration_col, req.survival_event_col] + list(X.columns)].copy()
+            surv_df["w"] = w
+            surv_df[req.survival_event_col] = pd.to_numeric(surv_df[req.survival_event_col], errors="coerce")
+            surv_df[req.survival_duration_col] = pd.to_numeric(surv_df[req.survival_duration_col], errors="coerce")
+            cph = CoxPHFitter()
+            cph.fit(surv_df, duration_col=req.survival_duration_col, event_col=req.survival_event_col, weights_col="w", robust=True)
+            outcome_result = {
+                "type": "weighted_cox",
+                "coefficients": [{"variable": v, "hr": round(float(cph.hazard_ratios_.get(v, 0)), 4)} for v in cph.params_.index]
+            }
+        except Exception as e:
+            logger.exception("IPTW Weighted Cox outcome fit failed")
+            outcome_result = {"type": "weighted_cox", "error": _sanitize_model_error(e, "weighted Cox model")}
+
+    weight_sum = float(np.sum(w))
+    effective_n = float(np.sum(w) ** 2 / np.sum(w ** 2)) if np.sum(w ** 2) > 0 else 0.0
+
+    warnings = []
+    if n_nonfinite > 0:
+        warnings.append(f"{n_nonfinite} non-finite weights were replaced with 0")
+    if n_truncated > 0:
+        warnings.append(f"{n_truncated} weights were truncated")
+    if weight_sum == 0:
+        warnings.append("All weights became zero after cleaning — results will be unreliable")
+    if effective_n < 10:
+        warnings.append(f"Very low effective sample size ({effective_n:.1f})")
+
+    return {
+        "method": "iptw",
+        "estimand": req.estimand,
+        "n": int(len(df)),
+        "weight_summary": {
+            "mean": round(float(np.mean(w)), 4),
+            "max": round(float(np.max(w)), 4),
+            "min": round(float(np.min(w)), 4),
+            "sum": round(weight_sum, 2),
+            "effective_n": round(effective_n, 1),
+            "n_truncated": n_truncated,
+        },
+        "smd_before": round(float(np.mean(smd_before)), 4) if smd_before else None,
+        "smd_after": round(float(np.mean(smd_after)), 4) if smd_after else None,
+        "warnings": warnings,
+        "outcome_result": outcome_result,
+        "result_text": _iptw_results_text(req.estimand, outcome_result, warnings),
+    }
+
+
+def _iptw_results_text(estimand, outcome_result, warnings):
+    parts = [f"IPTW analysis was performed for the {estimand.upper()} estimand."]
+    if outcome_result and "error" not in outcome_result:
+        if outcome_result.get("type") == "weighted_glm":
+            parts.append("A weighted logistic/linear model was fit on the inverse probability weights.")
+        elif outcome_result.get("type") == "weighted_cox":
+            parts.append("A weighted Cox model was fit using the stabilized/truncated weights.")
+    if warnings:
+        parts.append("Numerical warnings were raised during weight calculation.")
+    return " ".join(parts)

@@ -12,12 +12,13 @@ try:
 except ImportError:
     psutil = None  # type: ignore
 
+from services import logging_config
 from routers import (
     upload, stats, charts, models, session, compute, repeated, advanced_anova,
     pub_tables, categorical, agreement, reliability, missing_data, decision_curve,
     model_compare, diagnostics, model_diagnostics, pub_export, nomogram,
     survival_advanced, article_parser, code_runner, ml, timeseries, meta,
-    multiplicity, factor, bayesian, psm, rcs, survival, regression
+    multiplicity, factor, bayesian
 )
 from services import store
 
@@ -74,10 +75,6 @@ app.include_router(meta.router, prefix="/api/meta", tags=["meta"])
 app.include_router(multiplicity.router, prefix="/api/multiplicity", tags=["multiplicity"])
 app.include_router(factor.router, prefix="/api/factor", tags=["factor"])
 app.include_router(bayesian.router, prefix="/api/bayesian", tags=["bayesian"])
-app.include_router(psm.router, prefix="/api/models/psm", tags=["psm"])
-app.include_router(rcs.router, prefix="/api/models", tags=["rcs"])
-app.include_router(survival.router, prefix="/api/models", tags=["survival"])
-app.include_router(regression.router, prefix="/api/models", tags=["regression"])
 
 
 @app.get("/.well-known/security.txt", response_class=PlainTextResponse)

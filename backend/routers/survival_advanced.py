@@ -489,14 +489,13 @@ def fine_gray(req: FineGrayRequest):
          "detail": "Fine-Gray sHR has direct interpretation for cumulative incidence but is not a cause-specific hazard ratio."},
     ]
 
+    n_total = len(work)
     warnings = []
     n_event_interest = int((events == req.event_of_interest).sum())
     if n_event_interest < 20:
         warnings.append(f"Only {n_event_interest} events of interest — Fine-Gray estimates may be unstable.")
     if n_total < 100:
         warnings.append("Small overall sample size for competing risks analysis.")
-
-    n_total = len(work)
     result_text = (
         f"Competing risks analysis was performed on {n_total} subjects. "
         f"The cumulative incidence function (CIF) was estimated using the Aalen-Johansen estimator "
@@ -2427,7 +2426,7 @@ def shared_frailty(req: FrailtyRequest):
             },
         }
     }
-    if result.get("correlated_frailty", {}).get("pairs"):
+    if result.get("correlated_frailty") and result["correlated_frailty"].get("pairs"):
         pairs = result["correlated_frailty"]["pairs"]
         result["diagnostic_plots"]["correlated_frailty_scatter"] = {
             "data": [{

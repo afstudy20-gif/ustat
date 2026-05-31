@@ -1,28 +1,29 @@
-"""
-RCS Router — Restricted Cubic Splines (univariate + multivariable Cox-RCS).
-
-This module owns:
-- POST /rcs                 (univariate RCS for linear / logistic / Cox)
-- POST /survival/cox_rcs    (multivariable Cox with 1-2 RCS terms + optional RCS×RCS interaction)
-
-Fully self-contained after extraction from the old monolithic models.py.
-"""
-
 from __future__ import annotations
 
-from typing import List, Optional
-
+import asyncio
+from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from loguru import logger
 from scipy.stats import chi2
 
-from lifelines import CoxPHFitter
+from lifelines import KaplanMeierFitter, CoxPHFitter
+from lifelines.statistics import logrank_test, multivariate_logrank_test
 
 from services import store
 from services.impute import apply_imputation
+from services.assumptions import (
+    check_cox_assumptions_from_ph_test,
+    add_assumption_warnings_to_result,
+)
+from services.missing_data import (
+    mice_multiple,
+    pool_cox_results,
+    missing_pattern_summary,
+    add_missing_data_diagnostics,
+)
 from services.rcs_basis import (
     KNOT_PERCENTILES as _KNOT_PERCENTILES,
     rcs_basis as _rcs_basis,
@@ -31,8 +32,22 @@ from services.rcs_basis import (
 
 router = APIRouter()
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
-# ── Local helpers ──────────────────────────────────────────────────────────────
+def _safe_float(v) -> Optional[float]:
+    """Return float or None for inf/nan values that aren't JSON-serializable."""
+    try:
+        f = float(v)
+        if np.isfinite(f):
+            return f
+        return None
+    except (TypeError, ValueError):
+        return None
+
+
+def _clean(arr):
+    return [_safe_float(v) for v in arr]
+
 
 def _get_df(session_id: str) -> pd.DataFrame:
     df = store.get_filtered(session_id)
@@ -41,23 +56,413 @@ def _get_df(session_id: str) -> pd.DataFrame:
     return df
 
 
-def _ns(v):
-    if v is None:
+def _km_fit_groups(df: pd.DataFrame, duration_col: str, event_col: str, group_col: Optional[str]) -> list:
+    groups = df[group_col].unique() if group_col else [None]
+    results = []
+    for grp in groups:
+        subset = df[df[group_col] == grp] if group_col else df
+        kmf = KaplanMeierFitter()
+        try:
+            kmf.fit(
+                subset[duration_col].astype(float),
+                subset[event_col].astype(int),
+                label=str(grp) if grp is not None else "All",
+            )
+        except Exception as exc:
+            logger.exception("KM fitting failed")
+            raise HTTPException(status_code=400, detail=f"KM fitting error: {exc}")
+        sf = kmf.survival_function_.reset_index()
+        sf.columns = ["time", "survival"]
+        curve = [
+            {"time": _safe_float(row["time"]), "survival": _safe_float(row["survival"])}
+            for _, row in sf.iterrows()
+        ]
+        results.append({
+            "group": str(grp) if grp is not None else "All",
+            "n": int(len(subset)),
+            "events": int(subset[event_col].sum()),
+            "median_survival": _safe_float(kmf.median_survival_time_),
+            "curve": curve,
+        })
+    return results
+
+
+def _km_logrank(df: pd.DataFrame, duration_col: str, event_col: str, group_col: str) -> Optional[dict]:
+    groups = df[group_col].unique()
+    if len(groups) < 2:
         return None
     try:
-        fv = float(v)
-    except (TypeError, ValueError):
+        if len(groups) == 2:
+            g0 = df[df[group_col] == groups[0]]
+            g1 = df[df[group_col] == groups[1]]
+            lr = logrank_test(
+                g0[duration_col], g1[duration_col],
+                event_observed_A=g0[event_col].astype(int),
+                event_observed_B=g1[event_col].astype(int),
+            )
+            return {"test": "Log-rank", "p": _safe_float(lr.p_value)}
+        else:
+            lr = multivariate_logrank_test(df[duration_col], df[group_col], df[event_col].astype(int))
+            return {"test": "Log-rank (multivariate)", "p": _safe_float(lr.p_value)}
+    except Exception:
+        logger.exception("KM logrank test failed")
         return None
-    if np.isnan(fv) or np.isinf(fv):
-        return None
-    return round(fv, 4)
 
 
-def _clean(arr):
-    return [_ns(v) for v in arr]
+def _compute_vif(X: pd.DataFrame) -> dict:
+    """Variance Inflation Factor per column."""
+    from statsmodels.stats.outliers_influence import variance_inflation_factor
+    Xn = X.copy().astype(float)
+    if "const" in Xn.columns:
+        Xn = Xn.drop(columns=["const"])
+    if Xn.shape[1] < 2:
+        return {c: 1.0 for c in Xn.columns}
+    arr = Xn.values
+    out: dict = {}
+    for i, col in enumerate(Xn.columns):
+        try:
+            v = float(variance_inflation_factor(arr, i))
+            if not np.isfinite(v):
+                v = None
+        except Exception:
+            logger.exception("VIF calculation failed in Cox router")
+            v = None
+        out[str(col)] = v
+    return out
 
 
-# ── Pydantic Models ────────────────────────────────────────────────────────────
+# ── Kaplan-Meier ───────────────────────────────────────────────────────────────
+
+class KMRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    group_col: Optional[str] = None
+    stratify_col: Optional[str] = None
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/survival/km")
+def kaplan_meier(req: KMRequest):
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+
+    df_full = df_full.copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
+
+    km_cols = [req.duration_col, req.event_col]
+    df = apply_imputation(df_full, km_cols, req.imputation)
+    n_excluded = n_total - len(df)
+
+    if len(df) == 0:
+        raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric. Check that both columns contain numbers.")
+
+    event_vals = sorted(df[req.event_col].dropna().unique())
+    if set(event_vals) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1 (0=censored, 1=event). Found: {event_vals[:10]}")
+
+    if (df[req.duration_col] < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values. All durations must be ≥ 0.")
+
+    if req.stratify_col:
+        if req.stratify_col not in df_full.columns:
+            raise HTTPException(status_code=422, detail=f"Stratify column '{req.stratify_col}' not found.")
+        strata_vals = sorted(df[req.stratify_col].dropna().unique(), key=lambda x: (isinstance(x, str), x))
+        strata_out = []
+        for sv in strata_vals:
+            sub = df[df[req.stratify_col] == sv].copy()
+            if len(sub) == 0:
+                continue
+            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col)
+            lr = _km_logrank(sub, req.duration_col, req.event_col, req.group_col) if req.group_col else None
+            strata_out.append({"label": str(sv), "n": int(len(sub)), "groups": grp_results, "logrank": lr})
+        return {
+            "model": "Kaplan-Meier",
+            "strata": strata_out,
+            "stratify_col": req.stratify_col,
+            "n_total": n_total,
+            "n_excluded": n_excluded,
+            "imputation": req.imputation,
+        }
+
+    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col)
+    logrank = _km_logrank(df, req.duration_col, req.event_col, req.group_col) if req.group_col else None
+
+    return {
+        "model": "Kaplan-Meier",
+        "groups": results,
+        "logrank": logrank,
+        "n_total": n_total,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation,
+    }
+
+
+# ── Cox Proportional Hazards ───────────────────────────────────────────────────
+
+class CoxRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predictors: List[str]
+    imputation: Optional[str] = "listwise"
+    interactions: Optional[List[List[str]]] = None
+
+
+@router.post("/survival/cox")
+async def cox_regression(req: CoxRequest):
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+
+    df_full = df_full.copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
+
+    cox_cols = [req.duration_col, req.event_col] + req.predictors
+    imputation_method = req.imputation or "listwise"
+    use_mice_pooled = False
+
+    if imputation_method == "mice":
+        imp_result = mice_multiple(df_full, cox_cols, n_imputations=5)
+        imputed_dfs = imp_result.imputed_datasets
+
+        individual_results = []
+        for df_imp in imputed_dfs:
+            try:
+                cph_imp = CoxPHFitter()
+                await asyncio.to_thread(cph_imp.fit, df_imp[cox_cols], duration_col=req.duration_col, event_col=req.event_col)
+                loghrs = {var: float(np.log(cph_imp.hazard_ratios_.get(var, 1.0))) for var in req.predictors}
+                individual_results.append({"coefficients": loghrs})
+            except Exception:
+                logger.exception("Cox fit failed for one imputation step")
+                continue
+
+        pooled = pool_cox_results(individual_results) if individual_results else {}
+
+        df = imputed_dfs[0]
+        n_excluded = n_total - len(df)
+        use_mice_pooled = True
+    else:
+        df = apply_imputation(df_full, cox_cols, imputation_method)
+        n_excluded = n_total - len(df)
+        use_mice_pooled = False
+    if len(df) == 0:
+        raise HTTPException(status_code=400, detail="No valid rows after coercing duration/event columns to numeric.")
+
+    event_vals = sorted(df[req.event_col].dropna().unique())
+    if set(event_vals) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {event_vals[:10]}")
+    if (df[req.duration_col] < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
+
+    pred_raw = df[req.predictors].copy()
+    numeric_pred: list[str] = []
+    cat_pred: list[str] = []
+    for c in req.predictors:
+        col = pred_raw[c]
+        if pd.api.types.is_numeric_dtype(col):
+            numeric_pred.append(c)
+        else:
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= 0.8 and len(coerced.dropna().unique()) > 2:
+                pred_raw[c] = coerced
+                numeric_pred.append(c)
+            else:
+                cat_pred.append(c)
+
+    num_part = pred_raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=pred_raw.index)
+    cat_part = pd.get_dummies(pred_raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=pred_raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1).astype(float)
+
+    interaction_cols: list[str] = []
+    if req.interactions:
+        def _members(name: str) -> list[str]:
+            if name in enc.columns:
+                return [name]
+            prefix = f"{name}_"
+            return [c for c in enc.columns if c.startswith(prefix)]
+
+        for pair in req.interactions:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise HTTPException(status_code=422, detail=f"Each interaction must be a [colA, colB] pair. Got: {pair}")
+            a_members = _members(pair[0])
+            b_members = _members(pair[1])
+            if not a_members or not b_members:
+                raise HTTPException(status_code=422, detail=f"Interaction '{pair[0]} × {pair[1]}': one or both columns are not in the predictor list.")
+            for a in a_members:
+                for b in b_members:
+                    new_col = f"{a}:{b}"
+                    enc[new_col] = enc[a] * enc[b]
+                    interaction_cols.append(new_col)
+
+    fit_df = pd.concat([df[[req.duration_col, req.event_col]], enc], axis=1).dropna()
+    if len(fit_df) < 10:
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows after encoding (need ≥ 10, got {len(fit_df)}).")
+
+    cph = CoxPHFitter()
+    try:
+        await asyncio.to_thread(cph.fit, fit_df, duration_col=req.duration_col, event_col=req.event_col)
+    except Exception as exc:
+        logger.exception("Cox fitting failed")
+        raise HTTPException(status_code=400, detail=f"Cox fitting error: {exc}")
+
+    summary = cph.summary.reset_index()
+    vifs = _compute_vif(enc)
+    coefs = []
+    for _, row in summary.iterrows():
+        name = str(row["covariate"])
+        coefs.append({
+            "variable": name,
+            "log_hr": _safe_float(row["coef"]),
+            "hr": _safe_float(row["exp(coef)"]),
+            "se": _safe_float(row["se(coef)"]),
+            "z": _safe_float(row["z"]),
+            "p": _safe_float(row["p"]),
+            "hr_ci_low": _safe_float(row["exp(coef) lower 95%"]),
+            "hr_ci_high": _safe_float(row["exp(coef) upper 95%"]),
+            "vif": vifs.get(name),
+        })
+
+    ph_test = None
+    try:
+        from lifelines.statistics import proportional_hazard_test
+        ph_res = proportional_hazard_test(cph, fit_df, time_transform="rank")
+        ph_summary = ph_res.summary.reset_index() if hasattr(ph_res.summary, "reset_index") else ph_res.summary
+        per_term = []
+        for _, row in ph_summary.iterrows():
+            per_term.append({
+                "variable": str(row.get("index", row.get("covariate", ""))),
+                "test_stat": _safe_float(row.get("test_statistic")),
+                "p": _safe_float(row.get("p")),
+            })
+        from scipy.stats import chi2 as _chi2
+        chi_vals = [t["test_stat"] for t in per_term if t["test_stat"] is not None]
+        if chi_vals:
+            global_chi = float(sum(chi_vals))
+            global_df = len(chi_vals)
+            global_p = float(1 - _chi2.cdf(global_chi, global_df)) if global_df > 0 else None
+        else:
+            global_chi, global_df, global_p = None, None, None
+        ph_test = {"global": {"chi2": global_chi, "df": global_df, "p": global_p}, "per_term": per_term}
+    except Exception as exc:
+        logger.exception("Proportional hazards test failed")
+        ph_test = {"error": str(exc)}
+
+    result = {
+        "model": "Cox Proportional Hazards",
+        "n": int(cph.event_observed.sum()),
+        "n_total": n_total,
+        "n_excluded": n_excluded,
+        "imputation": req.imputation,
+        "log_likelihood": _safe_float(cph.log_likelihood_),
+        "concordance": _safe_float(cph.concordance_index_),
+        "coefficients": coefs,
+        "interactions_used": interaction_cols,
+        "ph_test": ph_test,
+    }
+
+    if use_mice_pooled and 'pooled' in locals() and pooled:
+        result["coefficients"] = pooled.get("coefficients", result.get("coefficients", []))
+        result["pooled_from_imputations"] = True
+        result["imputation"] = "mice (pooled)"
+
+    cox_assumption_report = check_cox_assumptions_from_ph_test(ph_test)
+    result = add_assumption_warnings_to_result(result, cox_assumption_report)
+
+    missing_info = missing_pattern_summary(df_full, cox_cols)
+    result = add_missing_data_diagnostics(result, missing_info)
+
+    return result
+
+
+# ── Cox with time-varying covariates ───────────────────────────────────────────
+
+class CoxTVRequest(BaseModel):
+    session_id: str
+    id_col: str
+    start_col: str
+    stop_col: str
+    event_col: str
+    predictors: List[str]
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/survival/cox_tv")
+async def cox_time_varying(req: CoxTVRequest):
+    from lifelines import CoxTimeVaryingFitter
+
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    cols = [req.id_col, req.start_col, req.stop_col, req.event_col] + req.predictors
+    missing = [c for c in cols if c not in df_full.columns]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Columns not found: {missing}")
+    df = apply_imputation(df_full, cols, req.imputation or "listwise")
+
+    for c in [req.start_col, req.stop_col]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df[req.event_col] = pd.to_numeric(df[req.event_col], errors="coerce")
+    df = df.dropna(subset=[req.start_col, req.stop_col, req.event_col, req.id_col])
+    if len(df) < 10:
+        raise HTTPException(status_code=400, detail="Need ≥10 valid (subject, interval) rows.")
+    if (df[req.stop_col] <= df[req.start_col]).any():
+        raise HTTPException(status_code=422, detail="Found rows with stop ≤ start; each interval must have stop > start.")
+    if set(df[req.event_col].unique()) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail="Event column must be 0/1.")
+    n_excluded = n_total - len(df)
+
+    enc = pd.get_dummies(df[req.predictors], drop_first=True).astype(float)
+    if enc.shape[1] == 0:
+        raise HTTPException(status_code=422, detail="No usable predictor columns after encoding.")
+    fit_df = pd.concat([df[[req.id_col, req.start_col, req.stop_col, req.event_col]], enc], axis=1)
+
+    ctv = CoxTimeVaryingFitter()
+    try:
+        await asyncio.to_thread(ctv.fit, fit_df, id_col=req.id_col, start_col=req.start_col, stop_col=req.stop_col, event_col=req.event_col)
+    except Exception as exc:
+        logger.exception("Cox-TV fitting failed")
+        raise HTTPException(status_code=400, detail=f"Cox-TV fitting failed: {exc}")
+
+    summary = ctv.summary.reset_index()
+    vifs = _compute_vif(enc)
+    coefs = []
+    for _, row in summary.iterrows():
+        name = str(row["covariate"])
+        coefs.append({
+            "variable": name,
+            "log_hr": _safe_float(row["coef"]),
+            "hr": _safe_float(row["exp(coef)"]),
+            "se": _safe_float(row["se(coef)"]),
+            "z": _safe_float(row["z"]),
+            "p": _safe_float(row["p"]),
+            "hr_ci_low": _safe_float(row["exp(coef) lower 95%"]),
+            "hr_ci_high": _safe_float(row["exp(coef) upper 95%"]),
+            "vif": vifs.get(name),
+        })
+
+    n_subjects = int(df[req.id_col].nunique())
+    n_events = int(df[req.event_col].sum())
+    return {
+        "model": "Cox Proportional Hazards (time-varying covariates)",
+        "n_intervals": int(len(df)),
+        "n_subjects": n_subjects,
+        "n_events": n_events,
+        "n_total": int(n_total),
+        "n_excluded": int(n_excluded),
+        "imputation": req.imputation or "listwise",
+        "log_likelihood": _safe_float(ctv.log_likelihood_),
+        "concordance": _safe_float(getattr(ctv, "concordance_index_", None)),
+        "coefficients": coefs,
+        "result_text": (
+            f"Cox regression with time-varying covariates on {n_subjects} subjects "
+            f"({len(df)} interval rows, {n_events} events; {n_excluded} excluded). "
+            f"Predictors: {', '.join(req.predictors)}."
+        ),
+    }
+
+
+# ── Restricted Cubic Splines (RCS) ───────────────────────────────────────────
 
 class RCSRequest(BaseModel):
     session_id: str
@@ -74,28 +479,9 @@ class RCSRequest(BaseModel):
     interaction_covariates: Optional[List[str]] = None
 
 
-class SplineTerm(BaseModel):
-    column: str
-    n_knots: int = 4
-    knot_positions: Optional[List[float]] = None
-    ref_value: Optional[float] = None
-
-
-class CoxRCSRequest(BaseModel):
-    session_id: str
-    duration_col: str
-    event_col: str
-    spline_terms: List[SplineTerm]
-    covariates: List[str] = []
-    include_interaction: bool = False
-    imputation: Optional[str] = "listwise"
-    grid_size: int = 50
-
-
-# ── Univariate RCS Endpoint ────────────────────────────────────────────────────
-
 @router.post("/rcs")
-def rcs_regression(req: RCSRequest):
+async def rcs_regression(req: RCSRequest):
+    import statsmodels.api as sm_api
     if req.n_knots not in _KNOT_PERCENTILES:
         raise HTTPException(status_code=422, detail=f"n_knots must be 3, 4, or 5. Got: {req.n_knots}")
 
@@ -153,7 +539,7 @@ def rcs_regression(req: RCSRequest):
     df = df.dropna()
     n = len(df)
     if n < 10:
-        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need ≥ 10). Got {n} after dropping rows with missing predictor / outcome / covariates (total available: {n_total}).")
+        raise HTTPException(status_code=400, detail=f"Not enough complete rows (need ≥ 10). Got {n} after dropping rows with missing predictor / outcome / covariates.")
 
     x_raw = df[req.predictor].values.astype(float)
 
@@ -168,13 +554,13 @@ def rcs_regression(req: RCSRequest):
             raise HTTPException(status_code=422, detail=f"duration_col '{req.duration_col}' must be ≥ 0.")
         unique_e = sorted(set(event.tolist()))
         if set(unique_e) - {0.0, 1.0}:
-            raise HTTPException(status_code=422, detail=f"event_col '{req.event_col}' must be binary 0/1. Found: {unique_e[:10]}")
+            raise HTTPException(status_code=422, detail=f"event_col '{req.event_col}' must be binary 0/1.")
     else:
         y = df[req.outcome].values.astype(float)
         if model_type == "logistic":
             unique_y = sorted(set(y.tolist()))
             if set(unique_y) - {0.0, 1.0}:
-                raise HTTPException(status_code=422, detail=f"Logistic RCS requires binary 0/1 outcome. Found: {unique_y[:10]}")
+                raise HTTPException(status_code=422, detail=f"Logistic RCS requires binary 0/1 outcome.")
 
     try:
         knots = _resolve_knots(x_raw, req.n_knots, req.knot_positions, req.predictor)
@@ -235,7 +621,7 @@ def rcs_regression(req: RCSRequest):
             fit_df["_dur_"] = duration
             fit_df["_evt_"] = event
             cph = CoxPHFitter()
-            cph.fit(fit_df, duration_col="_dur_", event_col="_evt_")
+            await asyncio.to_thread(cph.fit, fit_df, duration_col="_dur_", event_col="_evt_")
             design_cols = feat_cols + cov_names + interaction_extra_names
             params = cph.params_.reindex(design_cols).values
             cov_params = cph.variance_matrix_.reindex(index=design_cols, columns=design_cols).values
@@ -257,9 +643,9 @@ def rcs_regression(req: RCSRequest):
                 X_parts.append(interaction_mat)
             X = np.column_stack(X_parts)
             if model_type == "logistic":
-                result = sm.Logit(y, X).fit(disp=0, maxiter=200)
+                result = await asyncio.to_thread(lambda: sm_api.Logit(y, X).fit(disp=0, maxiter=200))
             else:
-                result = sm.OLS(y, X).fit()
+                result = await asyncio.to_thread(lambda: sm_api.OLS(y, X).fit())
             params = result.params
             cov_params = result.cov_params()
             try:
@@ -274,6 +660,7 @@ def rcs_regression(req: RCSRequest):
             concordance = None
             n_events = int(y.sum()) if model_type == "logistic" else None
     except Exception as exc:
+        logger.exception("RCS Model fitting failed")
         raise HTTPException(status_code=400, detail=f"Model fitting error: {exc}")
 
     interaction_result = None
@@ -282,7 +669,7 @@ def rcs_regression(req: RCSRequest):
             if is_cox:
                 reduced_df = fit_df.drop(columns=interaction_extra_names)
                 cph_red = CoxPHFitter()
-                cph_red.fit(reduced_df, duration_col="_dur_", event_col="_evt_")
+                await asyncio.to_thread(cph_red.fit, reduced_df, duration_col="_dur_", event_col="_evt_")
                 ll_red = float(cph_red.log_likelihood_)
                 ll_full = float(log_lik)
             else:
@@ -291,9 +678,9 @@ def rcs_regression(req: RCSRequest):
                     X_red_parts.append(cov_mat)
                 X_red = np.column_stack(X_red_parts)
                 if model_type == "logistic":
-                    res_red = sm.Logit(y, X_red).fit(disp=0, maxiter=200)
+                    res_red = await asyncio.to_thread(lambda: sm_api.Logit(y, X_red).fit(disp=0, maxiter=200))
                 else:
-                    res_red = sm.OLS(y, X_red).fit()
+                    res_red = await asyncio.to_thread(lambda: sm_api.OLS(y, X_red).fit())
                 ll_red = float(getattr(res_red, "llf", np.nan))
                 ll_full = float(log_lik) if log_lik is not None else float(getattr(result, "llf", np.nan))
             lr_stat = 2.0 * (ll_full - ll_red)
@@ -308,6 +695,7 @@ def rcs_regression(req: RCSRequest):
                 "log_lik_reduced": round(ll_red, 4),
             }
         except Exception as exc:
+            logger.exception("RCS Interaction LR test failed")
             interaction_result = {"covariates": interaction_cov_names, "error": str(exc)}
 
     x_lo, x_hi = float(np.percentile(x_raw, 1)), float(np.percentile(x_raw, 99))
@@ -395,7 +783,7 @@ def rcs_regression(req: RCSRequest):
             nonlin_df = df_nl
             nonlin_p = round(float(chi2.sf(wald, df=df_nl)), 6)
     except Exception:
-        pass
+        logger.exception("Nonlinearity test failed")
 
     crude_block = None
     if cov_names or interaction_extra_names:
@@ -410,7 +798,7 @@ def rcs_regression(req: RCSRequest):
                 fit_df_c["_dur_"] = duration
                 fit_df_c["_evt_"] = event
                 cph_c = CoxPHFitter()
-                cph_c.fit(fit_df_c, duration_col="_dur_", event_col="_evt_")
+                await asyncio.to_thread(cph_c.fit, fit_df_c, duration_col="_dur_", event_col="_evt_")
                 design_cols_c = feat_cols_c
                 params_c = cph_c.params_.reindex(design_cols_c).values
                 cov_params_c = cph_c.variance_matrix_.reindex(index=design_cols_c, columns=design_cols_c).values
@@ -419,9 +807,9 @@ def rcs_regression(req: RCSRequest):
                 X_parts_c = [np.ones(n), x_raw, spline_cols]
                 X_c = np.column_stack(X_parts_c)
                 if model_type == "logistic":
-                    res_c = sm.Logit(y, X_c).fit(disp=0, maxiter=200)
+                    res_c = await asyncio.to_thread(lambda: sm_api.Logit(y, X_c).fit(disp=0, maxiter=200))
                 else:
-                    res_c = sm.OLS(y, X_c).fit()
+                    res_c = await asyncio.to_thread(lambda: sm_api.OLS(y, X_c).fit())
                 params_c = res_c.params
                 cov_params_c = res_c.cov_params()
                 X_syn_c = np.column_stack([np.ones(200), x_syn, sp_syn])
@@ -452,7 +840,7 @@ def rcs_regression(req: RCSRequest):
                 w_c = float(beta_nl_c @ np.linalg.solve(cov_nl_c, beta_nl_c))
                 crude_nl_p = round(float(chi2.sf(w_c, df=int(len(idx_c)))), 6)
             except Exception:
-                pass
+                logger.exception("Crude RCS nonlinearity test failed")
 
             crude_block = {
                 "x_values": _clean(x_syn),
@@ -462,6 +850,7 @@ def rcs_regression(req: RCSRequest):
                 "nonlinearity_p": crude_nl_p,
             }
         except Exception:
+            logger.exception("Crude RCS fit failed")
             crude_block = None
 
     return {
@@ -479,9 +868,9 @@ def rcs_regression(req: RCSRequest):
         "knots": [round(float(kn), 2) for kn in knots],
         "knot_positions_custom": req.knot_positions is not None,
         "ref_value": round(ref_val, 4),
-        "aic": _ns(aic_val),
-        "log_likelihood": _ns(log_lik),
-        "concordance": _ns(concordance),
+        "aic": _safe_float(aic_val),
+        "log_likelihood": _safe_float(log_lik),
+        "concordance": _safe_float(concordance),
         "covariates_requested": list(req.covariates or []),
         "covariates_used": cov_names,
         "covariates_summary": cov_summary,
@@ -501,8 +890,26 @@ def rcs_regression(req: RCSRequest):
 
 # ── Multivariable Cox-RCS Endpoint ─────────────────────────────────────────────
 
+class SplineTerm(BaseModel):
+    column: str
+    n_knots: int = 4
+    knot_positions: Optional[List[float]] = None
+    ref_value: Optional[float] = None
+
+
+class CoxRCSRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    spline_terms: List[SplineTerm]
+    covariates: List[str] = []
+    include_interaction: bool = False
+    imputation: Optional[str] = "listwise"
+    grid_size: int = 50
+
+
 @router.post("/survival/cox_rcs")
-def cox_rcs(req: CoxRCSRequest):
+async def cox_rcs(req: CoxRCSRequest):
     if not (1 <= len(req.spline_terms) <= 2):
         raise HTTPException(status_code=422, detail="spline_terms must contain 1 or 2 entries.")
 
@@ -623,8 +1030,9 @@ def cox_rcs(req: CoxRCSRequest):
 
     try:
         cph_full = CoxPHFitter()
-        cph_full.fit(full_df, duration_col="_dur_", event_col="_evt_")
+        await asyncio.to_thread(cph_full.fit, full_df, duration_col="_dur_", event_col="_evt_")
     except Exception as exc:
+        logger.exception("Cox-RCS fitting failed")
         raise HTTPException(status_code=400, detail=f"Cox-RCS fitting error: {exc}")
 
     params_full = cph_full.params_.reindex(full_names).values
@@ -634,7 +1042,7 @@ def cox_rcs(req: CoxRCSRequest):
     try:
         p_full = cph_full.summary["p"].reindex(full_names).values
     except Exception:
-        pass
+        logger.exception("Cox-RCS p-value extraction failed")
     ci_low_full = cph_full.confidence_intervals_.iloc[:, 0].reindex(full_names).values
     ci_high_full = cph_full.confidence_intervals_.iloc[:, 1].reindex(full_names).values
     log_lik_full = float(cph_full.log_likelihood_)
@@ -668,6 +1076,7 @@ def cox_rcs(req: CoxRCSRequest):
             wald = float(b @ np.linalg.solve(cv, b))
             p_nl = float(chi2.sf(wald, df=len(idx)))
         except Exception:
+            logger.exception("Cox-RCS nonlinearity Wald test failed")
             wald = None
             p_nl = None
         nonlinearity[term.column] = {
@@ -682,7 +1091,7 @@ def cox_rcs(req: CoxRCSRequest):
         reduced_df = full_df[reduced_names + ["_dur_", "_evt_"]].copy()
         try:
             cph_red = CoxPHFitter()
-            cph_red.fit(reduced_df, duration_col="_dur_", event_col="_evt_")
+            await asyncio.to_thread(cph_red.fit, reduced_df, duration_col="_dur_", event_col="_evt_")
             ll_red = float(cph_red.log_likelihood_)
             lr_stat = 2.0 * (log_lik_full - ll_red)
             df_lr = len(interaction_names)
@@ -695,6 +1104,7 @@ def cox_rcs(req: CoxRCSRequest):
                 "log_lik_reduced": ll_red,
             }
         except Exception as exc:
+            logger.exception("Cox-RCS interaction LR test failed")
             interaction_result = {"error": f"interaction LR fit failed: {exc}"}
 
     curves_1d = []
@@ -736,7 +1146,6 @@ def cox_rcs(req: CoxRCSRequest):
         lp_syn = main_syn @ params_full
 
         own_ref = term_info[ti]["ref_value"]
-        ref_row = np.zeros_like(main_syn[0])
         ref_idx_syn = int(np.argmin(np.abs(x_syn - own_ref)))
         ref_row = main_syn[ref_idx_syn].copy()
 
@@ -748,19 +1157,12 @@ def cox_rcs(req: CoxRCSRequest):
         ci_low = np.exp(rel_lp - 1.96 * se_lp)
         ci_high = np.exp(rel_lp + 1.96 * se_lp)
 
-        def _cln(arr):
-            out = []
-            for v in arr:
-                fv = float(v)
-                out.append(None if (np.isnan(fv) or np.isinf(fv)) else round(fv, 4))
-            return out
-
         curves_1d.append({
             "column": term.column,
-            "x": _cln(x_syn),
-            "hr": _cln(hr),
-            "lower": _cln(ci_low),
-            "upper": _cln(ci_high),
+            "x": _clean(x_syn),
+            "hr": _clean(hr),
+            "lower": _clean(ci_low),
+            "upper": _clean(ci_high),
             "knots": [round(float(k), 2) for k in term_info[ti]["knots"]],
             "ref": round(float(own_ref), 4),
         })
@@ -815,7 +1217,7 @@ def cox_rcs(req: CoxRCSRequest):
             "y": [round(float(v), 4) for v in b_grid],
             "hr": _gclean(hr_grid),
             "ref": {term_info[0]["column"]: round(float(ref_a), 4),
-                    term_info[1]["column"]: round(float(ref_b), 4)},
+                      term_info[1]["column"]: round(float(ref_b), 4)},
         }
 
     aic_partial = None
@@ -824,7 +1226,7 @@ def cox_rcs(req: CoxRCSRequest):
         if np.isnan(aic_partial):
             aic_partial = None
     except Exception:
-        aic_partial = None
+        logger.exception("Cox-RCS partial AIC extraction failed")
 
     return {
         "n": int(n),
