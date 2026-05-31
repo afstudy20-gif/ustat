@@ -11,6 +11,8 @@ venv/
 dist/
 build/
 .pytest_cache/
+.coverage
+htmlcov/
 *.pyc
 
 # Node / frontend
