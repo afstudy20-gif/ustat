@@ -1608,17 +1608,22 @@ class JointModelRequest(BaseModel):
     session_id_surv: Optional[str] = None   # if None, assume same session
     id_col: str = "id"
     time_col: str = "time"
-    y_col: str = "Y"
+    y_cols: List[str] = ["Y"]
     long_predictors: List[str] = []
     surv_predictors: List[str] = []
     duration_col: str = "duration"
     event_col: str = "event"
+    association: List[str] = ["value"]
+    time_spline: bool = False
+    latent_classes: int = 0
 
 
 @router.post("/joint_model")
 def joint_model(req: JointModelRequest):
     """
-    Two-stage joint longitudinal-survival model (Phase 8).
+    Advanced Two-stage joint longitudinal-survival model (Phase 8 Enhanced).
+    Supports time-varying counting-process association, multivariate longitudinal,
+    and joint latent class modeling.
     """
     long_df = _get_df(req.session_id_long)
 
@@ -1627,24 +1632,49 @@ def joint_model(req: JointModelRequest):
     else:
         surv_df = long_df  # fallback (user should provide proper survival data)
 
-    from services.joint_model import fit_two_stage_joint_model
-    result = fit_two_stage_joint_model(
-        long_df,
-        surv_df,
-        id_col=req.id_col,
-        time_col=req.time_col,
-        y_col=req.y_col,
-        long_predictors=req.long_predictors or [],
-        surv_predictors=req.surv_predictors or [],
-        duration_col=req.duration_col,
-        event_col=req.event_col,
-    )
+    if req.latent_classes > 0:
+        from services.joint_model import fit_latent_class_joint_model
+        result = fit_latent_class_joint_model(
+            long_df,
+            surv_df,
+            id_col=req.id_col,
+            time_col=req.time_col,
+            y_cols=req.y_cols,
+            long_predictors=req.long_predictors or [],
+            surv_predictors=req.surv_predictors or [],
+            duration_col=req.duration_col,
+            event_col=req.event_col,
+            latent_classes=req.latent_classes
+        )
+        result["test"] = "Joint Latent Class Model (Phase 8 Enhanced)"
+        result["result_text"] = (
+            f"Joint latent class model fitted on {result['n_subjects']} subjects "
+            f"with {result['n_classes']} classes. "
+            f"AIC: {result['aic']}, BIC: {result['bic']}."
+        )
+    else:
+        from services.joint_model import fit_time_varying_joint_model
+        result = fit_time_varying_joint_model(
+            long_df,
+            surv_df,
+            id_col=req.id_col,
+            time_col=req.time_col,
+            y_cols=req.y_cols,
+            long_predictors=req.long_predictors or [],
+            surv_predictors=req.surv_predictors or [],
+            duration_col=req.duration_col,
+            event_col=req.event_col,
+            association=req.association,
+            time_spline=req.time_spline
+        )
+        result["test"] = "Time-Varying Joint Model (Phase 8 Enhanced)"
+        assoc_str = ", ".join(req.association)
+        result["result_text"] = (
+            f"Time-varying joint model fitted on {result['n_subjects']} subjects. "
+            f"Association structures: {assoc_str}. "
+            f"AIC: {result['aic']}, BIC: {result['bic']}."
+        )
 
-    result["test"] = "Joint Longitudinal-Survival Model (Two-Stage, Phase 8)"
-    result["result_text"] = (
-        f"Two-stage joint model fitted on {result['n_subjects']} subjects. "
-        "Random effects from longitudinal LMM used as predictors in Cox model."
-    )
     return result
 
 
@@ -1709,6 +1739,15 @@ class SurvivalMLBenchmarkRequest(BaseModel):
     event_col: str = "event"
     predictors: Optional[List[str]] = None
     n_estimators: int = 300
+    nested_cv: bool = False
+    repeated_cv_repeats: int = 1
+    cv_folds: int = 5
+    inner_cv_folds: int = 3
+    hyperparameter_iter: int = 12
+    include_shap: bool = False
+    include_partial_dependence: bool = True
+    include_competing_risks_ml: bool = False
+    optimization_method: str = "random"  # random | bayesian
 
 
 @router.post("/ml_survival_benchmark")
@@ -1728,9 +1767,18 @@ def ml_survival_benchmark(req: SurvivalMLBenchmarkRequest):
         event_col=req.event_col,
         predictors=preds,
         n_estimators=req.n_estimators,
+        nested_cv=req.nested_cv,
+        repeated_cv_repeats=req.repeated_cv_repeats,
+        cv_folds=req.cv_folds,
+        inner_cv_folds=req.inner_cv_folds,
+        hyperparameter_iter=req.hyperparameter_iter,
+        include_shap=req.include_shap,
+        include_partial_dependence=req.include_partial_dependence,
+        include_competing_risks_ml=req.include_competing_risks_ml,
+        optimization_method=req.optimization_method,
     )
 
-    result["test"] = "Survival ML Benchmark (Phase 12 - deepened)"
+    result["test"] = "Survival ML Benchmark (Phase 13 - nested CV, calibration, interpretability)"
     # Prefer the rich result_text produced by the service (Phase 12)
     if not result.get("result_text"):
         result["result_text"] = (
