@@ -14,7 +14,7 @@
  * - Full export support
  */
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runDCA } from "../api";
@@ -34,7 +34,11 @@ interface DcaResult {
 }
 
 export default function DecisionCurvePanel() {
-  const { session, columns } = useStore();
+  const session = useStore((s) => s.session);
+  // Columns live under session in the store; there is no top-level `columns`.
+  // Reading a non-existent top-level field returned undefined and crashed the
+  // tab on mount (`columns.filter` → "Cannot read properties of undefined").
+  const columns = session?.columns ?? [];
   const sid = session?.session_id;
 
   const [mode, setMode] = useState<"binary" | "survival">("survival");
@@ -54,7 +58,9 @@ export default function DecisionCurvePanel() {
   const [error, setError] = useState<string | null>(null);
 
   const numericCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const binaryCols = columns.filter((c) => c.kind === "binary" || c.kind === "numeric").map((c) => c.name);
+  // Binary outcome can be a 0/1 numeric or a 2-level categorical column.
+  const binaryCols = columns.filter((c) => c.kind === "categorical" || c.kind === "numeric").map((c) => c.name);
+  const dcaPlotRef = useRef<any>(null);
 
   const canRun = sid && (
     (mode === "binary" && probCol && outcomeCol) ||
@@ -390,7 +396,7 @@ export default function DecisionCurvePanel() {
             <Tip text="DCA answers: at which decision thresholds does using this model improve patient outcomes compared with treating everyone or no one?" />
           </div>
         }
-        center={
+        middle={
           result && plotData.length > 0 ? (
             <div>
               <div className="flex items-center justify-between mb-2 px-1">
@@ -398,9 +404,11 @@ export default function DecisionCurvePanel() {
                   <div className="text-sm font-semibold text-gray-800">Net Benefit Curves</div>
                   <div className="text-[11px] text-gray-500 -mt-0.5">Green = model provides clinical value over alternatives</div>
                 </div>
-                <PlotExporter filename="decision_curve" />
+                <PlotExporter plotRef={dcaPlotRef} title="decision_curve" />
               </div>
-              <Plot data={plotData} layout={buildLayout()} style={{ width: "100%", height: 440 }} />
+              <div className="relative" ref={dcaPlotRef}>
+                <Plot data={plotData} layout={buildLayout()} style={{ width: "100%", height: 440 }} />
+              </div>
             </div>
           ) : (
             <div className="h-[420px] flex items-center justify-center text-gray-400 border border-dashed rounded-2xl">
@@ -474,7 +482,7 @@ export default function DecisionCurvePanel() {
               )}
 
               <div className="pt-2">
-                <ResultExporter result={result} defaultName="decision_curve_analysis" />
+                <ResultExporter title="decision_curve_analysis" plotRef={dcaPlotRef} />
               </div>
             </div>
           ) : (

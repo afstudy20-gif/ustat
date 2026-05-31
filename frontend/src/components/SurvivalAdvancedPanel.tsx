@@ -169,6 +169,7 @@ export default function SurvivalAdvancedPanel() {
   const traceDefaults = useTraceDefaults();
 
   const fgPlotRef = useRef<any>(null);
+  const dcaPlotRef = useRef<any>(null);
   const lmPlotRef = useRef<any>(null);
 
   // Fine-Gray state
@@ -1573,8 +1574,9 @@ export default function SurvivalAdvancedPanel() {
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-semibold text-gray-600">Net Benefit Curves</span>
-                <PlotExporter filename="decision_curve" />
+                <PlotExporter plotRef={dcaPlotRef} title="decision_curve" />
               </div>
+              <div className="relative" ref={dcaPlotRef}>
               <Plot
                 data={[
                   {
@@ -1612,6 +1614,7 @@ export default function SurvivalAdvancedPanel() {
                 }}
                 style={{ width: "100%" }}
               />
+              </div>
             </div>
 
             {/* Result text + Assumptions / Warnings */}
@@ -1636,7 +1639,7 @@ export default function SurvivalAdvancedPanel() {
               </div>
             )}
 
-            <ResultExporter result={dcaResult} defaultName="decision_curve" />
+            <ResultExporter title="decision_curve" plotRef={dcaPlotRef} />
           </div>
         )}
       </Section>

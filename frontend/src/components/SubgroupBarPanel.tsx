@@ -177,6 +177,7 @@ export default function SubgroupBarPanel() {
     barWidth,
     referenceLine,
     sortBars,
+    barPattern,
   }) : null;
 
   // Layout Configuration
@@ -218,7 +219,7 @@ export default function SubgroupBarPanel() {
   // Alternating background colors for outer subgroups (visual hierarchy)
   if (plotData && showSubgroupBackgrounds && plotData.subgroups) {
     const subgroupCount = plotData.subgroups.length;
-    plotData.subgroups.forEach((sg: string, idx: number) => {
+    plotData.subgroups.forEach((_sg: string, idx: number) => {
       if (idx % 2 === 0) {
         // Light alternating background
         shapes.push({
@@ -790,6 +791,7 @@ function buildPlotlyTraces(
     barWidth?: number;
     referenceLine?: number | null;
     sortBars?: "none" | "value-desc" | "value-asc";
+    barPattern?: "none" | "stripes" | "dots";
   } = {}
 ) {
   if (!plotData || !plotData.traces || !session) return [];
@@ -798,7 +800,8 @@ function buildPlotlyTraces(
     showValueLabels = true, 
     showSampleSizes = true, 
     barWidth = 0.6,
-    sortBars = "none"
+    sortBars = "none",
+    barPattern = "none"
   } = options;
 
   let tracesData = [...plotData.traces];

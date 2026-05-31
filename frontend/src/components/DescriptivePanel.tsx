@@ -5,7 +5,6 @@ import api from "../api";
 import Plot from "../PlotComponent";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
-import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -161,15 +160,8 @@ const BASE_LAYOUT = {
 
 // ── Main chart for numeric columns ──────────────────────────────────────────
 
-const CHART_TABS = [
-  { id: "histogram", label: "Histogram" },
-  { id: "boxplot",   label: "Box Plot" },
-  { id: "violin",    label: "Violin" },
-  { id: "qq",        label: "Q-Q Plot" },
-] as const;
 function NumericView({ summary, loadSummary, selected }: { summary: any; loadSummary: (col: string) => void; selected: string }) {
   const chartTab = useStore((s) => s.descriptiveTab);
-  const setChartTab = useStore((s) => s.setDescriptiveTab);
   const showGrid = useStore((s) => s.showGrid);
   const pal = usePalette();
   const plotRef = useRef<any>(null);
@@ -783,19 +775,6 @@ export default function DescriptivePanel() {
   const chartTab = useStore((s) => s.descriptiveTab);
   const setChartTab = useStore((s) => s.setDescriptiveTab);
 
-  // For Scatter companions: which distribution plot to show next to scatter
-  const [scatterCompanionType, setScatterCompanionType] = useState<"histogram" | "boxplot" | "violin" | "qq">("histogram");
-  const [scatterCompanionData, setScatterCompanionData] = useState<any>(null);
-  const [scatterCompanionLoading, setScatterCompanionLoading] = useState(false);
-
-  // Resizable plot area from the right (for Summary tab graphs)
-  const { w: plotWidth, onDragStart: onPlotResizeStart, onReset: resetPlotWidth } = useResizableRightCol(
-    "summary-plot",
-    920,   // initial width
-    520,   // min
-    1400   // max
-  );
-
   // Dedicated resizer for Scatter Plot tab (divider on the RIGHT edge of the plot area)
   // Drag right → scatter grows (correct direction)
   const [scatterPlotWidth, setScatterPlotWidth] = useState(() => {
@@ -872,15 +851,6 @@ export default function DescriptivePanel() {
       localStorage.setItem("uStat.scatterLeftW", String(scatterLeftWidth));
     } catch {}
   }, [onScatterLeftResizeMove, scatterLeftWidth]);
-
-  const startScatterLeftResize = (e: React.PointerEvent) => {
-    e.preventDefault();
-    scatterLeftResizeRef.current = { startX: e.clientX, startW: scatterLeftWidth };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    document.addEventListener("pointermove", onScatterLeftResizeMove);
-    document.addEventListener("pointerup", onScatterLeftResizeUp);
-  };
 
   // 2D resizable container for the main Distribution plot (user wants red drag lines on right + bottom)
   const [distPlotW, setDistPlotW] = useState(() => {
