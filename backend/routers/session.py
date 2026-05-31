@@ -139,7 +139,7 @@ async def reorder_columns(session_id: str, body: ReorderColumnsRequest):
 @router.get("/{session_id}/export")
 async def export_dataset(
     session_id: str,
-    fmt: str = Query("csv", regex="^(csv|tsv|xlsx|sav)$"),
+    fmt: str = Query("csv", pattern="^(csv|tsv|xlsx|sav)$"),
     filename: str = Query("data"),
     col_kinds: str = Query("{}"),   # JSON: {"colName": "numeric"|"categorical"|"boolean"|"text"}
 ):

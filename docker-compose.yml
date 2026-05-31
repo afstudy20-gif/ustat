@@ -1,0 +1,58 @@
+version: "3.8"
+
+# Optimized for Coolify deployments
+services:
+  ustat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Coolify usually handles port mapping via its proxy. 
+    # You can expose it if you want direct access.
+    ports:
+      - "8000:8000"
+    environment:
+      # === Core Configuration ===
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://your-domain.com,http://localhost:5173}
+      - SECURITY_CONTACT_EMAIL=${SECURITY_CONTACT_EMAIL:-security@your-domain.com}
+
+      # === Code Runner Sandbox (Security Critical) ===
+      # Keep disabled (0) in production unless you explicitly need user code execution.
+      - ENABLE_CODE_RUNNER=${ENABLE_CODE_RUNNER:-0}
+
+      # Sandbox resource limits - tune these in Coolify environment variables
+      - SANDBOX_MEM_BYTES=${SANDBOX_MEM_BYTES:-536870912}       # 512MB default
+      - SANDBOX_CPU_SEC=${SANDBOX_CPU_SEC:-30}
+      - SANDBOX_FSIZE_BYTES=${SANDBOX_FSIZE_BYTES:-10485760}    # 10MB
+      - SANDBOX_NOFILE=${SANDBOX_NOFILE:-64}
+      - SANDBOX_NPROC=${SANDBOX_NPROC:-32}
+
+      # Rate limiting for the code runner
+      - CODE_RUNNER_PER_MIN=${CODE_RUNNER_PER_MIN:-6}
+      - CODE_RUNNER_PER_HOUR=${CODE_RUNNER_PER_HOUR:-30}
+      - CODE_RUNNER_MAX_CONCURRENT=${CODE_RUNNER_MAX_CONCURRENT:-2}
+
+      # === Security Headers ===
+      - CSP_ENFORCE=${CSP_ENFORCE:-0}   # Set to 1 after testing in production
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+    # Recommended: Set resource limits directly in Coolify UI under "Resources"
+    # instead of hardcoding here, so you can adjust without code changes.
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 1G
+
+    # Only add volumes if you need persistent code runner logs
+    # volumes:
+    #   - ustat-logs:/app/backend/logs
+
+# volumes:
+#   ustat-logs:

@@ -169,23 +169,68 @@ The frontend `Code` tab will then appear; before that, it is hidden by the
 
 ## Self-hosting
 
-A `Dockerfile` and `render.yaml` ship in the repo root. The production
-instance runs on Render's free plan.
+uSTAT is designed to be easy to self-host with Docker.
+
+### Recommended: Coolify (Self-hosted PaaS)
+
+The project is currently deployed on **Coolify**.
+
+**Recommended Coolify settings:**
+
+- **Project Type**: Docker Compose (recommended) or plain Dockerfile
+- **Compose File**: Use the `docker-compose.yml` in the repo root
+- **Health Check**: `/api/health`
+- **Port**: 8000 (Coolify's proxy will handle external access)
+
+**Important Environment Variables** (set these in Coolify → Environment Variables):
+
+```env
+CORS_ALLOWED_ORIGINS=https://your-domain.com,http://localhost:5173
+SECURITY_CONTACT_EMAIL=security@your-domain.com
+ENABLE_CODE_RUNNER=0
+CSP_ENFORCE=1
+```
+
+**Resource Recommendations** (in Coolify UI under Resources):
+- CPU: 1–2 cores
+- Memory: 512MB – 1GB (the app is quite lightweight)
+- Only increase if you enable the code runner sandbox heavily
+
+**Update Strategy**:
+- Push to `main` → Coolify should automatically rebuild and deploy (if Git integration is set up).
+- For manual deploys, use the "Deploy" button in the Coolify service dashboard.
+
+A `.env.example` file is included in the repository to help with variable names.
+
+### Quick local / manual Docker
 
 ```bash
 docker build -t ustat .
-docker run -p 8000:8000 ustat
+docker run -p 8000:8000 \
+  -e CORS_ALLOWED_ORIGINS="http://localhost:5173" \
+  -e ENABLE_CODE_RUNNER=0 \
+  ustat
 ```
 
-Optional production env vars (see [SECURITY.md](backend/SECURITY.md) for the
-full table):
+### Environment Variables
+
+See [`backend/SECURITY.md`](backend/SECURITY.md) for the full list of available variables (especially sandbox limits and rate limiting).
+
+Key variables:
+
+| Variable                    | Default     | Recommendation for production      |
+|----------------------------|-------------|------------------------------------|
+| `ENABLE_CODE_RUNNER`       | `0`         | `0` (keep disabled unless needed)  |
+| `CSP_ENFORCE`              | `0`         | `1`                                |
+| `CORS_ALLOWED_ORIGINS`     | (dev + prod domain) | Set to your actual domains     |
+| `SECURITY_CONTACT_EMAIL`   | ...         | Your security email                |
 
 ```bash
-ENABLE_CODE_RUNNER=0           # default — keep the runner off in production
-CSP_ENFORCE=0                  # flip to 1 after a week of report-only telemetry
-CODE_RUNNER_PER_MIN=2          # if you ever flip the runner on, tighten limits
+# Example hardened production values
+ENABLE_CODE_RUNNER=0
+CSP_ENFORCE=1
+CODE_RUNNER_PER_MIN=2
 CODE_RUNNER_MAX_CONCURRENT=1
-SECURITY_CONTACT_EMAIL=...     # overrides the default in /.well-known/security.txt
 ```
 
 ---

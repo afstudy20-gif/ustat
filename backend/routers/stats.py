@@ -42,9 +42,11 @@ def _sanitize(obj):
 router = APIRouter()
 
 
-def _get_df(session_id: str) -> pd.DataFrame:
+def _get_df(session_id: str, *, allow_missing: bool = False) -> pd.DataFrame | None:
     df = store.get_filtered(session_id)
     if df is None:
+        if allow_missing:
+            return None
         raise HTTPException(status_code=404, detail="Session not found")
     return df
 
@@ -57,7 +59,9 @@ def get_missing(session_id: str, columns: str = Query("")):
     Return per-column missing counts and total rows affected for the given
     comma-separated list of column names.
     """
-    df = _get_df(session_id)
+    df = _get_df(session_id, allow_missing=True)
+    if df is None:
+        return {"columns": [], "total_rows": 0}
     cols = [c.strip() for c in columns.split(",") if c.strip() and c.strip() in df.columns]
     if not cols:
         cols = df.columns.tolist()
@@ -1315,7 +1319,9 @@ def roc_combined(req: ROCCombinedRequest):
 
 @router.get("/{session_id}/sparklines")
 def get_sparklines(session_id: str):
-    df = _get_df(session_id)
+    df = _get_df(session_id, allow_missing=True)
+    if df is None:
+        return {}
     result = {}
     for col in df.columns:
         s = df[col].dropna()
