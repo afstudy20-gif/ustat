@@ -808,6 +808,47 @@ export default function DescriptivePanel() {
     1400   // max
   );
 
+  // For Scatter view: width of the left panel containing the 4 distribution plots (user wants them on the LEFT of the scatter)
+  const [scatterLeftWidth, setScatterLeftWidth] = useState(() => {
+    if (typeof window !== "undefined") {
+      const v = parseInt(localStorage.getItem("uStat.scatterLeftW") || "380", 10);
+      return Math.max(280, Math.min(700, v || 380));
+    }
+    return 380;
+  });
+
+  const scatterLeftResizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  const onScatterLeftResizeMove = useCallback((e: PointerEvent) => {
+    const d = scatterLeftResizeRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    const next = Math.max(280, Math.min(700, d.startW + dx));
+    setScatterLeftWidth(next);
+  }, []);
+
+  const onScatterLeftResizeUp = useCallback(() => {
+    const d = scatterLeftResizeRef.current;
+    if (!d) return;
+    scatterLeftResizeRef.current = null;
+    document.removeEventListener("pointermove", onScatterLeftResizeMove);
+    document.removeEventListener("pointerup", onScatterLeftResizeUp);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    try {
+      localStorage.setItem("uStat.scatterLeftW", String(scatterLeftWidth));
+    } catch {}
+  }, [onScatterLeftResizeMove, scatterLeftWidth]);
+
+  const startScatterLeftResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    scatterLeftResizeRef.current = { startX: e.clientX, startW: scatterLeftWidth };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", onScatterLeftResizeMove);
+    document.addEventListener("pointerup", onScatterLeftResizeUp);
+  };
+
   // 2D resizable container for the main Distribution plot (user wants red drag lines on right + bottom)
   const [distPlotW, setDistPlotW] = useState(() => {
     if (typeof window !== "undefined") {
@@ -1021,38 +1062,19 @@ export default function DescriptivePanel() {
           ))}
         </div>
 
-        {/* ── Scatter view: main scatter on left + 4 distribution plots (Hist/Box/Violin/QQ) on right, no extra "Distribution" title ── */}
+        {/* ── Scatter view: 4 distribution plots (Hist/Box/Violin/QQ) on the LEFT of the scatter, red draggable divider, no extra "Distribution" title ── */}
         {view === "scatter" && (
           <div className="flex h-full" style={{ minWidth: 0 }}>
-            {/* LEFT: Main scatter plot (resizable width) */}
+            {/* LEFT: The 4 plots (Histogram, Box, Violin, Q-Q) on the left of the scatter plot */}
             <div
-              className="flex-shrink-0 min-h-0 overflow-hidden border-r border-gray-200"
-              style={{ width: `${plotWidth}px` }}
+              className="flex-shrink-0 min-h-0 overflow-hidden bg-gray-50 p-2 border-r border-gray-200"
+              style={{ width: `${scatterLeftWidth}px` }}
             >
-              <ScatterView
-                key={session.session_id}
-                sessionId={session.session_id}
-                numCols={numCols}
-                catCols={catCols}
-                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
-              />
-            </div>
-
-            {/* Red vertical resize line (drag to change scatter width, right side gets the 4 plots) */}
-            <div
-              onPointerDown={onPlotResizeStart}
-              onDoubleClick={resetPlotWidth}
-              className="w-[5px] cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 transition-colors z-10 flex-shrink-0"
-              title="Drag red line to resize scatter vs the 4 plots • Double-click to reset"
-            />
-
-            {/* RIGHT: The 4 plots (Histogram, Box, Violin, Q-Q) placed beside the scatter - no "Distribution" heading */}
-            <div className="flex-1 flex flex-col min-w-0 bg-gray-50 p-3 overflow-auto">
               {summary && summary.type === "numeric" ? (
-                <div className="grid grid-cols-2 grid-rows-2 gap-3 h-full">
+                <div className="grid grid-cols-2 grid-rows-2 gap-2 h-full">
                   {/* Histogram */}
                   <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Histogram</div>
+                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Histogram</div>
                     <div className="flex-1 p-1">
                       <Plot
                         data={[{
@@ -1061,7 +1083,7 @@ export default function DescriptivePanel() {
                           type: "bar",
                           marker: { color: "#6366f1" },
                         }]}
-                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
+                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
                         style={{ width: "100%", height: "100%" }}
                         useResizeHandler
                       />
@@ -1070,7 +1092,7 @@ export default function DescriptivePanel() {
 
                   {/* Box Plot */}
                   <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Box Plot</div>
+                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Box Plot</div>
                     <div className="flex-1 p-1">
                       <Plot
                         data={[{
@@ -1080,7 +1102,7 @@ export default function DescriptivePanel() {
                           boxpoints: "outliers",
                           marker: { color: "#6366f1" },
                         }]}
-                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false }}
+                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
                         style={{ width: "100%", height: "100%" }}
                         useResizeHandler
                       />
@@ -1089,7 +1111,7 @@ export default function DescriptivePanel() {
 
                   {/* Violin */}
                   <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Violin</div>
+                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Violin</div>
                     <div className="flex-1 p-1">
                       <Plot
                         data={[{
@@ -1099,7 +1121,7 @@ export default function DescriptivePanel() {
                           box: { visible: true },
                           meanline: { visible: true },
                         }]}
-                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false }}
+                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
                         style={{ width: "100%", height: "100%" }}
                         useResizeHandler
                       />
@@ -1108,7 +1130,7 @@ export default function DescriptivePanel() {
 
                   {/* Q-Q Plot */}
                   <div className="flex flex-col border bg-white rounded overflow-hidden">
-                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Q-Q Plot</div>
+                    <div className="text-[9px] font-semibold px-1.5 py-0.5 border-b bg-gray-100 flex-shrink-0">Q-Q Plot</div>
                     <div className="flex-1 p-1">
                       <Plot
                         data={[
@@ -1127,7 +1149,7 @@ export default function DescriptivePanel() {
                             line: { color: "#ef4444", dash: "dash" },
                           },
                         ]}
-                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false, title: { text: "Normality", font: { size: 10 } } }}
+                        layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
                         style={{ width: "100%", height: "100%" }}
                         useResizeHandler
                       />
@@ -1135,10 +1157,29 @@ export default function DescriptivePanel() {
                   </div>
                 </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
-                  Select a numeric column from the list to see the four plots here
+                <div className="flex h-full items-center justify-center text-gray-400 text-xs">
+                  Select numeric column
                 </div>
               )}
+            </div>
+
+            {/* Red vertical draggable line - between the left 4 plots and the scatter */}
+            <div
+              onPointerDown={startScatterLeftResize}
+              onDoubleClick={() => setScatterLeftWidth(380)}
+              className="w-[6px] cursor-col-resize bg-red-500/80 hover:bg-red-600 active:bg-red-700 transition-colors z-10 flex-shrink-0"
+              title="Drag this red line to resize (left: 4 plots, right: scatter) • Double-click to reset"
+            />
+
+            {/* RIGHT: Main Scatter Plot */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <ScatterView
+                key={session.session_id}
+                sessionId={session.session_id}
+                numCols={numCols}
+                catCols={catCols}
+                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
+              />
             </div>
           </div>
         )}
