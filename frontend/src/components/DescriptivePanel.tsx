@@ -796,6 +796,51 @@ export default function DescriptivePanel() {
     1400   // max
   );
 
+  // Dedicated resizer for Scatter Plot tab (divider on the RIGHT edge of the plot area)
+  // Drag right → scatter grows (correct direction)
+  const [scatterPlotWidth, setScatterPlotWidth] = useState(() => {
+    if (typeof window !== "undefined") {
+      const v = parseInt(localStorage.getItem("uStat.scatterPlotW") || "920", 10);
+      return Math.max(520, Math.min(1400, v || 920));
+    }
+    return 920;
+  });
+
+  const scatterPlotResizeRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  const onScatterPlotResizeMove = useCallback((e: PointerEvent) => {
+    const d = scatterPlotResizeRef.current;
+    if (!d) return;
+    const dx = e.clientX - d.startX;
+    // Divider is on the RIGHT edge → positive dx (drag right) must GROW the width
+    const next = Math.max(520, Math.min(1400, d.startW + dx));
+    setScatterPlotWidth(next);
+  }, []);
+
+  const onScatterPlotResizeUp = useCallback(() => {
+    const d = scatterPlotResizeRef.current;
+    if (!d) return;
+    scatterPlotResizeRef.current = null;
+    document.removeEventListener("pointermove", onScatterPlotResizeMove);
+    document.removeEventListener("pointerup", onScatterPlotResizeUp);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    try {
+      localStorage.setItem("uStat.scatterPlotW", String(scatterPlotWidth));
+    } catch {}
+  }, [onScatterPlotResizeMove, scatterPlotWidth]);
+
+  const startScatterPlotResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    scatterPlotResizeRef.current = { startX: e.clientX, startW: scatterPlotWidth };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", onScatterPlotResizeMove);
+    document.addEventListener("pointerup", onScatterPlotResizeUp);
+  };
+
+  const resetScatterPlotWidth = () => setScatterPlotWidth(920);
+
   // For Scatter view: width of the left panel containing the 4 distribution plots (user wants them on the LEFT of the scatter)
   const [scatterLeftWidth, setScatterLeftWidth] = useState(() => {
     if (typeof window !== "undefined") {
@@ -1068,7 +1113,7 @@ export default function DescriptivePanel() {
           <div className="p-4">
             <div 
               className="relative border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden"
-              style={{ width: `${plotWidth}px`, minWidth: 520, maxWidth: '100%' }}
+              style={{ width: `${scatterPlotWidth}px`, minWidth: 520, maxWidth: '100%' }}
             >
               <ScatterView
                 key={session.session_id}
@@ -1080,8 +1125,8 @@ export default function DescriptivePanel() {
 
               {/* Red vertical resize line on the right (drag to change scatter width) */}
               <div
-                onPointerDown={onPlotResizeStart}
-                onDoubleClick={resetPlotWidth}
+                onPointerDown={startScatterPlotResize}
+                onDoubleClick={resetScatterPlotWidth}
                 className="absolute top-0 bottom-0 w-[5px] right-0 cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 transition-colors z-20"
                 title="Drag the red line to resize the scatter plot width • Double-click to reset"
               />
