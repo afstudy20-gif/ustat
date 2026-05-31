@@ -6,14 +6,42 @@ import AboutModal from "./components/AboutModal";
 import HelpModal from "./components/HelpModal";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
 
-class ErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
-  state = { error: null };
-  static getDerivedStateFromError(e: Error) { return { error: e.message + "\n" + e.stack }; }
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) { return { error }; }
+  componentDidCatch(error: Error) {
+    // Surface the failure for debugging without taking down the whole app.
+    // eslint-disable-next-line no-console
+    console.error("Panel render error:", error);
+  }
+  private reset = () => this.setState({ error: null });
   render() {
-    if (this.state.error) return (
-      <pre className="p-6 text-red-600 text-xs whitespace-pre-wrap bg-white min-h-screen">
-        {this.state.error}
-      </pre>
+    const { error } = this.state;
+    if (error) return (
+      <div className="flex-1 flex items-center justify-center p-8 overflow-y-auto">
+        <div className="max-w-lg w-full bg-white border border-red-200 rounded-2xl shadow-sm p-6 text-center">
+          <div className="text-red-500 text-3xl mb-2">⚠️</div>
+          <h2 className="text-lg font-semibold text-gray-800">This panel hit an error</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            The rest of the app is fine — switch tabs, or try again. Your data is unaffected.
+          </p>
+          <button
+            onClick={this.reset}
+            className="mt-4 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+          >
+            Try again
+          </button>
+          <details className="mt-4 text-left">
+            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Technical details</summary>
+            <pre className="mt-2 p-3 bg-gray-50 rounded-lg text-[11px] text-red-600 whitespace-pre-wrap overflow-x-auto max-h-60">
+              {error.message}{error.stack ? "\n\n" + error.stack : ""}
+            </pre>
+          </details>
+        </div>
+      </div>
     );
     return this.props.children;
   }
