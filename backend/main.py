@@ -1,18 +1,56 @@
+import logging
 import os
+import sys
 from datetime import datetime, timedelta, timezone
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from loguru import logger
 
 from middleware.security_headers import SecurityHeadersMiddleware
+
+
+# ── Loguru setup ─────────────────────────────────────────────────────────────
+# Remove default stderr sink, add structured one with rotation.
+logger.remove()
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<green>{time:HH:mm:ss}</green> | <level>{level:<7}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+)
+# File sink for persistent debug logs (auto-rotated at 10 MB).
+logger.add(
+    "logs/ustat_{time:YYYY-MM-DD}.log",
+    level="DEBUG",
+    rotation="10 MB",
+    retention="7 days",
+    compression="gz",
+    enqueue=True,  # thread-safe writes
+)
+
+# Intercept stdlib logging (uvicorn, statsmodels, sklearn) → loguru.
+class _InterceptHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+        frame, depth = logging.currentframe(), 2
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back  # type: ignore[assignment]
+            depth += 1
+        logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
 
 try:
     import psutil
 except ImportError:
     psutil = None  # type: ignore
 
-from routers import upload, stats, charts, models, session, compute, repeated, advanced_anova, pub_tables, categorical, agreement, reliability, missing_data, decision_curve, model_compare, diagnostics, model_diagnostics, pub_export, nomogram, survival_advanced, article_parser, code_runner, ml, timeseries, meta, multiplicity
+from routers import upload, stats, charts, models, models_causal, models_survival, models_logistic, session, compute, repeated, advanced_anova, pub_tables, categorical, agreement, reliability, missing_data, decision_curve, model_compare, diagnostics, model_diagnostics, pub_export, nomogram, survival_advanced, article_parser, code_runner, ml, timeseries, meta, multiplicity
 from services import store
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
@@ -44,6 +82,9 @@ app.include_router(upload.router, prefix="/api/upload", tags=["upload"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 app.include_router(charts.router, prefix="/api/charts", tags=["charts"])
 app.include_router(models.router, prefix="/api/models", tags=["models"])
+app.include_router(models_causal.router, prefix="/api/models", tags=["models-causal"])
+app.include_router(models_survival.router, prefix="/api/models", tags=["models-survival"])
+app.include_router(models_logistic.router, prefix="/api/models", tags=["models-logistic"])
 app.include_router(session.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(compute.router, prefix="/api/compute", tags=["compute"])
 app.include_router(repeated.router, prefix="/api/repeated", tags=["repeated"])

@@ -20,7 +20,10 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from loguru import logger
+
 from services import store
+from routers._models_shared import cpu_bound
 
 router = APIRouter()
 
@@ -58,6 +61,7 @@ class MICERequest(BaseModel):
 
 
 @router.post("/mice")
+@cpu_bound
 def mice_imputation(req: MICERequest):
     df = _get_df(req.session_id)
 
@@ -329,11 +333,13 @@ def _fine_gray_fit(df: pd.DataFrame, duration: str, event: str,
         try:
             p_v = float(cph.summary["p"].loc[var])
         except Exception:
+            logger.opt(exception=True).trace("p-value computation failed")
             p_v = None
         try:
             lo = float(ci.loc[var, ci.columns[0]])
             hi = float(ci.loc[var, ci.columns[1]])
         except Exception:
+            logger.opt(exception=True).trace("CI computation failed")
             lo = hi = float("nan")
         coefs.append({
             "variable": str(var),
@@ -371,6 +377,7 @@ def _fine_gray_fit(df: pd.DataFrame, duration: str, event: str,
 
 
 @router.post("/fine_gray")
+@cpu_bound
 def fine_gray(req: FineGrayRequest):
     df = _get_df(req.session_id)
 
@@ -463,6 +470,7 @@ def fine_gray(req: FineGrayRequest):
             )
             gray_p = _safe(round(float(lr.p_value), 6))
         except Exception:
+            logger.opt(exception=True).trace("Gray p-value computation failed")
             gray_p = None
 
     plot = {
@@ -551,7 +559,7 @@ def fine_gray(req: FineGrayRequest):
             "ran_regression": regression_result is not None,
         })
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Swallowed exception in survival_advanced")
 
     return {
         "test": "Fine-Gray Competing Risks",
@@ -699,6 +707,7 @@ class LandmarkRequest(BaseModel):
 
 
 @router.post("/landmark")
+@cpu_bound
 def landmark_analysis(req: LandmarkRequest):
     df = _get_df(req.session_id)
 
@@ -789,6 +798,7 @@ def landmark_analysis(req: LandmarkRequest):
             )
             logrank_p = _safe(round(float(lr.p_value), 6))
         except Exception:
+            logger.opt(exception=True).trace("log-rank p-value computation failed")
             logrank_p = None
 
     # Cox regression if predictors given
@@ -1193,7 +1203,7 @@ def rmst(req: RMSTRequest):
             "n_groups": len(groups) if groups else 1,
         })
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Swallowed exception in survival_advanced")
 
     return {
         "test": "Restricted Mean Survival Time",
@@ -1255,6 +1265,7 @@ def _mcf(intervals: pd.DataFrame, start: str, stop: str, event: str) -> List[dic
 
 
 @router.post("/recurrent_lwyy")
+@cpu_bound
 def recurrent_lwyy(req: RecurrentLWYYRequest):
     from lifelines import CoxPHFitter
 
@@ -1411,7 +1422,7 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
             "n_predictors": len(req.predictors), "n_subjects": n_subjects, "n_events": n_events,
         })
     except Exception:
-        pass
+        logger.opt(exception=True).debug("Swallowed exception in survival_advanced")
 
     return _safe({
         "test": "Recurrent events — LWYY model",
@@ -1466,6 +1477,7 @@ def _encode_survival_predictors(df: pd.DataFrame, predictors: List[str]) -> pd.D
 
 
 @router.post("/survival_validation")
+@cpu_bound
 def survival_validation(req: SurvivalValidationRequest):
     from lifelines import CoxPHFitter, KaplanMeierFitter
     from services.impute import apply_imputation
@@ -1588,6 +1600,7 @@ class DiscreteTimeRequest(BaseModel):
 
 
 @router.post("/discrete_time")
+@cpu_bound
 def discrete_time(req: DiscreteTimeRequest):
     import statsmodels.api as sm
     from services.impute import apply_imputation

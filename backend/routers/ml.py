@@ -469,7 +469,12 @@ def _calibration_deciles(proba: np.ndarray, y01: np.ndarray) -> list:
 
 
 @router.post("/predictive")
-def predictive(req: PredictiveRequest):
+async def predictive(req: PredictiveRequest):
+    import asyncio
+    return await asyncio.to_thread(_run_predictive, req)
+
+
+def _run_predictive(req: PredictiveRequest):
     from sklearn.model_selection import train_test_split, GridSearchCV, StratifiedKFold
     from sklearn.preprocessing import StandardScaler
     from sklearn.pipeline import Pipeline

@@ -40,3 +40,6 @@ Thumbs.db
 # Env files
 .env
 .env.*
+
+# Runtime logs
+backend/logs/
