@@ -1077,113 +1077,16 @@ export default function DescriptivePanel() {
           })}
         </div>
 
-        {/* ── Scatter view: 4 distribution plots (Hist/Box/Violin/QQ) on the LEFT of the scatter, red draggable divider, no extra "Distribution" title ── */}
+        {/* ── Scatter Plot view: clean, only the scatter plot. No Histogram/Box/Violin/Q-Q tabs or panels inside (those 4 only live as top-level sub-tabs under Descriptive) ── */}
         {view === "scatter" && (
-          <div className="flex h-full" style={{ minWidth: 0 }}>
-            {/* LEFT: The 4 plots (Histogram, Box, Violin, Q-Q) on the left of the scatter plot - bare plots only, no repeating titles (titles only in the top Descriptive sub-tabs) */}
-            <div
-              className="flex-shrink-0 min-h-0 overflow-hidden bg-gray-50 p-2 border-r border-gray-200"
-              style={{ width: `${scatterLeftWidth}px` }}
-            >
-              {summary && summary.type === "numeric" ? (
-                <div className="grid grid-cols-2 grid-rows-2 gap-2 h-full">
-                  {/* Histogram - no title bar, just the plot */}
-                  <div className="border bg-white rounded overflow-hidden p-1">
-                    <Plot
-                      data={[{
-                        x: summary.histogram?.map((b: any) => (b.bin_start + b.bin_end) / 2) || [],
-                        y: summary.histogram?.map((b: any) => b.count) || [],
-                        type: "bar",
-                        marker: { color: "#6366f1" },
-                      }]}
-                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
-                      style={{ width: "100%", height: "100%" }}
-                      useResizeHandler
-                    />
-                  </div>
-
-                  {/* Box Plot */}
-                  <div className="border bg-white rounded overflow-hidden p-1">
-                    <Plot
-                      data={[{
-                        y: summary.raw_values || [],
-                        type: "box",
-                        name: selected,
-                        boxpoints: "outliers",
-                        marker: { color: "#6366f1" },
-                      }]}
-                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                      style={{ width: "100%", height: "100%" }}
-                      useResizeHandler
-                    />
-                  </div>
-
-                  {/* Violin */}
-                  <div className="border bg-white rounded overflow-hidden p-1">
-                    <Plot
-                      data={[{
-                        y: summary.raw_values || [],
-                        type: "violin",
-                        name: selected,
-                        box: { visible: true },
-                        meanline: { visible: true },
-                      }]}
-                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                      style={{ width: "100%", height: "100%" }}
-                      useResizeHandler
-                    />
-                  </div>
-
-                  {/* Q-Q Plot */}
-                  <div className="border bg-white rounded overflow-hidden p-1">
-                    <Plot
-                      data={[
-                        {
-                          x: summary.qq?.map((p: any) => p.x) || [],
-                          y: summary.qq?.map((p: any) => p.y) || [],
-                          type: "scatter",
-                          mode: "markers",
-                          marker: { color: "#6366f1", size: 3 },
-                        },
-                        {
-                          x: summary.qq?.map((p: any) => p.x) || [],
-                          y: summary.qq?.map((p: any) => p.x) || [],
-                          type: "scatter",
-                          mode: "lines",
-                          line: { color: "#ef4444", dash: "dash" },
-                        },
-                      ]}
-                      layout={{ autosize: true, margin: { t: 4, r: 4, b: 20, l: 25 }, showlegend: false }}
-                      style={{ width: "100%", height: "100%" }}
-                      useResizeHandler
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full items-center justify-center text-gray-400 text-xs">
-                  Select numeric column
-                </div>
-              )}
-            </div>
-
-            {/* Red vertical draggable line - between the left 4 plots and the scatter */}
-            <div
-              onPointerDown={startScatterLeftResize}
-              onDoubleClick={() => setScatterLeftWidth(380)}
-              className="w-[6px] cursor-col-resize bg-red-500/80 hover:bg-red-600 active:bg-red-700 transition-colors z-10 flex-shrink-0"
-              title="Drag this red line to resize (left: 4 plots, right: scatter) • Double-click to reset"
+          <div className="flex-1 p-4 overflow-auto">
+            <ScatterView
+              key={session.session_id}
+              sessionId={session.session_id}
+              numCols={numCols}
+              catCols={catCols}
+              defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
             />
-
-            {/* RIGHT: Main Scatter Plot */}
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <ScatterView
-                key={session.session_id}
-                sessionId={session.session_id}
-                numCols={numCols}
-                catCols={catCols}
-                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
-              />
-            </div>
           </div>
         )}
 
