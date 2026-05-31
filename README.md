@@ -12,10 +12,15 @@
 
 </div>
 
-uSTAT is a free, server-hosted statistical analysis platform aimed at clinicians,
+uSTAT is a free, server-hosted clinical biostatistics platform aimed at clinicians,
 biostatisticians, and medical researchers. Upload a `CSV`, `Excel`, `SPSS`,
-`SAS`, or `Stata` file and run 40+ analyses — t-tests, ANOVA, Cox PH, ROC, PSM,
-RCS dose-response, Table 1, power analysis — without installing anything.
+`SAS`, or `Stata` file and run 100+ analyses — from basic hypothesis testing to
+advanced causal inference, missing-data sensitivity, external validation,
+survival ML benchmarking, and decision curve analysis — without installing anything.
+
+The backend has been completely refactored into a clean, maintainable services layer
+(20+ focused pure modules) with thin routers. All statistical work happens server-side
+in pure Python using peer-reviewed libraries (scipy, statsmodels, lifelines, scikit-learn).
 
 > ⚠️ **Not a medical device.** uSTAT has **not yet been validated through
 > peer-reviewed publications**. Independent validation against SPSS, R, and
@@ -54,22 +59,25 @@ Vulnerability disclosure: [adycovs@gmail.com](mailto:adycovs@gmail.com?subject=%
 
 ## Features
 
-| Area                  | What you can do |
-|-----------------------|-----------------|
-| **Data I/O**          | CSV, Excel (.xlsx / .xls), SPSS (.sav), SAS (.sas7bdat), Stata (.dta), JSON sessions |
-| **Cleaning**          | Rename, recode, fill blanks (mean / median / MICE), filter cases, compute new variables, Ctrl+V paste from Excel/CSV |
-| **Descriptive**       | Mean / SD / median / IQR, Shapiro-Wilk, Kolmogorov-Smirnov (Lilliefors), Q-Q plots |
-| **Hypothesis tests**  | t-test (independent / paired), one-way ANOVA, ANCOVA, two-way ANOVA, repeated-measures ANOVA, Tukey HSD, Mann-Whitney U, Wilcoxon signed-rank, Kruskal-Wallis, Friedman |
-| **Categorical**       | χ², Fisher's exact, McNemar, Cochran's Q, Mantel-Haenszel, binomial, one- & two-proportion |
-| **Correlation**       | Pearson, Spearman, Kendall, ICC, Cohen's κ |
-| **Regression**        | Linear (+ HC3 robust SE), logistic (with OR + 95% CI), Poisson / negative binomial, polynomial, **restricted cubic splines (RCS)**, mixed-effects (LMM) |
-| **Survival**          | Kaplan-Meier + log-rank, **Cox PH**, **Cox-RCS** with 1 or 2 spline terms and optional `rcs(X) × rcs(Y)` interaction (LR test + 2D HR contour), Fine-Gray competing risks, landmark, stratified Cox |
-| **ROC / prediction**  | ROC curves, AUC, Youden index, paired ROC comparison (DeLong), calibration plot, Hosmer-Lemeshow, Brier score, decision curve analysis, nomogram |
-| **Causal inference**  | **Propensity Score Matching (PSM)** — logistic / probit / GBM score models, greedy or optimal (Hungarian) matching, exact-match strata, common-support trim (Crump 2009), Austin 2011 logit-PS caliper, SMD + Rubin variance ratio + KS test, Love plot, GEE binary outcome **or** stratified Cox survival outcome, **Rosenbaum bounds** sensitivity analysis |
-| **Missing data**      | MICE multiple imputation, Little's MCAR test, imputation comparison |
-| **Tables & export**   | Publication-ready Table 1 with SMD, AMA-formatted journal Excel/Word export, charts at up to 600 DPI |
-| **Power analysis**    | t-test / ANOVA / proportions / correlation power, Cox / log-rank sample size (Schoenfeld 1981, Freedman 1982) |
-| **Code sandbox**      | Optional server-side Python runner with `df` pre-injected. Off by default — see [Code-execution sandbox](#code-execution-sandbox) |
+| Area                          | What you can do |
+|-------------------------------|-----------------|
+| **Data I/O**                  | CSV, Excel (.xlsx / .xls), SPSS (.sav), SAS (.sas7bdat), Stata (.dta), JSON sessions |
+| **Cleaning**                  | Rename, recode, fill blanks (mean / median / MICE), filter cases, compute new variables, Ctrl+V paste from Excel/CSV |
+| **Descriptive & survey**      | Mean / SD / median / IQR, weighted (survey) descriptives, Shapiro-Wilk, KS (Lilliefors), Q-Q plots |
+| **Hypothesis tests**          | t-test, ANOVA/ANCOVA, repeated-measures, non-parametric, gatekeeping (truncated Hochberg/Holm), non-inferiority/TOST |
+| **Categorical & agreement**   | χ² / Fisher / McNemar / Cochran Q / Mantel-Haenszel, Bland-Altman, Deming, Cronbach's α, McDonald's ω, Fleiss' κ |
+| **Regression**                | Linear (HC3), logistic (+ Firth), Poisson/NB, ordinal, GEE, **RCS dose-response** (with interactions) |
+| **Survival (advanced)**       | KM + log-rank (stratified), Cox (linear + RCS + TV + interactions), Fine-Gray, RMST, Landmark + dynamic prediction, Recurrent (LWYY), **Shared frailty**, **Multistate illness-death**, **Joint longitudinal-survival (two-stage)** |
+| **External validation**       | C-index, calibration slope/intercept, IPCW Integrated Brier Score, time-dependent AUC, transportability diagnostics (Phase 9 framework) |
+| **Survival ML**               | Gradient Boosting ranking benchmark vs Cox + permutation importance + direct feed into Phase 9 validation (risk scores → survival probabilities → full IBS/tdAUC on shifted cohorts) |
+| **ROC / Prediction / Utility**| ROC + DeLong, calibration + Hosmer-Lemeshow, Brier, **professional Decision Curve Analysis** (binary + survival modes, standardized net benefit, interventions avoided — Phase 13) |
+| **Causal inference**          | **PSM** (greedy/optimal + Rosenbaum bounds), **IPTW** (ATE/ATT/overlap + weighted outcome models), E-value + quantitative bias analysis (MNAR sensitivity) |
+| **Missing data**              | MICE + Little's MCAR + delta-adjustment MNAR sensitivity analysis |
+| **Tables & reporting**        | Publication-ready Table 1 (with SMD), Methods appendix DOCX from audit log, high-DPI chart export |
+| **Power & meta**              | Power (t/ANOVA/proportions/Cox), full meta-analysis (DL/PM random effects, prediction interval, subgroup, meta-regression, Egger/Begg/funnel/trim-and-fill) |
+| **Time series**               | ARIMA/SARIMA (auto + manual), STL decomposition, ADF + KPSS stationarity |
+| **Machine learning**          | Random Forest & Gradient Boosting (honest CV performance, permutation importance) |
+| **Code sandbox**              | Optional server-side Python runner with `df` pre-injected (off by default) |
 
 ---
 
@@ -184,26 +192,26 @@ SECURITY_CONTACT_EMAIL=...     # overrides the default in /.well-known/security.
 
 ## Architecture
 
+uSTAT follows a clean **services-first** architecture (major refactor completed in v3.0):
+
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│ Browser (React 19 + Plotly.js + zustand)                           │
-│   – no statistics here, just UI state + chart rendering            │
+│ Browser (React 19 + Plotly + zustand)                              │
+│   – UI state, charts, and result rendering only                    │
 └──────────────────────────────────────────────┬─────────────────────┘
-                                               │ HTTPS (HSTS, CSP, …)
+                                               │ HTTPS + security headers
 ┌──────────────────────────────────────────────▼─────────────────────┐
-│ FastAPI 0.115 + Uvicorn 0.34                                       │
-│   – /api/upload, /api/stats/*, /api/models/*, /api/sessions/*, …   │
-│   – middleware/security_headers.py                                 │
-│   – routers/code_runner.py (gated)                                 │
+│ FastAPI (thin routers)                                             │
+│   /api/decision_curve, /api/survival_advanced, /api/models/* …     │
 ├────────────────────────────────────────────────────────────────────┤
-│ services/store.py — in-RAM dataframe store (30 min TTL)            │
-│ services/rcs_basis.py — Harrell RCS basis                          │
-│ services/impute.py — listwise / mean / median / MICE               │
-│ services/sandbox.py + code_runner_child.py — Python subprocess     │
-│                       with rlimit + import allowlist + audit       │
+│ Pure services layer (20+ focused modules — no god files)           │
+│   decision_curve.py, survival_ml.py, external_validation.py,       │
+│   multistate.py, frailty.py, joint_model.py, causal_sensitivity.py,│
+│   missing_data_sensitivity.py, model_validation.py, psm.py …       │
+│   + store.py (in-RAM 30 min TTL sessions)                          │
 ├────────────────────────────────────────────────────────────────────┤
-│ scipy 1.15 · statsmodels 0.14 · lifelines 0.30 · scikit-learn 1.6  │
-│ pandas 2.2 · numpy 2.2 · patsy 0.5 · pyreadstat 1.2                │
+│ Statistical engines (peer-reviewed, no custom black boxes)         │
+│   scipy · statsmodels · lifelines · scikit-learn · pandas · numpy  │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -237,11 +245,15 @@ in-app **About → Tests & Methods** modal. Highlights:
 | Logistic regression (with OR + CI)               | `statsmodels.formula.api.logit`                 |
 | Cox proportional hazards                         | `lifelines.CoxPHFitter`                         |
 | Kaplan-Meier + log-rank                          | `lifelines.KaplanMeierFitter`, `logrank_test`   |
-| Fine-Gray competing risks                        | custom on top of `lifelines`                    |
+| Fine-Gray / Multistate / Frailty / Joint models  | lifelines + custom (services/multistate.py, frailty.py, joint_model.py) |
+| External validation (IBS, tdAUC, transportability) | services/external_validation.py (Phase 9)     |
+| Survival ML benchmark + Phase 9 integration      | services/survival_ml.py (Phase 12)              |
+| Professional Decision Curve Analysis (binary + survival) | services/decision_curve.py (Phase 13)         |
 | Restricted cubic splines (Harrell)               | `services/rcs_basis.py` (Harrell 2015 §2.4.4)   |
-| Propensity-score matching                        | sklearn `LogisticRegression` / `GradientBoostingClassifier` / statsmodels `Probit` + custom greedy and `scipy.optimize.linear_sum_assignment` |
-| Rosenbaum bounds                                 | custom on `scipy.stats.binom`                   |
-| MICE multiple imputation                         | `sklearn.impute.IterativeImputer`               |
+| Propensity-score matching + IPTW                 | sklearn + custom (services/psm.py)              |
+| Rosenbaum bounds + E-value + QBA                 | custom (services/causal_sensitivity.py)         |
+| MNAR sensitivity (delta adjustment)              | services/missing_data_sensitivity.py            |
+| MICE + bootstrap optimism validation             | services/missing_data.py + model_validation.py  |
 
 Methodological references applied:
 

@@ -44,6 +44,7 @@ import PlotThemeBar from "./components/PlotThemeBar";
 import RefreshAppButton from "./components/RefreshAppButton";
 import SurvivalAdvancedPanel from "./components/SurvivalAdvancedPanel";
 import RCSPanel from "./components/RCSPanel";
+import DecisionCurvePanel from "./components/DecisionCurvePanel";
 import MLPanel from "./components/MLPanel";
 import TimeSeriesPanel from "./components/TimeSeriesPanel";
 import MetaPanel from "./components/MetaPanel";
@@ -63,6 +64,7 @@ const TABS = [
   { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "iptw",        label: "IPTW",        icon: Scale },
+  { id: "dca",         label: "DCA",         icon: Target }, // Decision Curve Analysis (Phase 13)
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
   { id: "compute",     label: "Compute",     icon: Calculator },
@@ -149,6 +151,8 @@ const TEST_CATALOG: TestEntry[] = [
   // PSM
   { name: "Propensity Score Matching", tab: "psm", aliases: ["psm matching"] },
   { name: "IPTW", tab: "iptw", aliases: ["inverse probability weighting", "weighted", "iptw weighting"] },
+  // Phase 13
+  { name: "Decision Curve Analysis", tab: "dca", aliases: ["dca", "decision curve", "net benefit", "vickers", "clinical utility"] },
 
   // Weighted / survey
   { name: "Weighted descriptives (survey weights)", tab: "summary", group: "Weighted", aliases: ["weighted mean", "survey", "sampling weights", "ağırlıklı", "kish", "horvitz"] },
@@ -749,6 +753,7 @@ export default function App() {
           {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><IPTWPanel /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
+          {activeTab === "dca"         && <div className="flex-1 p-4 overflow-y-auto"><DecisionCurvePanel /></div>}
           {activeTab === "compute"     && <ComputeCombo />}
         </ErrorBoundary>
       </main>

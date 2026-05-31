@@ -5,6 +5,7 @@ import api from "../api";
 import Plot from "../PlotComponent";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
+import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -794,6 +795,19 @@ export default function DescriptivePanel() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"distribution" | "scatter">("distribution");
 
+  // For Scatter companions: which distribution plot to show next to scatter
+  const [scatterCompanionType, setScatterCompanionType] = useState<"histogram" | "boxplot" | "violin" | "qq">("histogram");
+  const [scatterCompanionData, setScatterCompanionData] = useState<any>(null);
+  const [scatterCompanionLoading, setScatterCompanionLoading] = useState(false);
+
+  // Resizable plot area from the right (for Summary tab graphs)
+  const { w: plotWidth, onDragStart: onPlotResizeStart, onReset: resetPlotWidth } = useResizableRightCol(
+    "summary-plot",
+    920,   // initial width
+    520,   // min
+    1400   // max
+  );
+
   useEffect(() => {
     if (!session) return;
     // Fetch real sparkline histograms for all columns
@@ -945,15 +959,120 @@ export default function DescriptivePanel() {
           ))}
         </div>
 
-        {/* ── Scatter view ── */}
+        {/* ── Scatter view with resizable plot area + companion distributions ── */}
         {view === "scatter" && (
-          <ScatterView
-            key={session.session_id}
-            sessionId={session.session_id}
-            numCols={numCols}
-            catCols={catCols}
-            defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
-          />
+          <div className="flex flex-col h-full relative" style={{ minWidth: 0 }}>
+            {/* Resizable plot container */}
+            <div 
+              className="flex-1 min-h-0 overflow-hidden"
+              style={{ width: `${plotWidth}px`, maxWidth: '100%' }}
+            >
+              <ScatterView
+                key={session.session_id}
+                sessionId={session.session_id}
+                numCols={numCols}
+                catCols={catCols}
+                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
+              />
+            </div>
+
+            {/* Draggable resizer handle on the right of the plot area */}
+            <div
+              onPointerDown={onPlotResizeStart}
+              onDoubleClick={resetPlotWidth}
+              className="absolute top-0 bottom-0 w-1.5 cursor-col-resize bg-gray-200 hover:bg-indigo-400 active:bg-indigo-500 transition-colors z-10"
+              style={{ left: `${plotWidth}px` }}
+              title="Drag to resize plot width • Double-click to reset"
+            />
+
+            {/* Companion distribution plots (placed below the resizable scatter area) */}
+            {summary && summary.type === "numeric" && (
+              <div className="border-t bg-gray-50 p-3 flex-shrink-0" style={{ width: `${plotWidth}px`, maxWidth: '100%' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-semibold text-gray-600">
+                    Distribution Plots for <span className="text-indigo-600">{selected}</span>
+                  </div>
+                  <div className="flex gap-1 text-[10px]">
+                    {(["histogram", "boxplot", "violin", "qq"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setScatterCompanionType(t)}
+                        className={`px-2 py-0.5 rounded ${scatterCompanionType === t ? "bg-indigo-600 text-white" : "bg-white border hover:bg-gray-100"}`}
+                      >
+                        {t === "histogram" ? "Hist" : t === "boxplot" ? "Box" : t === "violin" ? "Violin" : "Q-Q"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="h-64">
+                  {scatterCompanionType === "histogram" && summary.histogram && (
+                    <Plot
+                      data={[{
+                        x: summary.histogram.map((b: any) => (b.bin_start + b.bin_end) / 2),
+                        y: summary.histogram.map((b: any) => b.count),
+                        type: "bar",
+                        marker: { color: "#6366f1" },
+                      }]}
+                      layout={{ height: 250, margin: { t: 10, r: 10, b: 30, l: 40 }, title: "Histogram", showlegend: false }}
+                    />
+                  )}
+
+                  {scatterCompanionType === "boxplot" && (
+                    <Plot
+                      data={[{
+                        y: summary.raw_values || [],
+                        type: "box",
+                        name: selected,
+                        boxpoints: summary.raw_values ? "outliers" : false as any,
+                        marker: { color: "#6366f1" },
+                      }]}
+                      layout={{ height: 250, margin: { t: 10, r: 10, b: 30, l: 40 }, title: "Box Plot", showlegend: false }}
+                    />
+                  )}
+
+                  {scatterCompanionType === "violin" && (
+                    <Plot
+                      data={[{
+                        y: summary.raw_values || [],
+                        type: "violin",
+                        name: selected,
+                        box: { visible: true },
+                        meanline: { visible: true },
+                      }]}
+                      layout={{ height: 250, margin: { t: 10, r: 10, b: 30, l: 40 }, title: "Violin Plot", showlegend: false }}
+                    />
+                  )}
+
+                  {scatterCompanionType === "qq" && summary.qq && (
+                    <Plot
+                      data={[
+                        {
+                          x: summary.qq.map((p: any) => p.x),
+                          y: summary.qq.map((p: any) => p.y),
+                          type: "scatter",
+                          mode: "markers",
+                          marker: { color: "#6366f1", size: 4 },
+                        },
+                        {
+                          x: summary.qq.map((p: any) => p.x),
+                          y: summary.qq.map((p: any) => p.x),
+                          type: "scatter",
+                          mode: "lines",
+                          line: { color: "#ef4444", dash: "dash" },
+                        },
+                      ]}
+                      layout={{ height: 250, margin: { t: 10, r: 10, b: 30, l: 40 }, title: "Q-Q Plot", showlegend: false }}
+                    />
+                  )}
+                </div>
+
+                <div className="text-[10px] text-gray-400 mt-1 text-right">
+                  Drag the thin bar on the right edge of the plot area to resize • Double-click to reset • Use export buttons to download current view
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── Distribution view ── */}

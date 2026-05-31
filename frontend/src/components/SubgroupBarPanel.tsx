@@ -45,6 +45,22 @@ export default function SubgroupBarPanel() {
   const [chartHeight, setChartHeight] = useState<number>(500);
   const [isAutoWidth, setIsAutoWidth] = useState<boolean>(true);
 
+  // New visual enhancement states
+  const [showValueLabels, setShowValueLabels] = useState<boolean>(true);
+  const [showSampleSizes, setShowSampleSizes] = useState<boolean>(true);
+  const [barWidth, setBarWidth] = useState<number>(0.6);
+  const [referenceLine, setReferenceLine] = useState<number | null>(null);
+  const [referenceLineLabel, setReferenceLineLabel] = useState<string>("Reference");
+
+  // Sorting option
+  const [sortBars, setSortBars] = useState<"none" | "value-desc" | "value-asc">("none");
+
+  // Visual: Alternating background for outer subgroups
+  const [showSubgroupBackgrounds, setShowSubgroupBackgrounds] = useState<boolean>(true);
+
+  // Bar pattern/texture for accessibility & print
+  const [barPattern, setBarPattern] = useState<"none" | "stripes" | "dots">("none");
+
   const chartRef = useRef<any>(null);
   const plotContainerRef = useRef<HTMLDivElement>(null);
 
@@ -155,7 +171,13 @@ export default function SubgroupBarPanel() {
   };
 
   // Build Plotly-ready traces
-  const traces = plotData ? buildPlotlyTraces(plotData, pal, session, customLegendLabels) : null;
+  const traces = plotData ? buildPlotlyTraces(plotData, pal, session, customLegendLabels, {
+    showValueLabels,
+    showSampleSizes,
+    barWidth,
+    referenceLine,
+    sortBars,
+  }) : null;
 
   // Layout Configuration
   const yColMeta = session.columns.find((c) => c.name === yCol);
@@ -163,6 +185,58 @@ export default function SubgroupBarPanel() {
   const targetValueLabel = yColLabels[targetValue] ?? targetValue;
   const yAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
   
+  // Build shapes and annotations for visual enhancements
+  const shapes: any[] = [];
+  const annotations: any[] = [];
+
+  // Reference line
+  if (plotData && referenceLine !== null) {
+    shapes.push({
+      type: "line",
+      x0: 0,
+      x1: 1,
+      xref: "paper",
+      y0: referenceLine,
+      y1: referenceLine,
+      line: { color: "#dc2626", width: 2, dash: "dash" },
+    });
+    annotations.push({
+      x: 0.98,
+      y: referenceLine,
+      xref: "paper",
+      yref: "y",
+      text: referenceLineLabel || "Ref",
+      showarrow: false,
+      font: { color: "#dc2626", size: 10, weight: "bold" },
+      bgcolor: "white",
+      bordercolor: "#dc2626",
+      borderwidth: 1,
+      borderpad: 2,
+    });
+  }
+
+  // Alternating background colors for outer subgroups (visual hierarchy)
+  if (plotData && showSubgroupBackgrounds && plotData.subgroups) {
+    const subgroupCount = plotData.subgroups.length;
+    plotData.subgroups.forEach((sg: string, idx: number) => {
+      if (idx % 2 === 0) {
+        // Light alternating background
+        shapes.push({
+          type: "rect",
+          xref: "x",
+          yref: "paper",
+          x0: idx * (1 / subgroupCount) - 0.01,
+          x1: (idx + 1) * (1 / subgroupCount) + 0.01,
+          y0: 0,
+          y1: 1,
+          fillcolor: "rgba(243, 244, 246, 0.35)", // very light gray
+          line: { width: 0 },
+          layer: "below",
+        });
+      }
+    });
+  }
+
   const fullLayout = plotData ? {
     ...layout,
     width: chartWidth - 32,
@@ -186,7 +260,7 @@ export default function SubgroupBarPanel() {
       gridcolor: showGrid ? "#e5e7eb" : "transparent",
       tickfont: { size: 10 },
     },
-    barmode: "group", // side-by-side grouped bars
+    barmode: "group",
     legend: {
       orientation: "h",
       yanchor: "bottom",
@@ -197,6 +271,8 @@ export default function SubgroupBarPanel() {
     },
     margin: { t: 70, b: 60, l: 60, r: 20 },
     autosize: true,
+    shapes,
+    annotations,
   } : null;
 
   return (
@@ -456,6 +532,106 @@ export default function SubgroupBarPanel() {
               <p className="text-[10px] text-gray-400 leading-snug">
                 💡 Drag the bottom-right corner of the chart panel to resize it manually. The export dimensions will automatically sync!
               </p>
+
+              <div className="text-[10px] text-emerald-600 mt-1">
+                ✓ Value labels, reference lines, and bar spacing controls added for publication-ready visuals.
+              </div>
+            </div>
+
+            {/* Visual Enhancements */}
+            <div className="pt-3 border-t border-gray-100 space-y-3">
+              <div className="text-xs font-semibold text-gray-600">Visual Polish</div>
+
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showValueLabels} onChange={(e) => setShowValueLabels(e.target.checked)} className="accent-indigo-600" />
+                  Show value labels on bars
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showSampleSizes} onChange={(e) => setShowSampleSizes(e.target.checked)} className="accent-indigo-600" />
+                  Show N (sample size) under bars
+                </label>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Bar Width / Gap: {barWidth.toFixed(1)}</label>
+                <input 
+                  type="range" 
+                  min={0.3} 
+                  max={1.0} 
+                  step={0.05} 
+                  value={barWidth} 
+                  onChange={(e) => setBarWidth(parseFloat(e.target.value))} 
+                  className="w-full accent-indigo-500" 
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Reference Line (horizontal)</label>
+                <div className="flex gap-2">
+                  <input 
+                    type="number" 
+                    value={referenceLine ?? ""} 
+                    onChange={(e) => setReferenceLine(e.target.value ? parseFloat(e.target.value) : null)} 
+                    className="select flex-1 text-xs py-1" 
+                    placeholder="e.g. 0 or 50"
+                  />
+                  <input 
+                    type="text" 
+                    value={referenceLineLabel} 
+                    onChange={(e) => setReferenceLineLabel(e.target.value)} 
+                    className="select w-28 text-xs py-1" 
+                    placeholder="Label"
+                  />
+                </div>
+                {referenceLine !== null && (
+                  <button onClick={() => setReferenceLine(null)} className="text-[10px] text-red-500 mt-1 hover:underline">Remove reference line</button>
+                )}
+              </div>
+
+              {/* Bar Sorting */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Sort Bars</label>
+                <select 
+                  className="select w-full text-xs" 
+                  value={sortBars} 
+                  onChange={(e) => setSortBars(e.target.value as any)}
+                >
+                  <option value="none">No sorting (original order)</option>
+                  <option value="value-desc">Sort by value (descending)</option>
+                  <option value="value-asc">Sort by value (ascending)</option>
+                </select>
+              </div>
+
+              {/* Alternating Subgroup Backgrounds */}
+              <div className="flex items-center justify-between text-xs">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={showSubgroupBackgrounds} 
+                    onChange={(e) => setShowSubgroupBackgrounds(e.target.checked)} 
+                    className="accent-indigo-600" 
+                  />
+                  Alternating subgroup backgrounds
+                </label>
+              </div>
+
+              {/* Bar Patterns (for print / accessibility) */}
+              <div>
+                <label className="text-xs font-medium text-gray-500 block mb-1">Bar Pattern (Texture)</label>
+                <select 
+                  className="select w-full text-xs" 
+                  value={barPattern} 
+                  onChange={(e) => setBarPattern(e.target.value as any)}
+                >
+                  <option value="none">Solid (default)</option>
+                  <option value="stripes">Stripes</option>
+                  <option value="dots">Dots</option>
+                </select>
+              </div>
             </div>
           </div>
         )}
@@ -603,8 +779,38 @@ export default function SubgroupBarPanel() {
   );
 }
 
-function buildPlotlyTraces(plotData: any, pal: string[], session: any, customLegendLabels: Record<string, string>) {
+function buildPlotlyTraces(
+  plotData: any, 
+  pal: string[], 
+  session: any, 
+  customLegendLabels: Record<string, string>,
+  options: {
+    showValueLabels?: boolean;
+    showSampleSizes?: boolean;
+    barWidth?: number;
+    referenceLine?: number | null;
+    sortBars?: "none" | "value-desc" | "value-asc";
+  } = {}
+) {
   if (!plotData || !plotData.traces || !session) return [];
+
+  const { 
+    showValueLabels = true, 
+    showSampleSizes = true, 
+    barWidth = 0.6,
+    sortBars = "none"
+  } = options;
+
+  let tracesData = [...plotData.traces];
+
+  // === 1. Bar Sorting by Value ===
+  if (sortBars !== "none") {
+    tracesData.sort((a, b) => {
+      const sumA = a.y.reduce((sum: number, v: number) => sum + (v || 0), 0);
+      const sumB = b.y.reduce((sum: number, v: number) => sum + (v || 0), 0);
+      return sortBars === "value-desc" ? sumB - sumA : sumA - sumB;
+    });
+  }
 
   const subgroupColMeta = session.columns.find((c: any) => c.name === plotData.subgroup_col);
   const xaxisColMeta = session.columns.find((c: any) => c.name === plotData.xaxis_col);
@@ -614,40 +820,55 @@ function buildPlotlyTraces(plotData: any, pal: string[], session: any, customLeg
   const xaxisLabels = xaxisColMeta?.value_labels ?? {};
   const colorLabels = colorColMeta?.value_labels ?? {};
 
-  return plotData.traces.map((t: any, i: number) => {
-    // Map raw values to user-defined value labels if they exist
+  return tracesData.map((t: any, i: number) => {
     const mappedSubgroup = t.x_subgroup.map((v: any) => subgroupLabels[String(v)] ?? String(v));
     const mappedXaxis = t.x_xaxis.map((v: any) => xaxisLabels[String(v)] ?? String(v));
     const mappedName = customLegendLabels[String(t.name)] || colorLabels[t.name] || String(t.name);
 
     const xArray = [mappedSubgroup, mappedXaxis];
     
-    return {
+    const trace: any = {
       type: "bar",
       name: mappedName,
       x: xArray,
       y: t.y,
+      width: barWidth,
       error_y: {
         type: "data",
         array: t.error,
         visible: plotData.error_type !== "none",
-        color: "#4b5563", // nice dark gray error bars
-        thickness: 1.5,
-        width: 5,
+        color: "#374151",
+        thickness: 1.8,
+        width: 6,
       },
       marker: {
         color: pal[i % pal.length],
-        line: {
-          color: pal[i % pal.length],
-          width: 0.5,
-        }
+        line: { color: "#1f2937", width: 0.6 },
+        pattern: barPattern === "stripes" 
+          ? { shape: "/", fgcolor: "rgba(0,0,0,0.25)", size: 6 } 
+          : barPattern === "dots" 
+            ? { shape: ".", fgcolor: "rgba(0,0,0,0.3)", size: 4 } 
+            : undefined,
       },
       customdata: t.ns,
       hovertemplate: 
         `<b>%{x}</b><br>` +
-        `Summary Value: %{y:.2f}${plotData.y_mode === 'percentage' ? '%' : ''}<br>` +
-        (plotData.error_type !== 'none' ? `Error (${plotData.error_type.toUpperCase()}): %{error_y.array:.2f}<br>` : '') +
-        `Sample Size (N): %{customdata}<extra>${mappedName}</extra>`,
+        `Value: %{y:.2f}${plotData.y_mode === 'percentage' ? '%' : ''}<br>` +
+        (plotData.error_type !== 'none' ? `Error: %{error_y.array:.2f}<br>` : '') +
+        `N: %{customdata}<extra>${mappedName}</extra>`,
     };
+
+    // Value labels on top of bars
+    if (showValueLabels) {
+      trace.text = t.y.map((v: number) => v.toFixed(1) + (plotData.y_mode === 'percentage' ? '%' : ''));
+      trace.textposition = 'outside';
+      trace.textfont = { size: 10, color: '#111827' };
+    }
+
+    if (showSampleSizes && t.ns) {
+      trace.customdata = t.ns;
+    }
+
+    return trace;
   });
 }
