@@ -294,21 +294,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      {/* Chart type tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-0.5 self-start">
-        {CHART_TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setChartTab(id)}
-            className={`px-3 py-1 rounded-md text-xs font-medium transition-colors
-              ${chartTab === id
-                ? "bg-white text-indigo-600 shadow-sm"
-                : "text-gray-500 hover:text-gray-700"}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      {/* Chart type tabs removed — now controlled exclusively by the 5 top-level sub-tabs under Descriptive */}
 
       {/* Histogram */}
       {chartTab === "histogram" && (
