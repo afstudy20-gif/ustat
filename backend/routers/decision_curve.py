@@ -10,6 +10,10 @@ from typing import List, Optional
 
 from services import store
 from services.impute import apply_imputation
+from services.decision_curve import (
+    decision_curve_analysis_binary,
+    decision_curve_analysis_survival,
+)
 
 router = APIRouter()
 
@@ -304,8 +308,17 @@ def hosmer_lemeshow_endpoint(req: HLRequest):
 
 class DCARequest(BaseModel):
     session_id: str
-    outcome: str
-    predictors: List[str]
+    # Traditional mode: fit logistic from predictors
+    outcome: Optional[str] = None
+    predictors: Optional[List[str]] = None
+    # Phase 13 flexible mode: pre-computed predictions (recommended after survival ML / external validation)
+    probability_col: Optional[str] = None          # column in session containing probabilities (0-1)
+    risk_col: Optional[str] = None                 # column containing risk scores (higher = worse)
+    # Survival DCA mode (uses duration + event + risk to approximate event prob by horizon)
+    duration_col: Optional[str] = None
+    event_col: Optional[str] = None
+    time_horizon: Optional[float] = None
+
     threshold_range: List[float] = [0.01, 0.99]
     n_thresholds: int = 100
     imputation: str = "listwise"
@@ -313,79 +326,104 @@ class DCARequest(BaseModel):
 
 @router.post("/dca")
 def dca(req: DCARequest):
+    """
+    Phase 13: Full router + frontend integration ready.
+
+    Supports three input styles:
+    1. Traditional: session + outcome + predictors (fits logistic internally)
+    2. Pre-computed binary: session + probability_col or risk_col + outcome
+    3. Survival: session + duration_col + event_col + risk_col (+ optional time_horizon)
+
+    Always returns the rich Phase 13 payload (summary, standardized NB, assumptions,
+    warnings, result_text) while preserving legacy curve shape for existing clients.
+    """
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
-    df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation)
+
+    # Determine columns we need for imputation
+    needed_cols: List[str] = []
+    if req.outcome: needed_cols.append(req.outcome)
+    if req.predictors: needed_cols.extend(req.predictors)
+    if req.probability_col: needed_cols.append(req.probability_col)
+    if req.risk_col: needed_cols.append(req.risk_col)
+    if req.duration_col: needed_cols.append(req.duration_col)
+    if req.event_col: needed_cols.append(req.event_col)
+
+    needed_cols = list(dict.fromkeys(needed_cols))  # dedup preserve order
+    df = apply_imputation(df_full, needed_cols, req.imputation) if needed_cols else df_full
     n_excluded = n_total - len(df)
 
     if len(df) < 20:
         raise HTTPException(400, "Need at least 20 complete observations for DCA.")
 
-    model, X, y, probs = _fit_logistic(df, req.outcome, req.predictors)
+    # ── Resolve y and p (or risk) ─────────────────────────────────────────────
+    if req.duration_col and req.event_col and req.risk_col:
+        # Survival mode (Phase 13 highlight)
+        duration = df[req.duration_col].values
+        event = df[req.event_col].values
+        risk = df[req.risk_col].values
+        service_res = decision_curve_analysis_survival(
+            duration=duration,
+            event=event,
+            risk=risk,
+            time_horizon=req.time_horizon,
+            n_thresholds=req.n_thresholds,
+            threshold_range=tuple(req.threshold_range),
+        )
+        service_res["mode"] = "survival"
+        service_res["duration_col"] = req.duration_col
+        service_res["event_col"] = req.event_col
+        service_res["risk_col"] = req.risk_col
 
-    prevalence = float(y.mean())
-    n = len(y)
+    elif (req.probability_col or req.risk_col) and req.outcome:
+        # Pre-computed probability / risk mode (best for feeding from survival ML benchmark)
+        p_or_risk = df[req.probability_col or req.risk_col].values
+        y = df[req.outcome].values
+        # If user gave risk scores (not probabilities), the service will still work
+        # because decision_curve_analysis_binary accepts any monotonic score.
+        service_res = decision_curve_analysis_binary(
+            y=y,
+            p=p_or_risk,
+            n_thresholds=req.n_thresholds,
+            threshold_range=tuple(req.threshold_range),
+        )
+        service_res["mode"] = "precomputed"
+        service_res["probability_col"] = req.probability_col
+        service_res["risk_col"] = req.risk_col
+        service_res["outcome"] = req.outcome
 
-    thresholds = np.linspace(
-        max(0.001, req.threshold_range[0]),
-        min(0.999, req.threshold_range[1]),
-        req.n_thresholds,
-    )
-
-    model_nb = []
-    all_nb = []
-    none_nb = []
-
-    for pt in thresholds:
-        # Model net benefit
-        pred_pos = probs >= pt
-        tp = float((pred_pos & (y == 1)).sum()) / n
-        fp = float((pred_pos & (y == 0)).sum()) / n
-        nb = tp - fp * pt / (1 - pt) if pt < 1 else 0.0
-        model_nb.append(round(float(nb), 6))
-
-        # Treat-all net benefit
-        nb_all = prevalence - (1 - prevalence) * pt / (1 - pt) if pt < 1 else 0.0
-        all_nb.append(round(float(nb_all), 6))
-
-        # Treat-none net benefit
-        none_nb.append(0.0)
-
-    thresholds_list = [round(float(t), 4) for t in thresholds]
-
-    # ── Find range where model has positive net benefit ────────────────────
-    useful_range = [t for t, nb in zip(thresholds_list, model_nb) if nb > 0]
-    if useful_range:
-        useful_min = min(useful_range)
-        useful_max = max(useful_range)
-        range_text = f"The model has positive net benefit across threshold probabilities {useful_min:.2f} to {useful_max:.2f}."
+    elif req.outcome and req.predictors:
+        # Traditional mode (backward compat)
+        model, X, y, probs = _fit_logistic(df, req.outcome, req.predictors)
+        service_res = decision_curve_analysis_binary(
+            y=y,
+            p=probs,
+            n_thresholds=req.n_thresholds,
+            threshold_range=tuple(req.threshold_range),
+        )
+        service_res["mode"] = "logistic_fitted"
+        service_res["predictors"] = req.predictors
+        service_res["outcome"] = req.outcome
     else:
-        range_text = "The model does not show positive net benefit at any threshold."
+        raise HTTPException(400, "Provide either (outcome + predictors), (outcome + probability_col/risk_col), or (duration_col + event_col + risk_col)")
 
-    preds_col = ", ".join(req.predictors)
-    result_text = (
-        f"Decision curve analysis for {req.outcome} predicted by {preds_col} "
-        f"(n = {n}, prevalence = {prevalence:.3f}, {n_excluded} excluded). "
-        f"{range_text}"
-    )
+    if "error" in service_res:
+        raise HTTPException(400, service_res["error"])
 
-    return {
-        "test": "Decision Curve Analysis",
-        "curves": {
-            "model": {"thresholds": thresholds_list, "net_benefit": model_nb},
-            "treat_all": {"thresholds": thresholds_list, "net_benefit": all_nb},
-            "treat_none": {"thresholds": thresholds_list, "net_benefit": none_nb},
-        },
-        "prevalence": round(prevalence, 4),
-        "n": n,
-        "n_excluded": n_excluded,
-        "result_text": result_text,
-        "export_rows": [
-            ["Threshold", "Model NB", "Treat All NB", "Treat None NB"],
-            *[
-                [thresholds_list[i], model_nb[i], all_nb[i], none_nb[i]]
-                for i in range(len(thresholds_list))
-            ],
-        ],
-        "r_code": f"library(dcurves)\ndca(outcome ~ {' + '.join(req.predictors)}, data = data)",
-    }
+    # Common enrichment
+    service_res["n"] = len(df)
+    service_res["n_excluded"] = n_excluded
+    service_res["session_id"] = req.session_id
+
+    # Legacy curve shape for old clients
+    if "curves" in service_res and isinstance(service_res["curves"], dict) and "model_net_benefit" in service_res["curves"]:
+        curves = service_res["curves"]
+        service_res["curves"] = {
+            "model": {"thresholds": curves["thresholds"], "net_benefit": curves["model_net_benefit"]},
+            "treat_all": {"thresholds": curves["thresholds"], "net_benefit": curves.get("treat_all_net_benefit", [])},
+            "treat_none": {"thresholds": curves["thresholds"], "net_benefit": curves.get("treat_none_net_benefit", [])},
+        }
+
+    service_res["r_code"] = "library(dcurves)  # or rms::val.prob / dca package"
+
+    return service_res

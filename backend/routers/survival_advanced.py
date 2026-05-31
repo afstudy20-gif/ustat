@@ -5,9 +5,11 @@ Endpoints
 ---------
 POST /mice              — MICE multiple imputation
 POST /fine_gray         — Fine-Gray competing risks (CIF curves)
-POST /evalue            — E-value for unmeasured confounding
 POST /landmark          — Landmark survival analysis
 POST /rmst              — Restricted Mean Survival Time (PH-free alternative)
+POST /recurrent_lwyy    — Recurrent events (LWYY / Andersen-Gill)
+POST /frailty           — Shared gamma frailty Cox (Phase 6)
+POST /multistate        — Multi-state / illness-death models (Phase 7)
 """
 
 from __future__ import annotations
@@ -483,7 +485,16 @@ def fine_gray(req: FineGrayRequest):
     assumptions = [
         {"name": "Independent censoring", "met": True, "detail": "Competing risks model assumes censoring is non-informative."},
         {"name": "Event types", "met": True, "detail": f"Event types found: {event_types}. Event of interest: {req.event_of_interest}."},
+        {"name": "Subdistribution vs cause-specific", "met": True,
+         "detail": "Fine-Gray sHR has direct interpretation for cumulative incidence but is not a cause-specific hazard ratio."},
     ]
+
+    warnings = []
+    n_event_interest = int((events == req.event_of_interest).sum())
+    if n_event_interest < 20:
+        warnings.append(f"Only {n_event_interest} events of interest — Fine-Gray estimates may be unstable.")
+    if n_total < 100:
+        warnings.append("Small overall sample size for competing risks analysis.")
 
     n_total = len(work)
     result_text = (
@@ -493,6 +504,8 @@ def fine_gray(req: FineGrayRequest):
     )
     if gray_p is not None:
         result_text += f" Gray's test p = {gray_p}."
+    if warnings:
+        result_text += " " + " ".join(warnings)
 
     export_rows = [["Group", "N", "Events of Interest", "Competing Events", "Censored", "CIF at Max Time"]]
     for g in groups:
@@ -563,6 +576,7 @@ def fine_gray(req: FineGrayRequest):
         "gray_p": gray_p,
         "plot": plot,
         "assumptions": assumptions,
+        "warnings": warnings,
         "result_text": result_text,
         "export_rows": export_rows,
         "r_code": r_code,
@@ -583,6 +597,10 @@ class EValueRequest(BaseModel):
 
 @router.post("/evalue")
 def evalue(req: EValueRequest):
+    # DEPRECATION NOTICE (Phase 6)
+    # This endpoint is legacy. Please migrate to the much richer implementation:
+    #   POST /api/model_diagnostics/causal_sensitivity
+    # which supports better OR→RR conversion, QBA, and consistent response shape.
     est = req.estimate
     ci_lo = req.ci_low
     ci_hi = req.ci_high
@@ -840,6 +858,8 @@ def landmark_analysis(req: LandmarkRequest):
          "detail": f"{n_excluded} subjects excluded (event or censored before t={req.landmark_time})."},
         {"name": "Sufficient sample", "met": len(lm_df) >= 20,
          "detail": f"{len(lm_df)} subjects remain after landmark."},
+        {"name": "Landmark selection bias", "met": True,
+         "detail": "Landmark analysis conditions on survival to the landmark time; results do not apply to patients who failed earlier."},
     ]
     if logrank_p is not None:
         assumptions.append({"name": "Log-rank test", "met": logrank_p < 0.05,
@@ -1015,6 +1035,8 @@ def rmst(req: RMSTRequest):
     if len(df) < 5:
         raise HTTPException(status_code=400, detail=f"Not enough complete rows (need ≥ 5, got {len(df)}).")
 
+    rmst_warnings: list[str] = []
+
     t_all = df[req.duration_col].values.astype(float)
     if np.any(t_all < 0):
         raise HTTPException(status_code=422, detail="Negative durations are not allowed.")
@@ -1150,14 +1172,23 @@ def rmst(req: RMSTRequest):
             "average event-free time lived during the first τ time units."
         )
 
+    if rmst_warnings:
+        result_text += " " + " ".join(rmst_warnings)
+
     assumptions = [
         {"name": "Censoring at random",      "met": True,
          "detail": "RMST assumes censoring is independent of the event process within each group."},
         {"name": "τ within observed range",  "met": True,
          "detail": f"τ = {req.tau} is at or below the maximum observed time ({float(t_all.max()):.3f})."},
         {"name": "No proportional-hazards required", "met": True,
-         "detail": "RMST is a robust alternative when the PH assumption fails (e.g. crossing curves, late effects)."},
+         "detail": "RMST is a robust, PH-free summary (recommended when hazards cross or treatment effect is delayed)."},
     ]
+
+    rmst_warnings = []
+    if req.tau > 0.9 * float(t_all.max()):
+        rmst_warnings.append("τ is close to the maximum follow-up — RMST estimate has higher uncertainty in the tail.")
+    if len(df) < 50:
+        rmst_warnings.append("Small sample size — consider reporting median survival or Kaplan-Meier curves alongside RMST.")
 
     export_rows = [["Group", "n", "Events", "RMST (τ)", "SE", "95% CI low", "95% CI high"]]
     for g_label, gv in rmst_by_group.items():
@@ -1203,6 +1234,7 @@ def rmst(req: RMSTRequest):
         "contrasts": contrasts,
         "plot": plot,
         "assumptions": assumptions,
+        "warnings": rmst_warnings,
         "result_text": result_text,
         "export_rows": export_rows,
         "r_code": r_code,
@@ -1430,3 +1462,354 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
         "export_rows": export_rows,
         "r_code": r_code,
     })
+
+
+# ── Phase 7: Multi-State Models ──────────────────────────────────────────────
+#
+# Basic support for illness-death and other multi-state processes.
+# Accepts long-format transition data and returns transition-specific models.
+
+class MultistateRequest(BaseModel):
+    session_id: str
+    id_col: str = "id"
+    from_state_col: str = "from_state"
+    to_state_col: str = "to_state"
+    entry_col: str = "entry"
+    exit_col: str = "exit"
+    event_col: str = "event"
+    predictors: List[str]
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/multistate")
+def multistate(req: MultistateRequest):
+    df_full = _get_df(req.session_id)
+
+    needed = [
+        req.id_col, req.from_state_col, req.to_state_col,
+        req.entry_col, req.exit_col, req.event_col
+    ] + req.predictors
+
+    missing = [c for c in needed if c not in df_full.columns]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing}")
+
+    from services.impute import apply_imputation
+    work = apply_imputation(df_full[needed], needed, req.imputation or "listwise")
+
+    from services.multistate import fit_multistate_transitions
+    result = fit_multistate_transitions(
+        work,
+        id_col=req.id_col,
+        from_state_col=req.from_state_col,
+        to_state_col=req.to_state_col,
+        entry_col=req.entry_col,
+        exit_col=req.exit_col,
+        event_col=req.event_col,
+        predictors=req.predictors,
+    )
+
+    result["test"] = "Multi-State Transition Models (Phase 7)"
+    result["result_text"] = (
+        f"Multi-state analysis on {len(work)} transition records. "
+        f"Estimated {len(result.get('transitions_estimated', []))} transition(s) using cause-specific Cox models."
+    )
+    return result
+
+
+class DynamicPredictionRequest(BaseModel):
+    session_id: str
+    landmark_time: float
+    current_state: int = 0
+    id_col: str = "id"
+    from_state_col: str = "from_state"
+    to_state_col: str = "to_state"
+    entry_col: str = "entry"
+    exit_col: str = "exit"
+    event_col: str = "event"
+    predictors: List[str]
+    horizon: float = 5.0
+    n_points: int = 20
+
+
+@router.post("/dynamic_prediction")
+def dynamic_prediction(req: DynamicPredictionRequest):
+    """
+    Dynamic multi-state prediction from a landmark time, conditional on being in a specific state.
+    Builds on the existing Landmark infrastructure + multi-state transition models (Phase 7).
+    """
+    df_full = _get_df(req.session_id)
+
+    needed = [
+        req.id_col, req.from_state_col, req.to_state_col,
+        req.entry_col, req.exit_col, req.event_col
+    ] + req.predictors
+
+    missing = [c for c in needed if c not in df_full.columns]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing}")
+
+    from services.impute import apply_imputation
+    work = apply_imputation(df_full[needed], needed, "listwise")
+
+    from services.multistate import dynamic_prediction_from_landmark
+    horizon_times = np.linspace(req.landmark_time, req.landmark_time + req.horizon, req.n_points)
+
+    result = dynamic_prediction_from_landmark(
+        work,
+        landmark_time=req.landmark_time,
+        current_state=req.current_state,
+        predictors=req.predictors,
+        id_col=req.id_col,
+        from_state_col=req.from_state_col,
+        to_state_col=req.to_state_col,
+        entry_col=req.entry_col,
+        exit_col=req.exit_col,
+        event_col=req.event_col,
+        horizon_times=horizon_times,
+    )
+
+    # Enrich response (Phase 7 A)
+    assumptions = [
+        {"name": "Landmark conditioning", "met": True,
+         "detail": f"Predictions conditional on being in state {req.current_state} at t={req.landmark_time}."},
+        {"name": "Markov assumption", "met": True,
+         "detail": "Transition intensities depend only on current state and covariates (standard Markov multi-state model)."},
+    ]
+
+    warnings = []
+    n_at_risk = result.get("n_at_risk", 0)
+    if n_at_risk < 30:
+        warnings.append(f"Only {n_at_risk} subjects at risk at landmark — dynamic predictions have high uncertainty.")
+
+    err = result.get("prediction_error", {})
+    if err and "overall_mean_error" in err:
+        if err["overall_mean_error"] > 1.5:
+            warnings.append("High overall prediction error — consider adding more covariates or checking model fit.")
+
+    result_text = (
+        f"Dynamic multi-state prediction at landmark t={req.landmark_time} from state {req.current_state}. "
+        f"Horizon = {req.horizon} time units using {n_at_risk} subjects still at risk. "
+    )
+    if err and "overall_mean_error" in err:
+        result_text += f"Overall mean squared prediction error = {err['overall_mean_error']}."
+
+    result["test"] = "Dynamic Multi-State Prediction (Phase 7)"
+    result["assumptions"] = assumptions
+    result["warnings"] = warnings
+    result["result_text"] = result_text
+    return result
+
+
+# ── Phase 8: Joint Longitudinal-Survival Models ──────────────────────────────
+
+class JointModelRequest(BaseModel):
+    session_id_long: str
+    session_id_surv: Optional[str] = None   # if None, assume same session
+    id_col: str = "id"
+    time_col: str = "time"
+    y_col: str = "Y"
+    long_predictors: List[str] = []
+    surv_predictors: List[str] = []
+    duration_col: str = "duration"
+    event_col: str = "event"
+
+
+@router.post("/joint_model")
+def joint_model(req: JointModelRequest):
+    """
+    Two-stage joint longitudinal-survival model (Phase 8).
+    """
+    long_df = _get_df(req.session_id_long)
+
+    if req.session_id_surv:
+        surv_df = _get_df(req.session_id_surv)
+    else:
+        surv_df = long_df  # fallback (user should provide proper survival data)
+
+    from services.joint_model import fit_two_stage_joint_model
+    result = fit_two_stage_joint_model(
+        long_df,
+        surv_df,
+        id_col=req.id_col,
+        time_col=req.time_col,
+        y_col=req.y_col,
+        long_predictors=req.long_predictors or [],
+        surv_predictors=req.surv_predictors or [],
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+    )
+
+    result["test"] = "Joint Longitudinal-Survival Model (Two-Stage, Phase 8)"
+    result["result_text"] = (
+        f"Two-stage joint model fitted on {result['n_subjects']} subjects. "
+        "Random effects from longitudinal LMM used as predictors in Cox model."
+    )
+    return result
+
+
+# ── Phase 9: External Validation & Calibration Framework ─────────────────────
+
+class ExternalValidationRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predicted_lp_col: str
+    time_points: Optional[List[float]] = None
+    survival_probs: Optional[List[List[float]]] = None  # n_samples x len(time_points)
+    dev_metrics: Optional[Dict[str, float]] = None
+
+
+@router.post("/external_validation")
+def external_validation(req: ExternalValidationRequest):
+    """
+    External validation with time-dependent metrics (Phase 9).
+    Pass survival_probs (list of lists) at time_points for full IBS + tdAUC.
+    """
+    df = _get_df(req.session_id)
+
+    surv_probs_arr = np.array(req.survival_probs) if req.survival_probs else None
+
+    from services.external_validation import evaluate_external_validation
+    result = evaluate_external_validation(
+        val_df=df,
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+        predicted_lp_col=req.predicted_lp_col,
+        survival_probs=surv_probs_arr,
+        time_points=np.array(req.time_points) if req.time_points else None,
+        dev_metrics=req.dev_metrics,
+    )
+
+    result["test"] = "External Validation & Calibration (Phase 9 - Enhanced)"
+    if "error" not in result:
+        assumptions = [
+            {"name": "Independent censoring", "met": True, "detail": "IPCW assumes non-informative censoring."},
+            {"name": "Model transportability", "met": result.get("performance_vs_dev") is None or abs(result.get("performance_vs_dev", {}).get("c_index_drop", 0)) < 0.1, "detail": "Performance drop between dev and val indicates poor transportability."},
+        ]
+        warnings = []
+        if result.get("integrated_brier_score", {}).get("ibs", 0) > 0.25:
+            warnings.append("High Integrated Brier Score — predictions may be poorly calibrated on this population.")
+
+        result["assumptions"] = assumptions
+        result["warnings"] = warnings
+        result["result_text"] = (
+            f"External validation on n={result['n_validation']}. "
+            f"C-index={result.get('validation_c_index')}. "
+            f"IBS={result.get('integrated_brier_score', {}).get('ibs') if 'integrated_brier_score' in result else 'N/A (provide survival_probs)'}."
+        )
+    return result
+
+
+# ── Phase 10: Survival ML Benchmark (initial) ────────────────────────────────
+
+class SurvivalMLBenchmarkRequest(BaseModel):
+    session_id: str
+    duration_col: str = "duration"
+    event_col: str = "event"
+    predictors: Optional[List[str]] = None
+    n_estimators: int = 300
+
+
+@router.post("/ml_survival_benchmark")
+def ml_survival_benchmark(req: SurvivalMLBenchmarkRequest):
+    """
+    Phase 10 starter: Head-to-head of classical Cox vs practical ML survival model
+    (Gradient Boosting ranking) with permutation importance.
+    """
+    df = _get_df(req.session_id)
+
+    preds = req.predictors or [c for c in df.columns if c not in (req.duration_col, req.event_col)]
+
+    from services.survival_ml import run_survival_ml_benchmark
+    result = run_survival_ml_benchmark(
+        df,
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+        predictors=preds,
+        n_estimators=req.n_estimators,
+    )
+
+    result["test"] = "Survival ML Benchmark (Phase 12 - deepened)"
+    # Prefer the rich result_text produced by the service (Phase 12)
+    if not result.get("result_text"):
+        result["result_text"] = (
+            f"ML vs Cox benchmark on n={result.get('n')} subjects with full Phase 9 integration. "
+            "Useful when strong non-linear effects or interactions are suspected."
+        )
+    return result
+
+
+# ── 7. Shared Frailty Cox (Phase 6) ─────────────────────────────────────────
+
+#
+# Gamma shared frailty for clustered / correlated survival data.
+# See services/frailty.py for the implementation details.
+
+class FrailtyRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    cluster_col: str
+    predictors: List[str]
+    penalizer: float = 0.05
+    imputation: Optional[str] = "listwise"
+
+
+@router.post("/frailty")
+def shared_frailty(req: FrailtyRequest):
+    df_full = _get_df(req.session_id)
+
+    needed = [req.duration_col, req.event_col, req.cluster_col] + req.predictors
+    missing = [c for c in needed if c not in df_full.columns]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing}")
+
+    from services.impute import apply_imputation
+    df = apply_imputation(df_full[needed], needed, req.imputation or "listwise")
+
+    from services.frailty import fit_shared_gamma_frailty
+    result = fit_shared_gamma_frailty(
+        df,
+        duration_col=req.duration_col,
+        event_col=req.event_col,
+        cluster_col=req.cluster_col,
+        predictors=req.predictors,
+        penalizer=req.penalizer,
+    )
+
+    # Make everything JSON-safe (cluster keys can be numpy.int64 etc.)
+    def _safe(v):
+        if isinstance(v, (np.integer,)):
+            return int(v)
+        if isinstance(v, (np.floating,)):
+            return float(v) if np.isfinite(v) else None
+        if isinstance(v, float) and not np.isfinite(v):
+            return None
+        if isinstance(v, dict):
+            return {str(k): _safe(val) for k, val in v.items()}
+        if isinstance(v, list):
+            return [_safe(x) for x in v]
+        return v
+
+    result = _safe(result)
+
+    # Add a small plot of the frailty distribution (posterior means)
+    frailties = list(result["cluster_frailties"].values())
+    frailty_plot = {
+        "data": [{
+            "x": sorted(frailties),
+            "type": "histogram",
+            "name": "Posterior frailties",
+            "nbinsx": min(20, max(5, len(frailties) // 3)),
+        }],
+        "layout": {
+            "title": "Estimated Cluster Frailties (Gamma model)",
+            "xaxis": {"title": "Frailty multiplier (mean=1)"},
+            "yaxis": {"title": "Number of clusters"},
+        },
+    }
+
+    result["plot"] = frailty_plot
+    result["test"] = "Shared Gamma Frailty Cox Model"
+    return result

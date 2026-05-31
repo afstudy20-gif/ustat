@@ -504,7 +504,34 @@ def test_recurrent_lwyy(client, sid_recurrent):
     assert d["plot"]["data"] and len(d["plot"]["data"][0]["x"]) > 1
 
 
-# 27. Multistage gatekeeping (truncated Hochberg)
+# 27. Shared Frailty (Phase 6)
+@pytest.fixture(scope="module")
+def sid_frailty():
+    from services.simulation_generators import generate_shared_frailty_survival_data
+    df, _ = generate_shared_frailty_survival_data(n_subjects=240, n_clusters=24, cluster_effect_sd=0.65, seed=11)
+    # Rename for endpoint convention
+    df = df.rename(columns={"duration": "time", "event": "status"})
+    return make_session(df, "frailty_session")
+
+
+def test_shared_frailty(client, sid_frailty):
+    r = client.post("/api/survival_advanced/frailty", json={
+        "session_id": sid_frailty,
+        "duration_col": "time",
+        "event_col": "status",
+        "cluster_col": "cluster",
+        "predictors": ["X1", "X2", "X3"],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["n_clusters"] >= 20
+    assert 0.05 < d["theta"] < 3.0   # plausible range for the simulated theta
+    assert len(d["coefficients"]) >= 3
+    assert "cluster_frailties" in d and len(d["cluster_frailties"]) > 5
+    assert "plot" in d
+
+
+# 28. Multistage gatekeeping (truncated Hochberg)
 def test_gatekeeping_serial(client):
     payload = {
         "method": "hochberg", "logic": "serial", "alpha": 0.05,

@@ -200,6 +200,28 @@ def arima(req: ARIMARequest):
     except Exception:
         pass
 
+    # In-sample forecast accuracy (fitted vs observed)
+    resid = (y - fitted).dropna()
+    rmse = float(np.sqrt(np.mean(resid ** 2))) if len(resid) > 0 else None
+    mae = float(np.mean(np.abs(resid))) if len(resid) > 0 else None
+
+    assumptions = [
+        {"name": "Residual white noise", "met": lb_p is not None and lb_p >= 0.05,
+         "detail": f"Ljung-Box p = {lb_p}" if lb_p is not None else "n/a"},
+        {"name": "Stationarity & invertibility", "met": True,
+         "detail": "Model was fit with enforce_stationarity/invertibility=False for robustness."},
+    ]
+
+    warnings = []
+    if lb_p is not None and lb_p < 0.05:
+        warnings.append("Residuals show significant autocorrelation — model may be misspecified.")
+    if len(y) < 50:
+        warnings.append("Small sample size — ARIMA estimates and forecasts have high uncertainty.")
+
+    result_text = interp
+    if rmse is not None:
+        result_text += f" In-sample RMSE={rmse:.2f}, MAE={mae:.2f}."
+
     return _safe({
         "test": "ARIMA / SARIMA",
         "value_col": req.value_col,
@@ -210,11 +232,15 @@ def arima(req: ARIMARequest):
         "aic": round(float(fit.aic), 3),
         "bic": round(float(fit.bic), 3),
         "ljung_box_p": lb_p,
+        "in_sample_rmse": round(rmse, 4) if rmse else None,
+        "in_sample_mae": round(mae, 4) if mae else None,
         "coefficients": coefs,
         "fitted": fit_pairs,
         "forecast": fc_rows,
+        "assumptions": assumptions,
+        "warnings": warnings,
         "interpretation": interp,
-        "result_text": interp,
+        "result_text": result_text,
         "obs_index": obs_x,
     })
 

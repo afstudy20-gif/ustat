@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Dict, List, Optional
 import time
 from threading import Lock
+from fastapi import HTTPException
 
 _store: Dict[str, dict] = {}  # {session_id: {"df": DataFrame, "timestamp": float}}
 _filters: Dict[str, List[dict]] = {}
@@ -310,3 +311,15 @@ def rename_decimal_key(session_id: str, old: str, new: str) -> None:
     """Move the decimal entry to a new column name (called on rename)."""
     if session_id in _decimals and old in _decimals[session_id]:
         _decimals[session_id][new] = _decimals[session_id].pop(old)
+
+
+def get_df(session_id: str) -> "pd.DataFrame":
+    """
+    Convenience helper: return the (filtered) dataframe for a session.
+    Raises 404 if the session does not exist.
+    This used to live in routers/models.py as _get_df.
+    """
+    df = get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return df

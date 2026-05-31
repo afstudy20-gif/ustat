@@ -7,6 +7,12 @@ from main import app
 from services import store
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "simulation: marks tests as simulation-based (deselect with '-m \"not simulation\"')"
+    )
+
+
 @pytest.fixture
 def client():
     return TestClient(app)

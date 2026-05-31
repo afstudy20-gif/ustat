@@ -568,14 +568,11 @@ class ROCRequest(BaseModel):
     score_column: str
     outcome_column: str
     manual_cutoff: Optional[float] = None
-    imputation: Optional[str] = "listwise"  # "listwise" | "median" | "mice"
-    # Score direction:
-    #   "auto"   — flip when the naïve AUC < 0.5 (e.g. albumin, where low
-    #              values predict the event) so the reported AUC and curve
-    #              describe the protective biomarker correctly
-    #   "higher" — higher score predicts the event (legacy default)
-    #   "lower"  — lower  score predicts the event
+    imputation: Optional[str] = "listwise"
     direction: Optional[str] = "auto"
+    # NEW: Sex-specific / stratified ROC
+    stratify_by: Optional[str] = None          # e.g. "SEX", "gender"
+    stratify_values: Optional[List[str]] = None  # e.g. ["Male", "Female"] or [0, 1]
 
 
 def _roc_metrics_at_cutoff(scores: np.ndarray, y: np.ndarray, threshold: float) -> dict:
@@ -712,6 +709,50 @@ def roc_analysis(req: ROCRequest):
         df_full, req.score_column, req.outcome_column,
         imputation=req.imputation or "listwise"
     )
+
+    # === Sex-specific / Stratified ROC (Phase 2 improvement) ===
+    if req.stratify_by:
+        if req.stratify_by not in df.columns:
+            raise HTTPException(400, f"Stratification column '{req.stratify_by}' not found.")
+
+        strata_results = {}
+        strata_values = req.stratify_values or df[req.stratify_by].dropna().unique().tolist()
+
+        for val in strata_values:
+            mask = df[req.stratify_by] == val
+            if mask.sum() < 20:
+                continue
+
+            s_scores = scores_arr[mask.values]
+            s_y = y_arr[mask.values]
+
+            try:
+                fpr_s, tpr_s, th_s = roc_curve(s_y, s_scores)
+                auc_s = float(roc_auc_score(s_y, s_scores))
+
+                # Optimal cutoff (Youden)
+                j_scores = tpr_s + (1 - fpr_s) - 1
+                best_idx = int(np.argmax(j_scores))
+                best_cut = float(th_s[best_idx])
+
+                strata_results[str(val)] = {
+                    "n": int(mask.sum()),
+                    "auc": round(auc_s, 4),
+                    "optimal_cutoff": round(best_cut, 4),
+                    "sensitivity_at_opt": round(float(tpr_s[best_idx]), 4),
+                    "specificity_at_opt": round(float(1 - fpr_s[best_idx]), 4),
+                }
+            except Exception:
+                continue
+
+        # If stratification requested, return early with strata results
+        if strata_results:
+            return {
+                "test": "ROC Analysis (Stratified)",
+                "stratified_by": req.stratify_by,
+                "strata": strata_results,
+                "note": "Separate ROC analysis performed within each stratum."
+            }
 
     try:
         fpr, tpr, thresholds = roc_curve(y_arr, scores_arr)
