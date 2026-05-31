@@ -39,7 +39,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Run tests with coverage
-        run: pytest --cov=routers --cov=services --cov-report=term-missing -q
+        # Ratchet: 45 is a no-regression floor (current ≈48%). Raise this toward
+        # 60 then 80 as coverage improves — never lower it.
+        run: pytest --cov=routers --cov=services --cov-report=term-missing --cov-fail-under=45 -q
 
   frontend:
     name: Frontend (typecheck + build)
