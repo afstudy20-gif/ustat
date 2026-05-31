@@ -1063,16 +1063,33 @@ export default function DescriptivePanel() {
           })}
         </div>
 
-        {/* ── Scatter Plot view: clean, only the scatter plot. No Histogram/Box/Violin/Q-Q tabs or panels inside (those 4 only live as top-level sub-tabs under Descriptive) ── */}
+        {/* ── Scatter Plot view: clean scatter with red draggable resize line on the right (matching the other Descriptive sub-tabs) ── */}
         {view === "scatter" && (
-          <div className="flex-1 p-4 overflow-auto">
-            <ScatterView
-              key={session.session_id}
-              sessionId={session.session_id}
-              numCols={numCols}
-              catCols={catCols}
-              defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
-            />
+          <div className="p-4">
+            <div 
+              className="relative border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden"
+              style={{ width: `${plotWidth}px`, minWidth: 520, maxWidth: '100%' }}
+            >
+              <ScatterView
+                key={session.session_id}
+                sessionId={session.session_id}
+                numCols={numCols}
+                catCols={catCols}
+                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
+              />
+
+              {/* Red vertical resize line on the right (drag to change scatter width) */}
+              <div
+                onPointerDown={onPlotResizeStart}
+                onDoubleClick={resetPlotWidth}
+                className="absolute top-0 bottom-0 w-[5px] right-0 cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 transition-colors z-20"
+                title="Drag the red line to resize the scatter plot width • Double-click to reset"
+              />
+            </div>
+
+            <div className="text-[10px] text-gray-400 mt-1">
+              Drag the red line on the right edge to resize the scatter plot width (like the other Descriptive tabs)
+            </div>
           </div>
         )}
 
