@@ -364,6 +364,22 @@ def test_recurrent_lwyy_missing_column_400(client, sid_recur):
     assert r.status_code == 400, r.text
 
 
+def test_recurrent_lwyy_group_col_also_predictor(client, sid_recur):
+    # Regression: group_col duplicating a predictor used to yield duplicate
+    # DataFrame columns → pd.to_numeric TypeError → unhandled 500.
+    r = client.post(f"{PREFIX}/recurrent_lwyy", json={
+        "session_id": sid_recur,
+        "id_col": "subj_id",
+        "start_col": "start",
+        "stop_col": "stop",
+        "event_col": "rec_event",
+        "predictors": ["TRT", "AGE"],
+        "group_col": "TRT",
+    })
+    assert r.status_code == 200, r.text
+    assert len(r.json()["coefficients"]) >= 1
+
+
 # ── /survival_validation ─────────────────────────────────────────────────────
 
 def test_survival_validation_happy(client, sid):

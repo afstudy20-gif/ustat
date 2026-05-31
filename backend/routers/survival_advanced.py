@@ -1273,6 +1273,11 @@ def recurrent_lwyy(req: RecurrentLWYYRequest):
     needed = [req.id_col, req.start_col, req.stop_col, req.event_col, *req.predictors]
     if req.group_col:
         needed.append(req.group_col)
+    # De-duplicate while preserving order: group_col (or an id/time column) may
+    # also appear in predictors. Selecting df[needed] with a repeated name yields
+    # duplicate columns, so later single-column indexing returns a 2-D frame and
+    # pd.to_numeric raises — surfacing as an unhandled 500.
+    needed = list(dict.fromkeys(needed))
     for c in needed:
         if c not in df.columns:
             raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
