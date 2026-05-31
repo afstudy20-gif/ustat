@@ -1021,16 +1021,125 @@ export default function DescriptivePanel() {
           ))}
         </div>
 
-        {/* ── Scatter view: just the main scatter (companions removed from right panel as requested) ── */}
+        {/* ── Scatter view: main scatter on left + 4 distribution plots (Hist/Box/Violin/QQ) on right, no extra "Distribution" title ── */}
         {view === "scatter" && (
-          <div className="flex-1 p-4 overflow-auto">
-            <ScatterView
-              key={session.session_id}
-              sessionId={session.session_id}
-              numCols={numCols}
-              catCols={catCols}
-              defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
+          <div className="flex h-full" style={{ minWidth: 0 }}>
+            {/* LEFT: Main scatter plot (resizable width) */}
+            <div
+              className="flex-shrink-0 min-h-0 overflow-hidden border-r border-gray-200"
+              style={{ width: `${plotWidth}px` }}
+            >
+              <ScatterView
+                key={session.session_id}
+                sessionId={session.session_id}
+                numCols={numCols}
+                catCols={catCols}
+                defaultX={selected && numCols.includes(selected) ? selected : (numCols[0] ?? "")}
+              />
+            </div>
+
+            {/* Red vertical resize line (drag to change scatter width, right side gets the 4 plots) */}
+            <div
+              onPointerDown={onPlotResizeStart}
+              onDoubleClick={resetPlotWidth}
+              className="w-[5px] cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 transition-colors z-10 flex-shrink-0"
+              title="Drag red line to resize scatter vs the 4 plots • Double-click to reset"
             />
+
+            {/* RIGHT: The 4 plots (Histogram, Box, Violin, Q-Q) placed beside the scatter - no "Distribution" heading */}
+            <div className="flex-1 flex flex-col min-w-0 bg-gray-50 p-3 overflow-auto">
+              {summary && summary.type === "numeric" ? (
+                <div className="grid grid-cols-2 grid-rows-2 gap-3 h-full">
+                  {/* Histogram */}
+                  <div className="flex flex-col border bg-white rounded overflow-hidden">
+                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Histogram</div>
+                    <div className="flex-1 p-1">
+                      <Plot
+                        data={[{
+                          x: summary.histogram?.map((b: any) => (b.bin_start + b.bin_end) / 2) || [],
+                          y: summary.histogram?.map((b: any) => b.count) || [],
+                          type: "bar",
+                          marker: { color: "#6366f1" },
+                        }]}
+                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false, xaxis: { showgrid: true }, yaxis: { showgrid: true } }}
+                        style={{ width: "100%", height: "100%" }}
+                        useResizeHandler
+                      />
+                    </div>
+                  </div>
+
+                  {/* Box Plot */}
+                  <div className="flex flex-col border bg-white rounded overflow-hidden">
+                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Box Plot</div>
+                    <div className="flex-1 p-1">
+                      <Plot
+                        data={[{
+                          y: summary.raw_values || [],
+                          type: "box",
+                          name: selected,
+                          boxpoints: "outliers",
+                          marker: { color: "#6366f1" },
+                        }]}
+                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false }}
+                        style={{ width: "100%", height: "100%" }}
+                        useResizeHandler
+                      />
+                    </div>
+                  </div>
+
+                  {/* Violin */}
+                  <div className="flex flex-col border bg-white rounded overflow-hidden">
+                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Violin</div>
+                    <div className="flex-1 p-1">
+                      <Plot
+                        data={[{
+                          y: summary.raw_values || [],
+                          type: "violin",
+                          name: selected,
+                          box: { visible: true },
+                          meanline: { visible: true },
+                        }]}
+                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false }}
+                        style={{ width: "100%", height: "100%" }}
+                        useResizeHandler
+                      />
+                    </div>
+                  </div>
+
+                  {/* Q-Q Plot */}
+                  <div className="flex flex-col border bg-white rounded overflow-hidden">
+                    <div className="text-[10px] font-semibold px-2 py-1 border-b bg-gray-100 flex-shrink-0">Q-Q Plot</div>
+                    <div className="flex-1 p-1">
+                      <Plot
+                        data={[
+                          {
+                            x: summary.qq?.map((p: any) => p.x) || [],
+                            y: summary.qq?.map((p: any) => p.y) || [],
+                            type: "scatter",
+                            mode: "markers",
+                            marker: { color: "#6366f1", size: 3 },
+                          },
+                          {
+                            x: summary.qq?.map((p: any) => p.x) || [],
+                            y: summary.qq?.map((p: any) => p.x) || [],
+                            type: "scatter",
+                            mode: "lines",
+                            line: { color: "#ef4444", dash: "dash" },
+                          },
+                        ]}
+                        layout={{ autosize: true, margin: { t: 8, r: 8, b: 25, l: 30 }, showlegend: false, title: { text: "Normality", font: { size: 10 } } }}
+                        style={{ width: "100%", height: "100%" }}
+                        useResizeHandler
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
+                  Select a numeric column from the list to see the four plots here
+                </div>
+              )}
+            </div>
           </div>
         )}
 
