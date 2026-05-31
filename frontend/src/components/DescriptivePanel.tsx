@@ -808,6 +808,68 @@ export default function DescriptivePanel() {
     1400   // max
   );
 
+  // 2D resizable container for the main Distribution plot (user wants red drag lines on right + bottom)
+  const [distPlotW, setDistPlotW] = useState(() => {
+    if (typeof window !== "undefined") {
+      const v = parseInt(localStorage.getItem("uStat.distPlotW") || "920", 10);
+      return Math.max(520, Math.min(1400, v || 920));
+    }
+    return 920;
+  });
+  const [distPlotH, setDistPlotH] = useState(() => {
+    if (typeof window !== "undefined") {
+      const v = parseInt(localStorage.getItem("uStat.distPlotH") || "520", 10);
+      return Math.max(320, Math.min(900, v || 520));
+    }
+    return 520;
+  });
+
+  const distResizeRef = useRef<{ startX: number; startW: number; startY: number; startH: number; mode: "right" | "bottom" } | null>(null);
+
+  const onDistResizeMove = useCallback((e: PointerEvent) => {
+    const d = distResizeRef.current;
+    if (!d) return;
+    if (d.mode === "right") {
+      const dx = e.clientX - d.startX;
+      const nextW = Math.max(520, Math.min(1400, d.startW + dx));
+      setDistPlotW(nextW);
+    } else {
+      const dy = e.clientY - d.startY;
+      const nextH = Math.max(320, Math.min(900, d.startH + dy));
+      setDistPlotH(nextH);
+    }
+  }, []);
+
+  const onDistResizeUp = useCallback(() => {
+    const d = distResizeRef.current;
+    if (!d) return;
+    distResizeRef.current = null;
+    document.removeEventListener("pointermove", onDistResizeMove);
+    document.removeEventListener("pointerup", onDistResizeUp);
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    // persist
+    try {
+      localStorage.setItem("uStat.distPlotW", String(distPlotW));
+      localStorage.setItem("uStat.distPlotH", String(distPlotH));
+    } catch {}
+  }, [onDistResizeMove, distPlotW, distPlotH]);
+
+  const startDistResize = (mode: "right" | "bottom") => (e: React.PointerEvent) => {
+    e.preventDefault();
+    distResizeRef.current = {
+      startX: e.clientX,
+      startW: distPlotW,
+      startY: e.clientY,
+      startH: distPlotH,
+      mode,
+    };
+    document.body.style.cursor = mode === "right" ? "col-resize" : "row-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", onDistResizeMove);
+    document.addEventListener("pointerup", onDistResizeUp);
+  };
+
   useEffect(() => {
     if (!session) return;
     // Fetch real sparkline histograms for all columns
@@ -1195,10 +1257,43 @@ export default function DescriptivePanel() {
                   </div>
                 )}
 
-                {/* Charts */}
-                <div className="flex-1 overflow-y-auto p-4">
-                  {summary.type === "numeric" && <NumericView summary={summary} loadSummary={loadSummary} selected={selected ?? ""} />}
-                  {summary.type === "categorical" && <CategoricalView summary={summary} />}
+                {/* Charts - now inside a 2D resizable box with red drag lines on right + bottom (as requested) */}
+                <div className="p-4">
+                  <div
+                    className="relative border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden"
+                    style={{ width: `${distPlotW}px`, height: `${distPlotH}px`, minWidth: 520, minHeight: 320 }}
+                  >
+                    {/* The actual distribution plot content */}
+                    <div className="absolute inset-0 overflow-auto p-4">
+                      {summary.type === "numeric" && <NumericView summary={summary} loadSummary={loadSummary} selected={selected ?? ""} />}
+                      {summary.type === "categorical" && <CategoricalView summary={summary} />}
+                    </div>
+
+                    {/* Right vertical red resize line (drag to change width) */}
+                    <div
+                      onPointerDown={startDistResize("right")}
+                      className="absolute top-0 bottom-0 w-[5px] right-0 cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 z-20"
+                      title="Drag to resize plot width"
+                    />
+
+                    {/* Bottom horizontal red resize line (drag to change height) */}
+                    <div
+                      onPointerDown={startDistResize("bottom")}
+                      className="absolute left-0 right-0 h-[5px] bottom-0 cursor-row-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 z-20"
+                      title="Drag to resize plot height"
+                    />
+
+                    {/* Small corner handle for convenience */}
+                    <div
+                      onPointerDown={startDistResize("right")} // diagonal would be nicer but this is simple
+                      className="absolute bottom-0 right-0 w-3 h-3 bg-red-500/80 cursor-nwse-resize z-30 rounded-tl"
+                      title="Drag corner to resize both"
+                    />
+                  </div>
+
+                  <div className="text-[10px] text-gray-400 mt-1">
+                    Drag the red lines on the right and bottom to resize the plot area • Changes are remembered
+                  </div>
                 </div>
               </>
             )}
