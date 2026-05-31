@@ -8,7 +8,7 @@ POST /fine_gray         — Fine-Gray competing risks (CIF curves)
 POST /landmark          — Landmark survival analysis
 POST /rmst              — Restricted Mean Survival Time (PH-free alternative)
 POST /recurrent_lwyy    — Recurrent events (LWYY / Andersen-Gill)
-POST /frailty           — Shared gamma frailty Cox (Phase 6)
+POST /frailty           — Shared frailty Cox diagnostics (Phase 6)
 POST /multistate        — Multi-state / illness-death models (Phase 7)
 """
 
@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from services import store
 
@@ -1791,7 +1791,7 @@ def ml_survival_benchmark(req: SurvivalMLBenchmarkRequest):
 # ── 7. Shared Frailty Cox (Phase 6) ─────────────────────────────────────────
 
 #
-# Gamma shared frailty for clustered / correlated survival data.
+# Shared frailty for clustered / correlated survival data.
 # See services/frailty.py for the implementation details.
 
 class FrailtyRequest(BaseModel):
@@ -1801,6 +1801,12 @@ class FrailtyRequest(BaseModel):
     cluster_col: str
     predictors: List[str]
     penalizer: float = 0.05
+    frailty_distribution: str = "gamma"
+    estimation_method: str = "penalized"
+    nested_cluster_cols: List[str] = Field(default_factory=list)
+    correlated_cluster_col: Optional[str] = None
+    baseline_hazard: str = "semi_parametric"
+    include_diagnostics: bool = True
     imputation: Optional[str] = "listwise"
 
 
@@ -1808,7 +1814,11 @@ class FrailtyRequest(BaseModel):
 def shared_frailty(req: FrailtyRequest):
     df_full = _get_df(req.session_id)
 
-    needed = [req.duration_col, req.event_col, req.cluster_col] + req.predictors
+    extra_cluster_cols = [c for c in (req.nested_cluster_cols or []) if c]
+    if req.correlated_cluster_col:
+        extra_cluster_cols.append(req.correlated_cluster_col)
+    needed = [req.duration_col, req.event_col, req.cluster_col] + extra_cluster_cols + req.predictors
+    needed = list(dict.fromkeys(needed))
     missing = [c for c in needed if c not in df_full.columns]
     if missing:
         raise HTTPException(status_code=400, detail=f"Columns not found: {missing}")
@@ -1824,6 +1834,12 @@ def shared_frailty(req: FrailtyRequest):
         cluster_col=req.cluster_col,
         predictors=req.predictors,
         penalizer=req.penalizer,
+        frailty_distribution=req.frailty_distribution,
+        estimation_method=req.estimation_method,
+        nested_cluster_cols=req.nested_cluster_cols or [],
+        correlated_cluster_col=req.correlated_cluster_col,
+        baseline_hazard=req.baseline_hazard,
+        include_diagnostics=req.include_diagnostics,
     )
 
     # Make everything JSON-safe (cluster keys can be numpy.int64 etc.)
@@ -1844,6 +1860,7 @@ def shared_frailty(req: FrailtyRequest):
 
     # Add a small plot of the frailty distribution (posterior means)
     frailties = list(result["cluster_frailties"].values())
+    dist_label = result.get("frailty_distribution", req.frailty_distribution).replace("_", " ").title()
     frailty_plot = {
         "data": [{
             "x": sorted(frailties),
@@ -1852,12 +1869,47 @@ def shared_frailty(req: FrailtyRequest):
             "nbinsx": min(20, max(5, len(frailties) // 3)),
         }],
         "layout": {
-            "title": "Estimated Cluster Frailties (Gamma model)",
+            "title": f"Estimated Cluster Frailties ({dist_label} model)",
             "xaxis": {"title": "Frailty multiplier (mean=1)"},
             "yaxis": {"title": "Number of clusters"},
         },
     }
 
     result["plot"] = frailty_plot
-    result["test"] = "Shared Gamma Frailty Cox Model"
+    scatter = result.get("diagnostics", {}).get("frailty_diagnostics", {}).get("scatter", [])
+    result["diagnostic_plots"] = {
+        "frailty_scatter": {
+            "data": [{
+                "x": [p["events"] for p in scatter],
+                "y": [p["frailty"] for p in scatter],
+                "text": [p["cluster"] for p in scatter],
+                "type": "scatter",
+                "mode": "markers",
+                "name": "Cluster frailty",
+            }],
+            "layout": {
+                "title": "Frailty Diagnostics",
+                "xaxis": {"title": "Cluster events"},
+                "yaxis": {"title": "Frailty multiplier"},
+            },
+        }
+    }
+    if result.get("correlated_frailty", {}).get("pairs"):
+        pairs = result["correlated_frailty"]["pairs"]
+        result["diagnostic_plots"]["correlated_frailty_scatter"] = {
+            "data": [{
+                "x": [p["frailty_primary"] for p in pairs],
+                "y": [p["frailty_secondary"] for p in pairs],
+                "text": [p["cluster"] for p in pairs],
+                "type": "scatter",
+                "mode": "markers",
+                "name": "Bivariate frailty",
+            }],
+            "layout": {
+                "title": "Correlated Frailty Scatter",
+                "xaxis": {"title": req.cluster_col},
+                "yaxis": {"title": req.correlated_cluster_col},
+            },
+        }
+    result["test"] = f"Shared {dist_label} Frailty Cox Model"
     return result
