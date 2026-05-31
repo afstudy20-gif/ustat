@@ -7,11 +7,16 @@ __pycache__/
 env/
 venv/
 .venv/
+*venv/
+virtualenv/
 *.egg-info/
 dist/
 build/
 release/
+*.spec
 .pytest_cache/
+.coverage
+htmlcov/
 *.pyc
 
 # Node / frontend

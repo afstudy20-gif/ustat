@@ -7,6 +7,22 @@ on:
     branches: [main]
 
 jobs:
+  guard-artifacts:
+    name: Block large/binary artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail if any tracked file exceeds 5 MB
+        run: |
+          limit_kb=5120
+          offenders=$(git ls-files -z | xargs -0 -I{} sh -c 'test -f "{}" && echo "$(du -k "{}" | cut -f1) {}"' | awk -v lim="$limit_kb" '$1 > lim')
+          if [ -n "$offenders" ]; then
+            echo "::error::Tracked files exceed ${limit_kb} KB — build artifacts/binaries must not be committed:"
+            echo "$offenders"
+            exit 1
+          fi
+          echo "No oversized tracked files."
+
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
