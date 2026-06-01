@@ -27,12 +27,15 @@ from starlette.responses import Response
 
 _DEFAULT_CSP = "; ".join([
     "default-src 'self'",
-    # Plotly / PWA service worker / inline tailwind styles
+    # 'unsafe-eval' is currently required by the bundled Plotly.js build; it
+    # should be dropped once charts are verified to render without it. The
+    # backend formula evaluator no longer uses eval() (see routers/compute.py).
     "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    "connect-src 'self' https://mapmyvisitors.com",
+    # Same-origin only — the MapMyVisitors tracker has been removed.
+    "connect-src 'self'",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

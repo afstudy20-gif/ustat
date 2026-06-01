@@ -1,9 +1,15 @@
 """In-memory dataframe store keyed by session id with automatic cleanup."""
+import os
 import pandas as pd
 from typing import Dict, List, Optional
 import time
 from threading import Lock
 from fastapi import HTTPException
+
+# Per-dataset size ceiling (rows × columns). Guards the in-memory store against
+# a single oversized frame — from upload or from a runaway compute/merge.
+# ~20M cells ≈ 200k rows × 100 cols. Override via env.
+MAX_SESSION_CELLS = int(os.environ.get("MAX_SESSION_CELLS", str(20_000_000)))
 
 _store: Dict[str, dict] = {}  # {session_id: {"df": DataFrame, "timestamp": float}}
 _filters: Dict[str, List[dict]] = {}
@@ -61,6 +67,15 @@ def save(session_id: str, df: pd.DataFrame, track_undo: bool = True) -> None:
     If track_undo=True, pushes the previous state onto the undo stack.
     """
     _cleanup_old_sessions()
+    n_cells = int(df.shape[0]) * int(df.shape[1])
+    if n_cells > MAX_SESSION_CELLS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"Dataset too large: {df.shape[0]:,} rows × {df.shape[1]:,} cols "
+                f"= {n_cells:,} cells (limit {MAX_SESSION_CELLS:,})."
+            ),
+        )
     with _lock:
         # Push current state to undo stack before overwriting
         if track_undo and session_id in _store:

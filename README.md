@@ -333,8 +333,7 @@ Highlights:
   [`.github/workflows/security-scan.yml`](.github/workflows/security-scan.yml)
   runs `bandit`, `pip-audit`, `npm audit`, `semgrep` (OWASP Top 10), and
   `gitleaks`.
-- No persistent storage, no accounts, no analytics beyond an aggregate
-  visitor map.
+- No persistent storage, no accounts, no third-party analytics or trackers.
 
 If you discover a vulnerability, email
 [adycovs@gmail.com](mailto:adycovs@gmail.com?subject=%5BuSTAT-security%5D)

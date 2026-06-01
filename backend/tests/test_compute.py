@@ -83,6 +83,21 @@ def test_formula_custom_if_function(client, synth):
     assert body["n_computed"] == 200
 
 
+@pytest.mark.parametrize("evil", [
+    "().__class__.__bases__[0].__subclasses__()",  # dunder traversal
+    "AGE.__class__",                                 # attribute access
+    "__import__('os').system('echo pwned')",         # import / RCE
+    "AGE.to_csv('/tmp/leak.csv')",                    # method call → disk write
+    "open('/etc/passwd').read()",                     # builtin file read
+])
+def test_formula_rejects_code_injection(client, synth, evil):
+    # The formula evaluator must not execute arbitrary Python — every escape
+    # attempt should be rejected as an invalid formula, never run.
+    sid = _fresh(synth, "formula_evil")
+    r = client.post(f"{BASE}/{sid}/formula", json={"formula": evil, "new_col": "X"})
+    assert r.status_code in (400, 422), f"injection not blocked: {evil!r} -> {r.status_code}"
+
+
 def test_formula_unknown_column(client, synth):
     sid = _fresh(synth, "formula_bad")
     r = client.post(f"{BASE}/{sid}/formula",

@@ -4,10 +4,14 @@ import tempfile
 import os
 import pandas as pd
 import pyreadstat
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from services import store
 
 router = APIRouter()
+
+# Hard cap on a single uploaded dataset. Protects the in-memory store from
+# being exhausted by an oversized (or hostile) file. Override via env.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))  # 100 MB
 
 import re
 
@@ -99,8 +103,17 @@ def _read(filename: str, content: bytes) -> pd.DataFrame:
 
 
 @router.post("/")
-async def upload_file(file: UploadFile = File(...)):
-    content = await file.read()
+async def upload_file(request: Request, file: UploadFile = File(...)):
+    _max_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+    # Cheap pre-check on the declared size (rejects before reading the body).
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum upload size is {_max_mb} MB.")
+    # Hard cap on the bytes actually read — defends against a missing or spoofed
+    # Content-Length. Read one byte past the limit; if we got it, it's too big.
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail=f"File too large. Maximum upload size is {_max_mb} MB.")
     try:
         df = _read(file.filename, content)
     except Exception as e:

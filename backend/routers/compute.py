@@ -66,47 +66,62 @@ class FormulaRequest(BaseModel):
 
 
 def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Series:
-    """
-    Evaluate formula with custom IF, ISNA, DAYS functions.
-    Converts formula to use numpy/pandas operations and evaluates with proper namespace.
-    """
-    import re as regex
+    """Evaluate a column-arithmetic formula safely.
 
-    # Replace custom functions with their implementations
-    # Handle DAYS(date1, date2) -> (pd.to_datetime(date1) - pd.to_datetime(date2)).dt.days
-    formula_proc = formula
-    formula_proc = regex.sub(
-        r'DAYS\(([^,]+),\s*([^)]+)\)',
-        r'((pd.to_datetime(\1) - pd.to_datetime(\2)).dt.days)',
-        formula_proc
-    )
-    # Handle ISNA(x) -> pd.isna(x)
-    formula_proc = regex.sub(r'ISNA\(([^)]+)\)', r'pd.isna(\1)', formula_proc)
-    # Handle IF(cond, true, false) -> np.where(cond, true, false)
-    formula_proc = regex.sub(
-        r'IF\(([^,]+),\s*([^,]+),\s*([^)]+)\)',
-        r'np.where(\1, \2, \3)',
-        formula_proc
-    )
+    Uses simpleeval instead of Python's eval(): there is no __builtins__, no
+    imports, no attribute access (so dunder traversal like
+    ``().__class__.__bases__`` is impossible), and the only callable surface is
+    a fixed whitelist of spreadsheet-style functions. Operators apply directly
+    to pandas Series so column arithmetic still vectorises, and the only
+    resolvable identifiers are the dataframe's own column names.
+    """
+    import ast
+    import operator as op
 
-    # Build namespace with numpy, pandas, and all columns
-    namespace = {
-        'np': np,
-        'pd': pd,
-        **{col: df[col] for col in df.columns}
+    from simpleeval import DEFAULT_OPERATORS, InvalidExpression, SimpleEval
+
+    def _days(d1, d2):
+        return (pd.to_datetime(d1) - pd.to_datetime(d2)).dt.days
+
+    functions = {
+        "IF":    lambda cond, a, b: np.where(cond, a, b),
+        "ISNA":  lambda x: pd.isna(x),
+        "DAYS":  _days,
+        "ABS":   np.abs,
+        "LOG":   np.log,
+        "LOG10": np.log10,
+        "LOG2":  np.log2,
+        "EXP":   np.exp,
+        "SQRT":  np.sqrt,
+        "ROUND": np.round,
+        "MIN":   np.minimum,
+        "MAX":   np.maximum,
+        "FLOOR": np.floor,
+        "CEIL":  np.ceil,
     }
+    # Allow element-wise boolean combination of Series conditions (&, |, ^, ~)
+    # in addition to simpleeval's defaults; needed for IF(A>0 & B<5, ...).
+    operators = {
+        **DEFAULT_OPERATORS,
+        ast.BitAnd: op.and_,
+        ast.BitOr:  op.or_,
+        ast.BitXor: op.xor,
+        ast.Invert: op.invert,
+    }
+    names = {col: df[col] for col in df.columns}
 
-    # Sandboxed eval: __builtins__ disabled, formula pre-validated against a
-    # strict allow-list regex (see ALLOWED_FORMULA_TOKENS above). Bandit B307
-    # noted but accepted — replacing with ast.literal_eval would break the
-    # legitimate pandas/numpy column-arithmetic feature this endpoint exists for.
-    result = eval(formula_proc, {"__builtins__": {}}, namespace)  # nosec B307
-
-    if not isinstance(result, (pd.Series, np.ndarray)):
-        raise ValueError("Formula did not produce a series result")
+    evaluator = SimpleEval(operators=operators, functions=functions, names=names)
+    try:
+        result = evaluator.eval(formula)
+    except InvalidExpression as exc:
+        # NameNotDefined / FunctionNotDefined / FeatureNotAvailable / numeric
+        # guards all subclass InvalidExpression.
+        raise ValueError(str(exc))
 
     if isinstance(result, np.ndarray):
         result = pd.Series(result, index=df.index)
+    if not isinstance(result, pd.Series):
+        raise ValueError("Formula did not produce a series result")
 
     return result
 
@@ -134,7 +149,7 @@ def formula_compute(session_id: str, req: FormulaRequest):
     except Exception as exc:
         msg = str(exc)
         # Make common errors more user-friendly
-        if "undefined" in msg.lower() or "UndefinedVariable" in msg:
+        if "not defined" in msg.lower() or "undefined" in msg.lower() or "UndefinedVariable" in msg:
             # Extract the offending name
             m = re.search(r"'(\w+)'", msg)
             bad = f" Column '{m.group(1)}' not found." if m else ""
