@@ -634,9 +634,12 @@ def linear_mixed_model(req: LMMRequest):
         "n": int(model.nobs),
         "n_groups": int(df[req.group_col].nunique()),
         "n_excluded": n_excluded,
-        "aic": float(model.aic),
-        "bic": float(model.bic),
-        "log_likelihood": float(model.llf),
+        # statsmodels MixedLM under REML leaves AIC/BIC undefined (NaN); coerce
+        # any non-finite information criterion to None so the response is
+        # JSON-serialisable instead of crashing FastAPI's encoder.
+        "aic": (float(model.aic) if np.isfinite(model.aic) else None),
+        "bic": (float(model.bic) if np.isfinite(model.bic) else None),
+        "log_likelihood": (float(model.llf) if np.isfinite(model.llf) else None),
         "random_effect_variance": re_var,
         "residual_variance": residual_var,
         "icc": (re_var / (re_var + residual_var)) if re_var is not None else None,

@@ -1,0 +1,507 @@
+"""Coverage tests for routers/compute.py.
+
+The compute router is mounted at prefix ``/api/compute`` and addresses the
+session via the URL PATH segment ``/{session_id}/...`` (NOT a body field).
+Each test persists a synthetic DataFrame via ``make_session`` and exercises one
+endpoint (happy path + a few validation / edge cases).
+"""
+import numpy as np
+import pandas as pd
+import pytest
+
+from conftest import make_session
+
+SEED = 4242
+BASE = "/api/compute"
+
+
+def _fresh(synth, suffix):
+    """Persist a fresh copy of the synthetic frame under a unique session id.
+
+    Many compute endpoints mutate the stored frame (add/delete columns/rows),
+    so each test gets its own isolated session to avoid cross-test coupling.
+    """
+    sid = f"tcomp_{suffix}"
+    return make_session(synth.copy(), sid)
+
+
+@pytest.fixture(scope="module")
+def synth():
+    rng = np.random.default_rng(SEED)
+    n = 200
+    age = rng.normal(60, 10, n).clip(20, 90)
+    ldl = rng.normal(120, 30, n).clip(40, 250)
+    weight = rng.normal(80, 15, n).clip(40, 140)
+    height = rng.normal(170, 10, n).clip(140, 200)
+    creat = rng.normal(1.0, 0.3, n).clip(0.4, 3.0)
+    sbp = rng.normal(130, 20, n).clip(80, 220)
+    dbp = rng.normal(80, 12, n).clip(40, 130)
+    hr = rng.normal(75, 15, n).clip(40, 160)
+    qt = rng.normal(400, 40, n).clip(300, 550)
+    ef = rng.normal(45, 12, n).clip(10, 70)
+    bmi = (weight / ((height / 100) ** 2)).round(1)
+    sex = rng.integers(0, 2, n)
+    dm = rng.integers(0, 2, n)
+    htn = rng.integers(0, 2, n)
+    chf = rng.integers(0, 2, n)
+    stroke = rng.integers(0, 2, n)
+    vasc = rng.integers(0, 2, n)
+    af = rng.integers(0, 2, n)
+    nyha = rng.integers(1, 5, n)
+    killip = rng.integers(1, 5, n)
+    group = rng.choice(["A", "B", "C"], n)
+    return pd.DataFrame({
+        "AGE": age, "LDL": ldl, "WEIGHT": weight, "HEIGHT": height,
+        "CREAT": creat, "SBP": sbp, "DBP": dbp, "HR": hr, "QT": qt,
+        "EF": ef, "BMI": bmi, "SEX": sex, "DM": dm, "HTN": htn,
+        "CHF": chf, "STROKE": stroke, "VASC": vasc, "AF": af,
+        "NYHA": nyha, "KILLIP": killip, "GROUP": group,
+    })
+
+
+# ── Formula ───────────────────────────────────────────────────────────────────
+
+def test_formula_basic_arithmetic(client, synth):
+    sid = _fresh(synth, "formula_ok")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "LDL / 38.67", "new_col": "LDL_mmol"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "LDL_mmol"
+    assert "preview_values" in body
+    assert body["n_computed"] > 0
+    assert set(body) >= {"name", "dtype", "kind", "preview_values", "n_computed", "n_missing"}
+
+
+def test_formula_custom_if_function(client, synth):
+    sid = _fresh(synth, "formula_if")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "IF(AGE > 65, 1, 0)", "new_col": "ELDERLY"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "ELDERLY"
+    assert body["n_computed"] == 200
+
+
+def test_formula_unknown_column(client, synth):
+    sid = _fresh(synth, "formula_bad")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "NOPE * 2", "new_col": "X"})
+    assert r.status_code == 422, r.text
+
+
+def test_formula_empty_name_rejected(client, synth):
+    sid = _fresh(synth, "formula_empty")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "AGE + 1", "new_col": "   "})
+    assert r.status_code == 422, r.text
+
+
+def test_formula_session_not_found(client):
+    r = client.post(f"{BASE}/tcomp_nope/formula",
+                    json={"formula": "AGE + 1", "new_col": "X"})
+    assert r.status_code == 404, r.text
+
+
+# ── Transform ─────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("transform", [
+    "ln", "log10", "sqrt", "square", "exp", "abs",
+    "zscore", "tertile", "quartile", "median_split",
+])
+def test_transform_all_kinds(client, synth, transform):
+    sid = _fresh(synth, f"tf_{transform}")
+    r = client.post(f"{BASE}/{sid}/transform",
+                    json={"source_col": "LDL", "transform": transform,
+                          "new_col": f"LDL_{transform}"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == f"LDL_{transform}"
+    assert body["n_computed"] >= 0
+
+
+def test_transform_unknown_transform(client, synth):
+    sid = _fresh(synth, "tf_unknown")
+    r = client.post(f"{BASE}/{sid}/transform",
+                    json={"source_col": "LDL", "transform": "wat", "new_col": "Y"})
+    assert r.status_code == 422, r.text
+
+
+def test_transform_missing_column(client, synth):
+    sid = _fresh(synth, "tf_miss")
+    r = client.post(f"{BASE}/{sid}/transform",
+                    json={"source_col": "MISSING", "transform": "ln", "new_col": "Y"})
+    assert r.status_code == 422, r.text
+
+
+# ── Recode ────────────────────────────────────────────────────────────────────
+
+def test_recode_numeric_rules(client, synth):
+    sid = _fresh(synth, "recode_num")
+    payload = {
+        "new_col": "AGE_CAT",
+        "else_val": 0,
+        "rules": [
+            {"conditions": [{"col": "AGE", "op": ">=", "val": 65}], "result": 2},
+            {"conditions": [{"col": "AGE", "op": ">=", "val": 50}], "result": 1},
+        ],
+    }
+    r = client.post(f"{BASE}/{sid}/recode", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "AGE_CAT"
+    assert body["n_computed"] == 200
+
+
+def test_recode_string_result(client, synth):
+    sid = _fresh(synth, "recode_str")
+    payload = {
+        "new_col": "AGE_LABEL",
+        "else_val": "young",
+        "rules": [
+            {"conditions": [{"col": "AGE", "op": ">=", "val": 65}], "result": "old"},
+        ],
+    }
+    r = client.post(f"{BASE}/{sid}/recode", json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "AGE_LABEL"
+
+
+def test_recode_no_rules(client, synth):
+    sid = _fresh(synth, "recode_none")
+    r = client.post(f"{BASE}/{sid}/recode",
+                    json={"new_col": "X", "rules": []})
+    assert r.status_code == 422, r.text
+
+
+def test_recode_missing_column(client, synth):
+    sid = _fresh(synth, "recode_miss")
+    payload = {
+        "new_col": "X",
+        "rules": [{"conditions": [{"col": "GHOST", "op": ">", "val": 1}], "result": 1}],
+    }
+    r = client.post(f"{BASE}/{sid}/recode", json=payload)
+    assert r.status_code == 422, r.text
+
+
+# ── Clinical calculators ──────────────────────────────────────────────────────
+
+def test_clinical_bmi(client, synth):
+    sid = _fresh(synth, "bmi")
+    r = client.post(f"{BASE}/{sid}/clinical/bmi",
+                    json={"column_map": {"weight": "WEIGHT", "height": "HEIGHT"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "BMI"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(5 < v < 90 for v in vals)
+
+
+def test_clinical_bmi_missing_mapping(client, synth):
+    sid = _fresh(synth, "bmi_miss")
+    r = client.post(f"{BASE}/{sid}/clinical/bmi",
+                    json={"column_map": {"weight": "WEIGHT"}})
+    assert r.status_code == 422, r.text
+
+
+def test_clinical_egfr(client, synth):
+    sid = _fresh(synth, "egfr")
+    r = client.post(f"{BASE}/{sid}/clinical/egfr",
+                    json={"column_map": {"age": "AGE", "sex": "SEX",
+                                         "creatinine": "CREAT"},
+                          "female_value": "1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "eGFR"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 < v < 250 for v in vals)
+
+
+def test_clinical_chadsvasc(client, synth):
+    sid = _fresh(synth, "chadsvasc")
+    r = client.post(f"{BASE}/{sid}/clinical/chadsvasc",
+                    json={"column_map": {"age": "AGE", "sex": "SEX", "chf": "CHF",
+                                         "htn": "HTN", "dm": "DM", "stroke": "STROKE",
+                                         "vasc": "VASC"},
+                          "female_value": "1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "CHA2DS2VASc"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 9 for v in vals)
+
+
+def test_clinical_chadsva(client, synth):
+    sid = _fresh(synth, "chadsva")
+    r = client.post(f"{BASE}/{sid}/clinical/chadsva",
+                    json={"column_map": {"age": "AGE", "chf": "CHF", "htn": "HTN",
+                                         "dm": "DM", "stroke": "STROKE", "vasc": "VASC"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "CHA2DS2VA"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 8 for v in vals)
+
+
+def test_clinical_bsa(client, synth):
+    sid = _fresh(synth, "bsa")
+    r = client.post(f"{BASE}/{sid}/clinical/bsa",
+                    json={"column_map": {"weight": "WEIGHT", "height": "HEIGHT"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "BSA"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0.5 < v < 4 for v in vals)
+
+
+def test_clinical_map(client, synth):
+    sid = _fresh(synth, "map")
+    r = client.post(f"{BASE}/{sid}/clinical/map",
+                    json={"column_map": {"sbp": "SBP", "dbp": "DBP"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "MAP"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(40 < v < 200 for v in vals)
+
+
+def test_clinical_hasbled(client, synth):
+    sid = _fresh(synth, "hasbled")
+    r = client.post(f"{BASE}/{sid}/clinical/hasbled",
+                    json={"column_map": {"age": "AGE", "htn": "HTN",
+                                         "stroke": "STROKE"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "HAS_BLED"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 9 for v in vals)
+
+
+def test_clinical_grace(client, synth):
+    sid = _fresh(synth, "grace")
+    r = client.post(f"{BASE}/{sid}/clinical/grace",
+                    json={"column_map": {"age": "AGE", "hr": "HR", "sbp": "SBP",
+                                         "creatinine": "CREAT", "killip": "KILLIP"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "GRACE_Score"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(v >= 0 for v in vals)
+
+
+def test_clinical_timi_nstemi(client, synth):
+    sid = _fresh(synth, "timi_n")
+    r = client.post(f"{BASE}/{sid}/clinical/timi_nstemi",
+                    json={"column_map": {"age": "AGE", "known_cad": "VASC"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "TIMI_NSTEMI"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 7 for v in vals)
+
+
+def test_clinical_timi_stemi(client, synth):
+    sid = _fresh(synth, "timi_s")
+    r = client.post(f"{BASE}/{sid}/clinical/timi_stemi",
+                    json={"column_map": {"age": "AGE", "sbp": "SBP", "hr": "HR",
+                                         "killip": "KILLIP", "weight": "WEIGHT"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "TIMI_STEMI"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 14 for v in vals)
+
+
+def test_clinical_h2fpef(client, synth):
+    sid = _fresh(synth, "h2fpef")
+    r = client.post(f"{BASE}/{sid}/clinical/h2fpef",
+                    json={"column_map": {"bmi": "BMI", "age": "AGE", "af": "AF"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "H2FPEF"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(0 <= v <= 9 for v in vals)
+
+
+def test_clinical_maggic(client, synth):
+    sid = _fresh(synth, "maggic")
+    r = client.post(f"{BASE}/{sid}/clinical/maggic",
+                    json={"column_map": {"age": "AGE", "sbp": "SBP", "bmi": "BMI",
+                                         "creatinine": "CREAT", "ef": "EF",
+                                         "nyha": "NYHA", "sex": "SEX"},
+                          "female_value": "1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "MAGGIC_Score"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(v >= 0 for v in vals)
+
+
+def test_clinical_qtc(client, synth):
+    sid = _fresh(synth, "qtc")
+    r = client.post(f"{BASE}/{sid}/clinical/qtc",
+                    json={"column_map": {"qt": "QT", "hr": "HR"}})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "QTc_Bazett"
+    vals = [v for v in body["preview_values"] if v is not None]
+    assert all(v > 0 for v in vals)
+
+
+def test_clinical_maggic_missing_mapping(client, synth):
+    sid = _fresh(synth, "maggic_miss")
+    r = client.post(f"{BASE}/{sid}/clinical/maggic",
+                    json={"column_map": {"age": "AGE"}})
+    assert r.status_code == 422, r.text
+
+
+# ── Column / row data operations ──────────────────────────────────────────────
+
+def test_delete_column(client, synth):
+    sid = _fresh(synth, "delcol")
+    r = client.delete(f"{BASE}/{sid}/column/LDL")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] == "LDL"
+
+
+def test_delete_column_not_found(client, synth):
+    sid = _fresh(synth, "delcol_miss")
+    r = client.delete(f"{BASE}/{sid}/column/NOPE")
+    assert r.status_code == 404, r.text
+
+
+def test_fill_blanks_mean(client, synth):
+    sid = _fresh(synth, "fill_mean")
+    r = client.post(f"{BASE}/{sid}/fill_blanks",
+                    json={"column": "LDL", "value": "__mean__"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["column"] == "LDL"
+    assert "fill_value" in body
+    assert "n_filled" in body
+
+
+def test_fill_blanks_column_not_found(client, synth):
+    sid = _fresh(synth, "fill_miss")
+    r = client.post(f"{BASE}/{sid}/fill_blanks",
+                    json={"column": "NOPE", "value": "0"})
+    assert r.status_code == 404, r.text
+
+
+def test_delete_rows(client, synth):
+    sid = _fresh(synth, "delrows")
+    r = client.post(f"{BASE}/{sid}/delete_rows",
+                    json={"row_indices": [0, 1, 2]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == 3
+    assert body["remaining_rows"] == 197
+
+
+def test_delete_rows_out_of_range(client, synth):
+    sid = _fresh(synth, "delrows_oor")
+    r = client.post(f"{BASE}/{sid}/delete_rows",
+                    json={"row_indices": [99999]})
+    assert r.status_code == 422, r.text
+
+
+def test_add_row(client, synth):
+    sid = _fresh(synth, "addrow")
+    r = client.post(f"{BASE}/{sid}/add_row", json={"position": -1})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["rows"] == 201
+
+
+def test_add_column(client, synth):
+    sid = _fresh(synth, "addcol")
+    r = client.post(f"{BASE}/{sid}/add_column",
+                    json={"name": "NEWCOL", "default_value": 0})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "NEWCOL"
+
+
+def test_add_column_duplicate(client, synth):
+    sid = _fresh(synth, "addcol_dup")
+    r = client.post(f"{BASE}/{sid}/add_column",
+                    json={"name": "AGE", "default_value": 0})
+    assert r.status_code == 422, r.text
+
+
+def test_paste_rows_append(client, synth):
+    sid = _fresh(synth, "paste")
+    tsv = "AGE,LDL\n55,130\n60,140"
+    r = client.post(f"{BASE}/{sid}/paste",
+                    json={"tsv": tsv, "has_header": True, "mode": "append"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_pasted"] == 2
+    assert body["total_rows"] == 202
+
+
+def test_paste_rows_empty(client, synth):
+    sid = _fresh(synth, "paste_empty")
+    r = client.post(f"{BASE}/{sid}/paste",
+                    json={"tsv": "   ", "has_header": True})
+    assert r.status_code == 422, r.text
+
+
+def test_rename_column(client, synth):
+    sid = _fresh(synth, "rename")
+    r = client.post(f"{BASE}/{sid}/rename",
+                    json={"old_name": "LDL", "new_name": "LDL_C"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["new_name"] == "LDL_C"
+
+
+def test_rename_column_not_found(client, synth):
+    sid = _fresh(synth, "rename_miss")
+    r = client.post(f"{BASE}/{sid}/rename",
+                    json={"old_name": "NOPE", "new_name": "X"})
+    assert r.status_code == 404, r.text
+
+
+def test_duplicate_column(client, synth):
+    sid = _fresh(synth, "dup")
+    r = client.post(f"{BASE}/{sid}/duplicate_column",
+                    json={"column": "AGE"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "AGE_copy"
+
+
+def test_duplicate_column_not_found(client, synth):
+    sid = _fresh(synth, "dup_miss")
+    r = client.post(f"{BASE}/{sid}/duplicate_column",
+                    json={"column": "NOPE"})
+    assert r.status_code == 404, r.text
+
+
+def test_paste_cells(client, synth):
+    sid = _fresh(synth, "paste_cells")
+    r = client.post(f"{BASE}/{sid}/paste_cells",
+                    json={"start_row": 0, "start_col": "AGE", "tsv": "50\t130\n55\t140"})
+    assert r.status_code == 200, r.text
+    assert r.json()["pasted"] >= 1
+
+
+def test_paste_cells_bad_column(client, synth):
+    sid = _fresh(synth, "paste_cells_bad")
+    r = client.post(f"{BASE}/{sid}/paste_cells",
+                    json={"start_row": 0, "start_col": "NOPE", "tsv": "1"})
+    assert r.status_code == 400, r.text
+
+
+def test_unique_values(client, synth):
+    sid = _fresh(synth, "unique")
+    r = client.get(f"{BASE}/{sid}/unique/GROUP")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "values" in body
+    assert set(body["values"]) <= {"A", "B", "C"}
+
+
+def test_unique_values_not_found(client, synth):
+    sid = _fresh(synth, "unique_miss")
+    r = client.get(f"{BASE}/{sid}/unique/NOPE")
+    assert r.status_code == 404, r.text
