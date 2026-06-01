@@ -64,6 +64,30 @@ export default function SubgroupBarPanel() {
   const chartRef = useRef<any>(null);
   const plotContainerRef = useRef<HTMLDivElement>(null);
 
+  // Drag the red line on the right edge to resize the chart width (drag left to
+  // shrink). Mirrors the resize affordance used in the other analysis panels.
+  const startChartWidthResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startW = plotContainerRef.current?.offsetWidth ?? chartWidth;
+    setIsAutoWidth(false);
+    setChartWidth(startW);
+    const startX = e.clientX;
+    const onMove = (ev: PointerEvent) => {
+      setChartWidth(Math.max(360, Math.min(1600, startW + (ev.clientX - startX))));
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  };
+  const resetChartWidth = () => { setChartWidth(800); setIsAutoWidth(true); };
+
   // Auto-switch mode or fetch unique values when Y column changes
   useEffect(() => {
     if (!yCol) return;
@@ -683,6 +707,13 @@ export default function SubgroupBarPanel() {
                 config={{ responsive: true, displayModeBar: true, displaylogo: false }}
               />
             </div>
+            {/* Red vertical resize line on the right — drag left to shrink the chart */}
+            <div
+              onPointerDown={startChartWidthResize}
+              onDoubleClick={resetChartWidth}
+              className="absolute top-0 bottom-0 w-[5px] right-0 cursor-col-resize bg-red-500/70 hover:bg-red-600 active:bg-red-700 transition-colors z-20"
+              title="Drag the red line to resize the chart width • Double-click to reset"
+            />
           </div>
         ) : (
           <div className="panel min-h-[480px] flex flex-col items-center justify-center text-slate-400 p-8 text-center bg-white border border-gray-200 shadow-sm rounded-2xl relative overflow-hidden">
