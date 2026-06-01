@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, getSparklines } from "../api";
+import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES } from "../store";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { CoefTable, ORTable, ForestPlot, PredictionPanel, CoefDetailPanel, ModelSummaryTable } from "./models/resultViews";
+import { useModelData } from "./models/useModelData";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -100,40 +101,7 @@ export default function ModelsPanel() {
     useResizableRightCol("ModelsPanel.result", 480);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const allCols = session.columns.map((c) => c.name);
-
-  // Binary columns (≤ 2 unique non-null values, both in {0, 1}) — Cox event
-  // and logistic outcome pickers should narrow to these to avoid the user
-  // accidentally selecting a continuous variable as the event indicator.
-  const binaryCols = useMemo(() => {
-    const out: string[] = [];
-    for (const col of session.columns) {
-      const vals = new Set<unknown>();
-      for (const row of session.preview) {
-        const v = row[col.name];
-        if (v == null || v === "") continue;
-        vals.add(typeof v === "number" ? v : Number(v));
-        if (vals.size > 2) break;
-      }
-      const arr = [...vals];
-      if (arr.length === 0 || arr.length > 2) continue;
-      if (arr.every((v) => v === 0 || v === 1)) out.push(col.name);
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.session_id]);
-
-  // Missing counts per column
-  const missingCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const col of session.columns) {
-      counts[col.name] = session.preview.filter(
-        (row) => row[col.name] === null || row[col.name] === undefined || row[col.name] === ""
-      ).length;
-    }
-    return counts;
-  }, [session.preview, session.columns]);
+  const { numCols, allCols, binaryCols, missingCounts, sparklines } = useModelData(session);
 
   const [model, setModel] = useState("linear");
   const [outcome, setOutcome] = useState(numCols[0] ?? "");
@@ -148,14 +116,6 @@ export default function ModelsPanel() {
   const [selectedCoefIdx, setSelectedCoefIdx] = useState<number | null>(null);
   const [nullHyp,   setNullHyp]   = useState("eq");    // eq | leq | geq
   const [robustSE,  setRobustSE]  = useState(false);
-  const [sparklines, setSparklines] = useState<Record<string, { type: string; data: number[] }>>({});
-
-  useEffect(() => {
-    getSparklines(session.session_id)
-      .then((r) => setSparklines(r.data))
-      .catch(() => {});
-  }, [session.session_id]);
-
   const [scaleFactors, setScaleFactors] = useState<Record<string, string>>({}); // col → divisor string
   const [selection, setSelection] = useState("p10"); // multivariate variable selection strategy
   const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
