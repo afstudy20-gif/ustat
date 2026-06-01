@@ -1123,7 +1123,7 @@ export default function DescriptivePanel() {
             )}
             {!summaryLoading && summary && (
               <>
-                {/* Header - compacted to single row as requested (tek sıra) */}
+                {/* Header - compacted to a single row */}
                 <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 flex-shrink-0">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="font-semibold text-gray-900">Distribution of</span>

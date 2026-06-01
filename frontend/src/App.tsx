@@ -89,12 +89,12 @@ const TABS = [
   { id: "correlation", label: "Correlation", icon: GitMerge },
   { id: "roc",         label: "ROC",         icon: TrendingUp },
   { id: "models",      label: "Models",      icon: Brain },
-  { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "iptw",        label: "IPTW",        icon: Scale },
   { id: "dca",         label: "DCA",         icon: Target }, // Decision Curve Analysis (Phase 13)
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
+  { id: "visual",      label: "Visual",      icon: Shapes },
   { id: "compute",     label: "Compute",     icon: Calculator },
 ];
 
@@ -642,6 +642,13 @@ export default function App() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <PlotThemeBar />
+            <button
+              onClick={toggleGrid}
+              className={`p-1.5 rounded-lg transition-colors ${showGrid ? "text-indigo-500 bg-indigo-50 hover:bg-indigo-100" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
+              title={showGrid ? "Hide chart grid lines" : "Show chart grid lines"}
+            >
+              {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
+            </button>
             <RefreshAppButton confirmBeforeReload />
             <button
               onClick={() => setShowHelp(true)}
@@ -656,13 +663,6 @@ export default function App() {
               title="About uSTAT — packages & methods"
             >
               <Info size={16} />
-            </button>
-            <button
-              onClick={toggleGrid}
-              className={`p-1.5 rounded-lg transition-colors ${showGrid ? "text-indigo-500 bg-indigo-50 hover:bg-indigo-100" : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"}`}
-              title={showGrid ? "Hide chart grid lines" : "Show chart grid lines"}
-            >
-              {showGrid ? <Grid3x3 size={16} /> : <Grid2x2 size={16} />}
             </button>
             <div className="relative" ref={headerSaveMenuRef}>
               <button

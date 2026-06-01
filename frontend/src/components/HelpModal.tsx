@@ -7,7 +7,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
   const [activeTab, setActiveTab] = useState<TabId>("quickstart");
 
   const tabs = [
-    { id: "quickstart", label: "Quick Start / Veri", icon: BookOpen },
+    { id: "quickstart", label: "Quick Start", icon: BookOpen },
     { id: "hypothesis", label: "Hypothesis Tests", icon: FlaskConical },
     { id: "advanced",   label: "Causal & Regression", icon: Brain },
     { id: "specialized",label: "EFA, Bayes & Meta", icon: Settings },
@@ -17,7 +17,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col h-[650px] max-h-[90vh] overflow-hidden animate-in fade-in zoom-in duration-200">
-        
+
         {/* Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-2">
@@ -25,11 +25,11 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
               <HelpCircle size={18} className="text-white" />
             </div>
             <div>
-              <h2 className="font-bold text-sm tracking-tight">uSTAT Yardım & Analiz Kılavuzu</h2>
-              <p className="text-[10px] text-slate-400 font-mono">uSTAT Help Center & Interactive Tutorial</p>
+              <h2 className="font-bold text-sm tracking-tight">uSTAT Help &amp; Analysis Guide</h2>
+              <p className="text-[10px] text-slate-400 font-mono">uSTAT Help Center &amp; Interactive Tutorial</p>
             </div>
           </div>
-          <button 
+          <button
             onClick={onClose}
             className="text-slate-400 hover:text-white transition-colors p-1 hover:bg-slate-800 rounded-lg cursor-pointer"
           >
@@ -39,11 +39,11 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
 
         {/* Inner Content Area */}
         <div className="flex-1 flex min-h-0">
-          
+
           {/* Sidebar Navigation */}
           <div className="w-56 bg-slate-50 border-r border-slate-200 flex flex-col p-3 gap-1 flex-shrink-0 overflow-y-auto">
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2.5 pb-2">
-              Kategoriler / Sections
+              Sections
             </p>
             {tabs.map(({ id, label, icon: Icon }) => (
               <button
@@ -59,23 +59,23 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                 {label}
               </button>
             ))}
-            
+
             <div className="mt-auto p-2 bg-indigo-50 rounded-xl border border-indigo-100">
-              <p className="text-[10px] font-bold text-indigo-900 uppercase">💡 İpucu / Tip</p>
+              <p className="text-[10px] font-bold text-indigo-900 uppercase">💡 Tip</p>
               <p className="text-[9px] text-indigo-700 mt-0.5 leading-relaxed">
-                Her paneldeki <span className="font-semibold">ⓘ</span> veya soru işareti simgelerine yaklaşarak detaylı klinik ipuçlarını okuyabilirsiniz.
+                Hover the <span className="font-semibold">ⓘ</span> or question-mark icons in any panel to read detailed clinical tips.
               </p>
             </div>
           </div>
 
           {/* Tab Panels */}
           <div className="flex-1 p-6 overflow-y-auto bg-white font-sans text-xs text-slate-700 space-y-4">
-            
+
             {activeTab === "quickstart" && (
               <div className="space-y-4">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                    🚀 Hızlı Başlangıç & Veri Hazırlığı <span className="text-xs font-normal text-slate-400 font-mono">| Quick Start</span>
+                    🚀 Quick Start &amp; Data Preparation
                   </h3>
                 </div>
 
@@ -83,9 +83,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">1. Dosya Yükleme (Data Upload)</p>
+                      <p className="font-bold text-slate-800">1. Data Upload</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Excel (<span className="font-mono">.xlsx</span>), CSV, SPSS (<span className="font-mono">.sav</span>) veya TSV dosyalarınızı sürükleyip bırakarak yükleyebilirsiniz. SPSS etiketleriniz ve değişken açıklamalarınız otomatik olarak okunur.
+                        Drag &amp; drop Excel (<span className="font-mono">.xlsx</span>), CSV, SPSS (<span className="font-mono">.sav</span>) or TSV files to upload. SPSS value labels and variable descriptions are read automatically.
                       </p>
                     </div>
                   </div>
@@ -93,9 +93,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">2. Değişken Türleri & Ölçekler (Variable Kinds)</p>
+                      <p className="font-bold text-slate-800">2. Variable Kinds</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        uSTAT değişkenleri otomatik olarak sınıflandırır. Bir değişkeni <span className="text-indigo-600 font-semibold">Numeric</span> (Sürekli) veya <span className="text-teal-600 font-semibold">Categorical</span> (Kategorik) olarak değiştirmek için Data sekmesindeki değişken başlığının yanındaki etiketlere (badge) tıklamanız veya **Data Dictionary** panelini açmanız yeterlidir.
+                        uSTAT classifies variables automatically. To change a variable to <span className="text-indigo-600 font-semibold">Numeric</span> (continuous) or <span className="text-teal-600 font-semibold">Categorical</span>, click the badge next to the column header in the Data tab, or open the <span className="font-semibold">Data Dictionary</span> panel.
                       </p>
                     </div>
                   </div>
@@ -103,9 +103,19 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">3. Veri Filtreleme (Active Filters)</p>
+                      <p className="font-bold text-slate-800">3. Active Filters</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Data sekmesindeki **Filter** butonuna tıklayarak alt gruplar (subsets) oluşturabilirsiniz. Aktif filtre uygulandığında tüm analizler otomatik olarak bu alt gruba göre filtrelenir (başlıkta turuncu badge görünür).
+                        Click the <span className="font-semibold">Filter</span> button in the Data tab to create subsets. When a filter is active every analysis is automatically restricted to that subset (an orange badge appears in the header).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-slate-800">4. Compute &amp; Cleaning</p>
+                      <p className="text-slate-500 leading-relaxed mt-0.5">
+                        Build new variables (formulas, transforms, recodes, clinical calculators) in the <span className="font-semibold">Compute</span> tab. Data-quality tools — listwise deletion, IQR / Z-score outlier removal, and find &amp; replace — live in the <span className="font-semibold">Missing</span> tab alongside MICE imputation.
                       </p>
                     </div>
                   </div>
@@ -117,7 +127,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
               <div className="space-y-4">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                    🧪 Hipotez & Kategorik Testler <span className="text-xs font-normal text-slate-400 font-mono">| Hypothesis Tests</span>
+                    🧪 Hypothesis &amp; Categorical Tests
                   </h3>
                 </div>
 
@@ -125,16 +135,16 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2 bg-indigo-50/50 p-3 rounded-xl border border-indigo-100/50">
                     <Info size={16} className="text-indigo-600 flex-shrink-0 mt-0.5" />
                     <p className="text-indigo-800 leading-relaxed text-[11px]">
-                      <strong>Otomatik Dağılım Kararı (Auto Mode):</strong> uSTAT hipotez testlerinde otomatik dağılım kontrolü yapar. n ≤ 2000 ise **Shapiro-Wilk**, n &gt; 2000 ise çarpıklık (skewness) ve **Lilliefors Kolmogorov-Smirnov** testleri ile normallik sınanır. Dağılım normal ise parametrik (t-test, ANOVA), değilse otomatik olarak non-parametrik testler (Mann-Whitney U, Kruskal-Wallis) seçilir.
+                      <strong>Automatic distribution decision (Auto Mode):</strong> uSTAT checks normality automatically. For n ≤ 2000 it uses the Shapiro-Wilk test; for n &gt; 2000, skewness together with the Lilliefors Kolmogorov-Smirnov test. If the distribution is normal it runs parametric tests (t-test, ANOVA); otherwise it switches automatically to non-parametric tests (Mann-Whitney U, Kruskal-Wallis).
                     </p>
                   </div>
 
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">T-Testi & Varyans Analizi (ANOVA)</p>
+                      <p className="font-bold text-slate-800">T-test &amp; ANOVA</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Bağımsız iki grup karşılaştırması için Independent t-test (veya Mann-Whitney U), ikiden fazla grup için One-way ANOVA (veya Kruskal-Wallis) uygulanır. Tekrarlı ölçümler için Paired t-test veya Repeated Measures ANOVA sekmesini kullanabilirsiniz.
+                        Compare two independent groups with the Independent t-test (or Mann-Whitney U), and more than two groups with One-way ANOVA (or Kruskal-Wallis). For repeated measures use the Paired t-test or the Repeated Measures ANOVA tab.
                       </p>
                     </div>
                   </div>
@@ -142,9 +152,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Kategorik İlişki Testleri (Categorical)</p>
+                      <p className="font-bold text-slate-800">Categorical association tests</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        İki kategorik değişken arasındaki oranları karşılaştırmak için Ki-Kare (Chi-square) veya küçük örneklemlerde Fisher's Exact testini uygulayın. Cochran-Armitage testini ise doz-cevap veya sıralı kategoriler arasındaki trendleri incelemek için kullanabilirsiniz.
+                        Compare proportions between two categorical variables with the Chi-square test, or Fisher's Exact test for small samples. Use the Cochran-Armitage test to examine dose-response or ordered-category trends.
                       </p>
                     </div>
                   </div>
@@ -152,9 +162,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Hiyerarşik Uç Nokta Testi (Gatekeeping)</p>
+                      <p className="font-bold text-slate-800">Hierarchical endpoint testing (Gatekeeping)</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Çoklu hipotezleri (örneğin birincil ve ikincil sonlanım noktalarını) aileler halinde sıralayarak ve Bonferroni/Hochberg/Holm ağırlıklarını dağıtarak hata payını (FWER) koruyabilirsiniz.
+                        Order multiple hypotheses (e.g. primary and secondary endpoints) into families and distribute Bonferroni / Hochberg / Holm weights to control the family-wise error rate (FWER).
                       </p>
                     </div>
                   </div>
@@ -166,7 +176,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
               <div className="space-y-4">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                    🧠 Regresyon & Nedensel Çıkarım <span className="text-xs font-normal text-slate-400 font-mono">| Causal & Regression</span>
+                    🧠 Regression &amp; Causal Inference
                   </h3>
                 </div>
 
@@ -174,9 +184,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Regresyon Modelleri & Çoklu Bağlantı (Regression & VIF)</p>
+                      <p className="font-bold text-slate-800">Regression models &amp; VIF</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Lineer (sürekli çıktılar), Lojistik (ikili çıktılar), Firth Penalized Lojistik (nadir olaylar ve ayrışma sorunları için), Poisson ve Cox PH (sağkalım) modellerini eğitebilirsiniz. Tüm modellerde otomatik olarak çoklu bağlantıyı test eden **VIF** (Variance Inflation Factor) değerleri hesaplanır.
+                        Fit Linear (continuous outcomes), Logistic (binary outcomes), Firth penalized logistic (for rare events and separation), Poisson, and Cox PH (survival) models. VIF (Variance Inflation Factor) for multicollinearity is computed automatically on every model.
                       </p>
                     </div>
                   </div>
@@ -184,9 +194,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Eğilim Skoru Eşleştirmesi (Propensity Score Matching - PSM)</p>
+                      <p className="font-bold text-slate-800">Propensity Score Matching (PSM)</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Tedavi ve kontrol grupları arasındaki karıştırıcı faktörleri (confounders) eşitleyerek bire bir veya 1:N eşleşmiş kohortlar kurar. Love Plot ve SMD tablosu ile dengelenmeyi doğrular. Sonuçtaki <span className="font-semibold text-indigo-600">"View & Analyze Matched Cohort"</span> butonu ile tüm uygulamayı eşleşmiş hasta listesine kilitleyebilir ve backtracking (Geri Dön) butonuyla orijinal sete geri dönebilirsiniz.
+                        Balances confounders between treatment and control groups into 1:1 or 1:N matched cohorts. Verify balance with the Love Plot and SMD table. The <span className="font-semibold text-indigo-600">"View &amp; Analyze Matched Cohort"</span> button locks the whole app to the matched patient list; the backtracking button returns you to the original dataset.
                       </p>
                     </div>
                   </div>
@@ -194,9 +204,19 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Ters Olasılık Ağırlıklandırması (IPTW Weighting)</p>
+                      <p className="font-bold text-slate-800">Inverse Probability Weighting (IPTW)</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Eşleştirme yerine, her hastayı propensity skoruna göre ağırlıklandırarak (ATE veya ATT estimandları) tüm veri kümesini dengeler. Ağırlıklı kohortu uygulamaya kilitleyerek tüm analizlerinizde survey-weight mantığında ağırlıklı tahminler yürütebilirsiniz.
+                        Instead of matching, weight each patient by their propensity score (ATE or ATT estimands) to balance the full dataset. Lock the weighted cohort to run weighted, survey-weight-style estimates across all of your analyses.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold text-slate-800">Decision Curve Analysis (DCA)</p>
+                      <p className="text-slate-500 leading-relaxed mt-0.5">
+                        In the DCA tab, evaluate the clinical net benefit of a model (Cox linear predictor or an ML risk score) against "treat all" and "treat none" across threshold probabilities — for both binary and survival outcomes.
                       </p>
                     </div>
                   </div>
@@ -208,7 +228,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
               <div className="space-y-4">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                    ⚙️ İleri & Özel Analiz Yöntemleri <span className="text-xs font-normal text-slate-400 font-mono">| EFA, Bayes & Meta</span>
+                    ⚙️ Advanced &amp; Specialized Methods
                   </h3>
                 </div>
 
@@ -216,9 +236,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Açıklayıcı Faktör Analizi & PCA (Factor Analysis)</p>
+                      <p className="font-bold text-slate-800">Exploratory Factor Analysis &amp; PCA</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Ölçek ve anket verilerinizin yapısını ortaya çıkarmak için KMO ve Bartlett küresellik testleri ile veri uygunluğunu ölçün. Varimax (dik) veya Promax (eğik) döndürmelerle faktör yüklerini hesaplayıp interaktif Scree Plot ve Biplot grafikleri oluşturabilirsiniz.
+                        Reveal the structure of scale and survey data. Check suitability with KMO and Bartlett's sphericity test, compute factor loadings with Varimax (orthogonal) or Promax (oblique) rotation, and build interactive Scree plots and biplots.
                       </p>
                     </div>
                   </div>
@@ -226,9 +246,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Bayesyen Hipotez Sınama (Bayesian Statistics)</p>
+                      <p className="font-bold text-slate-800">Bayesian hypothesis testing</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Klasik p-değerlerine bağlı kalmaksızın, alternatif (H₁) ve boş (H₀) hipotezlerin kanıt gücünü **JZS Bayes Faktörü** (BF₁₀ / BF₀₁) ile test edin. Önsel (Prior) Cauchy eğrisi ile sonsal (Posterior) dağılımın üst üste bindiği grafikleri ve Savage-Dickey yoğunluk oranlarını inceleyin.
+                        Beyond classical p-values, weigh the evidence for the alternative (H₁) vs null (H₀) with the JZS Bayes Factor (BF₁₀ / BF₀₁). Inspect prior (Cauchy) vs posterior density overlays and Savage-Dickey density ratios.
                       </p>
                     </div>
                   </div>
@@ -236,9 +256,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Meta-Analiz & Yayın Yanlılığı (Meta-Analysis)</p>
+                      <p className="font-bold text-slate-800">Meta-analysis &amp; publication bias</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Sabit ve rastgele etkiler modellerini (DL & Paule-Mandel) kullanarak çalışmaları havuzlayın. Egger ve Begg testleri ile yayın yanlılığını (publication bias) sınayın ve Trim-and-Fill metoduyla eksik olabilecek çalışmaları tamamlayın.
+                        Pool studies with fixed- and random-effects models (DerSimonian-Laird &amp; Paule-Mandel). Test for publication bias with Egger's and Begg's tests, and impute potentially missing studies with the Trim-and-Fill method.
                       </p>
                     </div>
                   </div>
@@ -250,7 +270,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
               <div className="space-y-4">
                 <div className="border-b pb-2">
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
-                    💻 R Replikasyon Hub & Raporlama <span className="text-xs font-normal text-slate-400 font-mono">| R Replication Hub</span>
+                    💻 R Replication Hub &amp; Reporting
                   </h3>
                 </div>
 
@@ -258,9 +278,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2.5 items-start">
                     <Info size={18} className="text-indigo-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="font-bold text-sm text-white">Birebir R Replikasyon Betiği</h4>
+                      <h4 className="font-bold text-sm text-white">One-to-one R replication script</h4>
                       <p className="text-xs text-indigo-300 mt-1 leading-relaxed">
-                        uSTAT'ta yaptığınız her analiz, veri filtreleme veya modelleme arka planda kronolojik olarak kaydedilir. R Replication Hub simgesine tıklayarak, yaptığınız tüm işlemlerin RStudio üzerinde **birebir aynısını çoğaltacak (replicate edecek)** temiz, optimize edilmiş bir R betiğini (<span className="font-mono text-white bg-indigo-900/60 px-1 py-0.5 rounded">.R dosyası</span>) tek tıkla indirebilirsiniz.
+                        Every analysis, filter, and model you run in uSTAT is recorded chronologically in the background. Click the R Replication Hub to download a clean, optimized R script (<span className="font-mono text-white bg-indigo-900/60 px-1 py-0.5 rounded">.R file</span>) that reproduces all of your steps exactly in RStudio.
                       </p>
                     </div>
                   </div>
@@ -270,9 +290,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                   <div className="flex gap-2">
                     <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-slate-800">Yayın Hazır Bulgular (Methods Appendix)</p>
+                      <p className="font-bold text-slate-800">Publication-ready findings (Methods Appendix)</p>
                       <p className="text-slate-500 leading-relaxed mt-0.5">
-                        Tüm analizlerinizi bitirdiğinizde R betiğinin yanı sıra makalenizin Yöntem (Methods) bölümüne doğrudan ekleyebileceğiniz, kullanılan yazılım sürümlerini, tohum (seed) değerlerini ve analiz açıklamalarını içeren akademik bir Word belgesi (DOCX) oluşturabilirsiniz.
+                        When you finish, alongside the R script you can generate an academic Word document (DOCX) for your paper's Methods section — listing the software versions, random seeds, and analysis descriptions used.
                       </p>
                     </div>
                   </div>
@@ -288,9 +308,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
         <div className="bg-slate-50 border-t border-slate-200 px-6 py-3 flex items-center justify-between flex-shrink-0 text-[10px] text-slate-500 font-medium">
           <div className="flex items-center gap-1.5">
             <ShieldCheck size={13} className="text-emerald-600" />
-            <span>Tüm verileriniz yerel tarayıcı oturumunda işlenir ve sunucuya sadece hesaplama için anonim olarak gönderilir.</span>
+            <span>Your data stays in your local browser session and is sent to the server only for computation, anonymously.</span>
           </div>
-          <span className="font-semibold text-slate-400">uSTAT v2.6.0 Kılavuz</span>
+          <span className="font-semibold text-slate-400">uSTAT v3.1.0 Guide</span>
         </div>
 
       </div>

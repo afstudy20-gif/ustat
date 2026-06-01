@@ -176,7 +176,7 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
             <div
               role="separator"
               aria-orientation="vertical"
-              title="Sürükle: orta / sağ sütun genişliği · Çift tık: sıfırla"
+              title="Drag: middle / right column width · Double-click: reset"
               onPointerDown={onResizeStart}
               onDoubleClick={onResizeReset}
               className="hidden xl:block absolute top-0 bottom-0 w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize z-20 transition-colors"

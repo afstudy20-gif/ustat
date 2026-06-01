@@ -857,7 +857,7 @@ export default function SurvivalAdvancedPanel() {
               }}
               className="px-3 py-1.5 text-xs font-medium border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors"
             >
-              {kmScanLoading ? "Taranıyor…" : "🔍 Log-rank Tarama"}
+              {kmScanLoading ? "Scanning…" : "🔍 Log-rank Scan"}
             </button>
           )}
           {kmError && <p className="text-xs text-red-500">{kmError}</p>}
@@ -867,13 +867,13 @@ export default function SurvivalAdvancedPanel() {
         {kmScanResult.length > 0 && (
           <div className="rounded-lg border border-gray-200 overflow-auto">
             <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
-              <p className="text-xs font-semibold text-gray-600">Log-rank Tarama — Tüm Kategorik Değişkenler</p>
-              <button onClick={() => setKmScanResult([])} className="text-[10px] text-gray-400 hover:text-red-500">✕ Kapat</button>
+              <p className="text-xs font-semibold text-gray-600">Log-rank Scan — All Categorical Variables</p>
+              <button onClick={() => setKmScanResult([])} className="text-[10px] text-gray-400 hover:text-red-500">✕ Close</button>
             </div>
             <table className="text-xs w-full">
               <thead><tr className="bg-gray-50">
-                <th className="px-3 py-1.5 text-left text-gray-500">Değişken</th>
-                <th className="px-3 py-1.5 text-left text-gray-500">Grup sayısı</th>
+                <th className="px-3 py-1.5 text-left text-gray-500">Variable</th>
+                <th className="px-3 py-1.5 text-left text-gray-500">Groups</th>
                 <th className="px-3 py-1.5 text-left text-gray-500">χ²</th>
                 <th className="px-3 py-1.5 text-left text-gray-500">Log-rank p</th>
                 <th className="px-3 py-1.5 text-left text-gray-500"></th>
@@ -885,13 +885,13 @@ export default function SurvivalAdvancedPanel() {
                     <td className="px-3 py-1 text-gray-500">{r.groups ?? "—"}</td>
                     <td className="px-3 py-1 text-gray-500">{r.chi2 != null ? r.chi2.toFixed(3) : "—"}</td>
                     <td className={`px-3 py-1 font-semibold ${r.logrank_p !== null && r.logrank_p < 0.05 ? "text-indigo-700" : "text-gray-500"}`}>
-                      {r.logrank_p !== null ? (r.logrank_p < 0.001 ? "<0.001" : r.logrank_p.toFixed(4)) : "hata"}
+                      {r.logrank_p !== null ? (r.logrank_p < 0.001 ? "<0.001" : r.logrank_p.toFixed(4)) : "error"}
                     </td>
                     <td className="px-3 py-1">
                       {r.logrank_p !== null && r.logrank_p < 0.05 && (
                         <button onClick={() => { setKmGroup(r.variable); setKmScanResult([]); }}
                           className="text-[10px] text-indigo-500 hover:text-indigo-700 underline">
-                          Grafiğe ekle
+                          Add to chart
                         </button>
                       )}
                     </td>

@@ -50,7 +50,7 @@ export default function ThreeCol({
       <div
         role="separator"
         aria-orientation="vertical"
-        title="Sürükle: sol sütun genişliği · Çift tık: sıfırla"
+        title="Drag: left column width · Double-click: reset"
         onPointerDown={leftCol.onDragStart}
         onDoubleClick={leftCol.onReset}
         className="hidden xl:block w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize self-stretch transition-colors"
@@ -59,7 +59,7 @@ export default function ThreeCol({
       <div
         role="separator"
         aria-orientation="vertical"
-        title="Sürükle: sağ sütun genişliği · Çift tık: sıfırla"
+        title="Drag: right column width · Double-click: reset"
         onPointerDown={rightCol.onDragStart}
         onDoubleClick={rightCol.onReset}
         className="hidden xl:block w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize self-stretch transition-colors"
