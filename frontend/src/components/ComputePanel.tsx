@@ -1166,8 +1166,6 @@ function ClinicalTab({
   );
 }
 
-// ── Tab 5: Data Cleaning & Imputation ──────────────────────────────────────────
-
 
 
 // ── Main ComputePanel ─────────────────────────────────────────────────────────
