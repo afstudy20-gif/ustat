@@ -352,91 +352,90 @@ def subgroup_bar(req: SubgroupBarRequest):
     if len(sub) == 0:
         raise HTTPException(status_code=400, detail="No valid data points found after dropping missing values in grouping variables.")
 
-    # Get unique groups, handling categories sorting nicely
-    subgroups = sorted(sub[req.subgroup_col].dropna().unique())
-    x_vals = sorted(sub[req.xaxis_col].dropna().unique())
-    color_groups = sorted(sub[req.color_col].dropna().unique()) if req.color_col else ["All"]
+    # Get unique groups, sorted deterministically (mixed types → string sort).
+    subgroups = sorted(sub[req.subgroup_col].dropna().unique(), key=str)
+    x_vals = sorted(sub[req.xaxis_col].dropna().unique(), key=str)
+    color_groups = sorted(sub[req.color_col].dropna().unique(), key=str) if req.color_col else ["All"]
+
+    # ── Percentage "success" level — resolved ONCE over the whole subset, not
+    # per cell. Picking it per cell (the old behaviour) let different bars
+    # measure different levels, so the chart was not comparable.
+    pct_target = None
+    if req.y_mode == "percentage":
+        pct_target = req.target_value
+        if pct_target is None:
+            levels = sorted(str(v) for v in sub[req.y_col].dropna().unique())
+            if "1" in levels:
+                pct_target = "1"
+            elif "1.0" in levels:
+                pct_target = "1.0"
+            elif levels:
+                pct_target = levels[-1]  # deterministic fallback
+            else:
+                pct_target = "1"
+
+    Z = 1.959963984540054  # 95% normal quantile
+
+    def _wilson_pct(successes: int, n: int) -> tuple:
+        """Wilson score interval (×100). Returns (point%, low%, high%)."""
+        if n == 0:
+            return 0.0, 0.0, 0.0
+        p = successes / n
+        denom = 1.0 + Z * Z / n
+        center = (p + Z * Z / (2 * n)) / denom
+        half = (Z / denom) * np.sqrt(p * (1 - p) / n + Z * Z / (4 * n * n))
+        return p * 100.0, max(0.0, center - half) * 100.0, min(1.0, center + half) * 100.0
 
     traces = []
-    
     for cg in color_groups:
-        trace_x_subgroup = []
-        trace_x_xaxis = []
-        trace_y = []
-        trace_error = []
-        trace_ns = []
-        
+        tr = {"name": str(cg), "x_subgroup": [], "x_xaxis": [], "y": [],
+              "error": [], "error_low": [], "error_high": [], "ns": []}
         for sg in subgroups:
             for xv in x_vals:
-                # Filter for this cell
                 mask = (sub[req.subgroup_col] == sg) & (sub[req.xaxis_col] == xv)
                 if req.color_col:
                     mask = mask & (sub[req.color_col] == cg)
-                
-                cell_data = sub.loc[mask, req.y_col].dropna()
-                n = len(cell_data)
-                
-                val = 0.0
-                err = 0.0
-                
-                if n > 0:
-                    if req.y_mode == "percentage":
-                        target = req.target_value
-                        if target is None:
-                            unique_vals = cell_data.unique()
-                            if len(unique_vals) > 0:
-                                target = str(unique_vals[0])
-                            else:
-                                target = "1"
-                        
-                        successes = sum(cell_data.astype(str) == str(target))
-                        p = successes / n
-                        val = p * 100.0
-                        
-                        sd = np.sqrt(p * (1 - p)) * 100.0
-                        se = (np.sqrt(p * (1 - p) / n)) * 100.0
-                        ci = 1.96 * se
-                    else:
-                        numeric_data = pd.to_numeric(cell_data, errors='coerce').dropna()
-                        n_num = len(numeric_data)
-                        if n_num > 0:
-                            val = float(numeric_data.mean())
-                            sd = float(numeric_data.std()) if n_num > 1 else 0.0
-                            se = sd / np.sqrt(n_num)
-                            ci = 1.96 * se
-                        else:
-                            val = 0.0
-                            sd = 0.0
-                            se = 0.0
-                            ci = 0.0
-                    
+                cell = sub.loc[mask, req.y_col].dropna()
+                n = int(len(cell))
+
+                val, e_low, e_high = 0.0, 0.0, 0.0
+                if n > 0 and req.y_mode == "percentage":
+                    successes = int((cell.astype(str) == str(pct_target)).sum())
+                    p = successes / n
+                    val, lo, hi = _wilson_pct(successes, n)
+                    se = np.sqrt(p * (1 - p) / n) * 100.0
+                    sd = np.sqrt(p * (1 - p)) * 100.0
                     if req.error_type == "ci":
-                        err = ci
+                        e_low, e_high = max(0.0, val - lo), max(0.0, hi - val)  # asymmetric (Wilson)
                     elif req.error_type == "se":
-                        err = se
+                        e_low = e_high = se
                     elif req.error_type == "sd":
-                        err = sd
-                    else:
-                        err = 0.0
-                else:
-                    val = 0.0
-                    err = 0.0
-                
-                trace_x_subgroup.append(str(sg))
-                trace_x_xaxis.append(str(xv))
-                trace_y.append(val)
-                trace_error.append(err)
-                trace_ns.append(n)
-                
-        traces.append({
-            "name": str(cg),
-            "x_subgroup": trace_x_subgroup,
-            "x_xaxis": trace_x_xaxis,
-            "y": trace_y,
-            "error": trace_error,
-            "ns": trace_ns
-        })
-        
+                        e_low = e_high = sd
+                elif n > 0:
+                    nums = pd.to_numeric(cell, errors="coerce").dropna()
+                    m = int(len(nums))
+                    if m > 0:
+                        val = float(nums.mean())
+                        sd = float(nums.std(ddof=1)) if m > 1 else 0.0
+                        se = sd / np.sqrt(m)
+                        if req.error_type == "ci":
+                            tcrit = float(scipy_stats.t.ppf(0.975, m - 1)) if m > 1 else 0.0
+                            e_low = e_high = tcrit * se  # t-distribution CI half-width
+                        elif req.error_type == "se":
+                            e_low = e_high = se
+                        elif req.error_type == "sd":
+                            e_low = e_high = sd
+
+                tr["x_subgroup"].append(str(sg))
+                tr["x_xaxis"].append(str(xv))
+                tr["y"].append(val)
+                tr["error"].append(e_high)        # legacy symmetric field (= upper offset)
+                tr["error_low"].append(e_low)
+                tr["error_high"].append(e_high)
+                tr["ns"].append(n)
+        traces.append(tr)
+
+    _err_label = {"ci": "95% CI", "se": "± 1 SE", "sd": "± 1 SD", "none": "no error bars"}.get(req.error_type, req.error_type)
     return {
         "type": "subgroup_bar",
         "y_col": req.y_col,
@@ -444,8 +443,13 @@ def subgroup_bar(req: SubgroupBarRequest):
         "xaxis_col": req.xaxis_col,
         "color_col": req.color_col,
         "y_mode": req.y_mode,
-        "target_value": req.target_value,
+        "target_value": pct_target if req.y_mode == "percentage" else req.target_value,
         "error_type": req.error_type,
-        "traces": traces
+        "traces": traces,
+        "method_note": (
+            "Means use a t-distribution CI (t_{n−1}); percentages use the Wilson "
+            "score interval (bounded to 0–100%, accurate for small n and extreme "
+            f"proportions). Error bars show {_err_label}."
+        )
     }
 

@@ -838,7 +838,11 @@ function buildPlotlyTraces(
       width: barWidth,
       error_y: {
         type: "data",
-        array: t.error,
+        // Asymmetric when the backend sends Wilson bounds (percentage CI);
+        // symmetric (low == high) for SE/SD and t-CI on means.
+        symmetric: false,
+        array: t.error_high ?? t.error,
+        arrayminus: t.error_low ?? t.error,
         visible: plotData.error_type !== "none",
         color: "#374151",
         thickness: 1.8,
