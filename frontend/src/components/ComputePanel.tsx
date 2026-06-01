@@ -18,11 +18,7 @@ import {
   computeClinical,
   deleteColumn,
   getUniqueValues,
-  runDropMissing,
-  runCleanOutliers,
-  runFindReplace,
 } from "../api";
-import api from "../api";
 import { Tip } from "./Tip";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -40,7 +36,7 @@ interface FormulaTemplate { name: string; formula: string; }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const TABS = ["Formula", "Transform", "Recode", "Clinical", "Cleaning"] as const;
+const TABS = ["Formula", "Transform", "Recode", "Clinical"] as const;
 type Tab = (typeof TABS)[number];
 
 const TRANSFORMS = [
@@ -1172,189 +1168,6 @@ function ClinicalTab({
 
 // ── Tab 5: Data Cleaning & Imputation ──────────────────────────────────────────
 
-function CleaningTab({
-  sessionId,
-  columns,
-  numCols,
-}: {
-  sessionId: string;
-  columns: ColMeta[];
-  numCols: ColMeta[];
-}) {
-  const [cleanMode, setCleanMode] = useState<"missing" | "outliers" | "find_replace">("missing");
-  const [selectedCols, setSelectedCols] = useState<string[]>([]);
-  
-  // Outliers variables
-  const [outlierMethod, setOutlierMethod] = useState("iqr");
-  const [outlierThreshold, setOutlierThreshold] = useState(1.5);
-  
-  // Find & Replace variables
-  const [findValue, setFindValue] = useState("");
-  const [replaceValue, setReplaceValue] = useState("");
-  
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const refreshSession = async () => {
-    const refresh = await api.get(`/api/stats/${sessionId}/refresh`);
-    const session = useStore.getState().session;
-    if (session) {
-      useStore.getState().setSession({ ...session, ...refresh.data });
-    }
-  };
-
-  const handleClean = async () => {
-    if (selectedCols.length === 0) {
-      setError("Please select at least one column.");
-      return;
-    }
-    setLoading(true); setError(null); setSuccess(null);
-    try {
-      if (cleanMode === "missing") {
-        const res = await runDropMissing(sessionId, { columns: selectedCols });
-        await refreshSession();
-        setSuccess(`Success! Dropped ${res.data.deleted} rows with missing values. ${res.data.remaining_rows} rows remaining.`);
-      } else if (cleanMode === "outliers") {
-        const res = await runCleanOutliers(sessionId, {
-          columns: selectedCols,
-          method: outlierMethod,
-          threshold: outlierThreshold
-        });
-        await refreshSession();
-        setSuccess(`Success! Removed ${res.data.deleted} outlier rows. ${res.data.remaining_rows} rows remaining.`);
-      } else if (cleanMode === "find_replace") {
-        const res = await runFindReplace(sessionId, {
-          columns: selectedCols,
-          find_value: findValue,
-          replace_value: replaceValue
-        });
-        await refreshSession();
-        setSuccess(`Success! Replaced ${res.data.replaced_count} cell values across selected columns.`);
-      }
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Data cleaning failed.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4 max-w-lg">
-      <div className="panel space-y-4">
-        <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cleaning Operation</label>
-          <div className="flex gap-2">
-            {[
-              ["missing", "Drop Missing (Listwise)"],
-              ["outliers", "Clean Outliers"],
-              ["find_replace", "Find & Replace"]
-            ].map(([id, label]) => (
-              <label key={id} className="flex items-center gap-1 text-xs cursor-pointer text-gray-700 bg-gray-50 hover:bg-gray-100 border rounded-lg px-2.5 py-1">
-                <input
-                  type="radio"
-                  name="clean_mode"
-                  checked={cleanMode === id}
-                  onChange={() => {
-                    setCleanMode(id as any);
-                    setSelectedCols([]);
-                    setError(null);
-                    setSuccess(null);
-                  }}
-                  className="accent-indigo-600"
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Variables Selection */}
-        <div className="space-y-1">
-          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-            Select Variables
-          </label>
-          <select
-            multiple
-            className="select w-full h-36 font-mono text-xs"
-            value={selectedCols}
-            onChange={(e) => setSelectedCols(Array.from(e.target.selectedOptions, (o) => o.value))}
-          >
-            {(cleanMode === "outliers" ? numCols : columns).map((c) => (
-              <option key={c.name}>{c.name}</option>
-            ))}
-          </select>
-          <p className="text-[10px] text-gray-400">Hold Ctrl/Cmd to select multiple.</p>
-        </div>
-
-        {/* Dynamic controls based on operation */}
-        {cleanMode === "outliers" && (
-          <div className="grid grid-cols-2 gap-3 bg-gray-50 border rounded-xl p-3">
-            <div className="space-y-1">
-              <label className="text-xs text-gray-500">Method</label>
-              <select
-                className="select text-xs w-full"
-                value={outlierMethod}
-                onChange={(e) => setOutlierMethod(e.target.value)}
-              >
-                <option value="iqr">IQR (Interquartile Range)</option>
-                <option value="zscore">Z-score</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-gray-500">
-                {outlierMethod === "iqr" ? "Threshold (IQR multiplier)" : "Threshold (Z score)"}
-              </label>
-              <input
-                type="number"
-                step="0.1"
-                className="select text-xs w-full"
-                value={outlierThreshold}
-                onChange={(e) => setOutlierThreshold(parseFloat(e.target.value) || 1.5)}
-              />
-            </div>
-          </div>
-        )}
-
-        {cleanMode === "find_replace" && (
-          <div className="grid grid-cols-2 gap-3 bg-gray-50 border rounded-xl p-3">
-            <div className="space-y-1">
-              <label className="text-xs text-gray-500">Find value</label>
-              <input
-                type="text"
-                placeholder="e.g. 999 or 'N/A'"
-                className="select text-xs w-full font-mono"
-                value={findValue}
-                onChange={(e) => setFindValue(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-gray-500">Replace value</label>
-              <input
-                type="text"
-                placeholder="e.g. 1 or leave blank for missing"
-                className="select text-xs w-full font-mono"
-                value={replaceValue}
-                onChange={(e) => setReplaceValue(e.target.value)}
-              />
-            </div>
-          </div>
-        )}
-
-        <button
-          className="btn-primary w-full py-1.5"
-          onClick={handleClean}
-          disabled={loading || selectedCols.length === 0}
-        >
-          {loading ? "Processing..." : "Apply Cleaning"}
-        </button>
-
-        {error && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-700">{error}</div>}
-        {success && <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2 text-xs text-green-800">{success}</div>}
-      </div>
-    </div>
-  );
-}
 
 
 // ── Main ComputePanel ─────────────────────────────────────────────────────────
@@ -1407,7 +1220,6 @@ export default function ComputePanel() {
               {t === "Transform" && "📐 "}
               {t === "Recode"   && "🔀 "}
               {t === "Clinical" && "🫀 "}
-              {t === "Cleaning" && "🧹 "}
               {t}
             </button>
           ))}
@@ -1436,9 +1248,6 @@ export default function ComputePanel() {
         )}
         {tab === "Clinical" && (
           <ClinicalTab sessionId={sid} columns={allCols} onResult={handleResult} />
-        )}
-        {tab === "Cleaning" && (
-          <CleaningTab sessionId={sid} columns={allCols} numCols={numCols} />
         )}
       </div>
     </div>

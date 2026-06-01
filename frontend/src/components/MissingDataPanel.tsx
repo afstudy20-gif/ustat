@@ -3,10 +3,12 @@ import { useStore } from "../store";
 import { runMICE } from "../api";
 import ResultExporter from "./ResultExporter";
 import api from "../api";
+import { CleaningTab } from "./CleaningTab";
 
 export default function MissingDataPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
+  const numCols = columns.filter((c) => c.kind === "numeric");
   const sid = session?.session_id ?? "";
 
   // Missing column detection
@@ -255,6 +257,9 @@ export default function MissingDataPanel() {
           )}
         </div>
       </div>
+
+      {/* ── Data Cleaning (listwise deletion · outliers · find & replace) ── */}
+      <CleaningTab sessionId={sid} columns={columns} numCols={numCols} />
     </div>
   );
 }
