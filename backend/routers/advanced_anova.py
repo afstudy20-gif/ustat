@@ -345,3 +345,149 @@ def two_way_anova(req: TwoWayAnovaRequest):
             f'emmeans(model, ~ {req.factor1} | {req.factor2})'
         ),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. MANCOVA  (multivariate analysis of covariance)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MancovaRequest(BaseModel):
+    session_id: str
+    outcomes: List[str]            # ≥2 dependent variables (e.g. BDNF, GDNF, NTF3, NGF)
+    group_col: str
+    covariates: List[str] = []
+    alpha: float = 0.05
+    imputation: str = "listwise"
+
+
+def _eta_magnitude(v: float) -> str:
+    if v >= 0.14:
+        return "large"
+    if v >= 0.06:
+        return "medium"
+    if v >= 0.01:
+        return "small"
+    return "negligible"
+
+
+@router.post("/mancova")
+def mancova(req: MancovaRequest):
+    """One-way MANCOVA: several continuous outcomes vs a grouping factor while
+    controlling for covariates. Returns the four multivariate test statistics
+    (Pillai's trace, Wilks' lambda, Hotelling-Lawley trace, Roy's greatest root)
+    for the group effect, with an F-approximation, p-value, and a multivariate
+    partial η². Intended as the omnibus step before per-outcome ANCOVAs.
+    """
+    from statsmodels.multivariate.manova import MANOVA
+
+    df_full = _get_df(req.session_id)
+    if len(req.outcomes) < 2:
+        raise HTTPException(400, "MANCOVA needs at least 2 outcome variables.")
+    cols = list(dict.fromkeys(req.outcomes + [req.group_col] + req.covariates))
+    for c in cols:
+        if c not in df_full.columns:
+            raise HTTPException(400, f"Column '{c}' not found.")
+
+    df = apply_imputation(df_full, cols, req.imputation)
+    for c in req.outcomes + req.covariates:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=cols)
+
+    min_n = max(10, len(req.outcomes) + len(req.covariates) + 3)
+    if len(df) < min_n:
+        raise HTTPException(400, f"Need at least {min_n} complete rows for this MANCOVA.")
+
+    groups = sorted(df[req.group_col].unique(), key=str)
+    if len(groups) < 2:
+        raise HTTPException(400, "Group column must have at least 2 levels.")
+
+    lhs = " + ".join(_safe_col(o) for o in req.outcomes)
+    rhs = " + ".join([f"C({_safe_col(req.group_col)})"] + [_safe_col(c) for c in req.covariates])
+    formula = f"{lhs} ~ {rhs}"
+
+    try:
+        mv = MANOVA.from_formula(formula, data=df)
+        mvtest = mv.mv_test()
+    except Exception as exc:
+        raise HTTPException(400, f"MANCOVA fitting error: {exc}")
+
+    # Locate the grouping term in the multivariate test output.
+    group_term = next((k for k in mvtest.results.keys() if req.group_col in str(k)), None)
+    if group_term is None:
+        raise HTTPException(500, "Could not find the group effect in the MANCOVA output.")
+
+    stat_df = mvtest.results[group_term]["stat"]
+    tests_out = []
+    pillai = None
+    for name in stat_df.index:
+        row = stat_df.loc[name]
+        entry = {
+            "test": str(name),
+            "value": round(float(row["Value"]), 5),
+            "F": round(float(row["F Value"]), 4),
+            "num_df": round(float(row["Num DF"]), 1),
+            "den_df": round(float(row["Den DF"]), 1),
+            "p": float(row["Pr > F"]),
+            "significant": bool(float(row["Pr > F"]) < req.alpha),
+        }
+        tests_out.append(entry)
+        if "Pillai" in str(name):
+            pillai = entry
+
+    if pillai is None:
+        pillai = tests_out[0]
+
+    # Multivariate partial η² from Pillai's trace: V / s, s = min(#outcomes, df_hypothesis)
+    s = max(1, min(len(req.outcomes), len(groups) - 1))
+    eta2 = float(pillai["value"]) / s
+    eta2 = max(0.0, min(1.0, eta2))
+    magnitude = _eta_magnitude(eta2)
+    sig = bool(pillai["p"] < req.alpha)
+    ps = _p_str(pillai["p"])
+
+    cov_list = ", ".join(req.covariates) if req.covariates else "none"
+    out_list = ", ".join(req.outcomes)
+
+    export_rows = [["Multivariate test", "Value", "F", "Num df", "Den df", "p"]]
+    for t in tests_out:
+        export_rows.append([t["test"], t["value"], t["F"], t["num_df"], t["den_df"], round(t["p"], 6)])
+
+    return {
+        "test": "MANCOVA",
+        "outcomes": req.outcomes,
+        "group_col": req.group_col,
+        "covariates": req.covariates,
+        "n": int(len(df)),
+        "n_groups": len(groups),
+        "groups": [str(g) for g in groups],
+        "multivariate_tests": tests_out,
+        "pillai": pillai,
+        "significant": sig,
+        "effect_size": {"name": "partial η² (multivariate, from Pillai)",
+                        "value": round(eta2, 4), "magnitude": magnitude},
+        "interpretation": (
+            f"After controlling for {cov_list}, there was {'a significant' if sig else 'no significant'} "
+            f"multivariate effect of {req.group_col} on the combined outcomes "
+            f"(Pillai's Trace = {pillai['value']:.3f}, F({pillai['num_df']:.0f}, {pillai['den_df']:.0f}) "
+            f"= {pillai['F']:.2f}, p = {ps}, partial η² = {eta2:.3f} [{magnitude}])."
+            + (" Follow up with per-outcome ANCOVAs." if sig else "")
+        ),
+        "result_text": (
+            f"A one-way MANCOVA was conducted with {out_list} as dependent variables and {req.group_col} as the "
+            f"between-subjects factor, controlling for {cov_list}. "
+            f"There was {'a statistically significant' if sig else 'no statistically significant'} "
+            f"multivariate effect of {req.group_col} (Pillai's Trace = {pillai['value']:.3f}, "
+            f"F({pillai['num_df']:.0f}, {pillai['den_df']:.0f}) = {pillai['F']:.2f}, p = {ps}, "
+            f"partial η² = {eta2:.3f}). "
+            + ("Given the significant omnibus result, separate ANCOVAs were examined for each outcome."
+               if sig else "As the omnibus test was non-significant, follow-up ANCOVAs are not warranted.")
+        ),
+        "export_rows": export_rows,
+        "r_code": (
+            f'library(car)\n'
+            f'model <- lm(cbind({", ".join(req.outcomes)}) ~ {req.group_col}'
+            + (f' + {" + ".join(req.covariates)}' if req.covariates else "")
+            + f', data = data)\n'
+            f'Manova(model, type = "II")  # Pillai by default'
+        ),
+    }

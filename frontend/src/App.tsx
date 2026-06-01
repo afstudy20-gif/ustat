@@ -117,6 +117,7 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "Independent t-test", tab: "tests", group: "Parametric", aliases: ["two sample t", "bağımsız t"] },
   { name: "One-way ANOVA", tab: "tests", group: "Parametric", aliases: ["anova", "tek yönlü varyans"] },
   { name: "ANCOVA", tab: "tests", group: "Parametric", aliases: ["covariance analysis"] },
+  { name: "MANCOVA", tab: "tests", group: "Parametric", aliases: ["multivariate ancova", "manova", "pillai", "wilks", "multivariate analysis of covariance", "çok değişkenli kovaryans"] },
   { name: "Two-way ANOVA", tab: "tests", group: "Parametric", aliases: ["iki yönlü anova", "factorial"] },
   { name: "Mann-Whitney U", tab: "tests", group: "Non-parametric", aliases: ["m-w", "u test", "wilcoxon rank"] },
   { name: "Kruskal-Wallis", tab: "tests", group: "Non-parametric", aliases: ["kw", "nonparametric anova"] },

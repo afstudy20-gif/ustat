@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra } from "../api";
+import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra, runMancova } from "../api";
 import ResultExporter from "./ResultExporter";
 
 const TESTS = [
@@ -11,6 +11,7 @@ const TESTS = [
   { id: "kruskal",        label: "Kruskal-Wallis",        group: "Non-parametric" },
   { id: "jonckheere",     label: "Jonckheere-Terpstra trend", group: "Non-parametric" },
   { id: "ancova",          label: "ANCOVA",                group: "Parametric" },
+  { id: "mancova",        label: "MANCOVA",               group: "Parametric" },
   { id: "two_way",        label: "Two-way ANOVA",         group: "Parametric" },
   { id: "chisquare",      label: "Chi-square",            group: "Categorical" },
   { id: "fisher",         label: "Fisher's exact",        group: "Categorical" },
@@ -66,6 +67,11 @@ const TEST_GUIDANCE: Record<string, { when: string; assumptions: string; reading
     when: "Examine the effects of two categorical factors (and their interaction) on a continuous outcome. E.g. drug type \u00D7 dose level on blood pressure.",
     assumptions: "Normality of residuals. Homogeneity of variances across all factor-level combinations.",
     reading: "Check the interaction first. If significant, main effects are qualified by the interaction. Report F, p, and partial \u03B7\u00B2 for each term. Use EMMs to understand cell means.",
+  },
+  mancova: {
+    when: "Test a group effect on several correlated continuous outcomes at once (e.g. BDNF, GDNF, NTF3, NGF), while controlling for covariates (age, sex, anxiety, BMI, smoking). Use it as the omnibus step before per-outcome ANCOVAs to guard against multiple-comparison inflation.",
+    assumptions: "Multivariate normality of residuals, homogeneity of covariance matrices (Box's M), linear covariate\u2013outcome relationships, and no severe multicollinearity among outcomes. Log-transform skewed outcomes first (Compute \u2192 LOG).",
+    reading: "Read Pillai's Trace first \u2014 it is the most robust to assumption violations. p < 0.05 means the groups differ on the combined outcomes after adjustment. Report Pillai's Trace, F(num,den), p, and partial \u03B7\u00B2 (0.01 small / 0.06 medium / 0.14 large). If significant, follow up with an ANCOVA per outcome.",
   },
 };
 
@@ -261,6 +267,7 @@ export default function HypothesisPanel() {
   const [groupCol, setGroupCol] = useState(catCols[0] ?? "");
   const [mu, setMu] = useState("0");
   const [covariates, setCovariates] = useState<string[]>([]);
+  const [outcomes, setOutcomes] = useState<string[]>([]);  // MANCOVA: ≥2 dependent vars
   const [factor2, setFactor2] = useState(catCols[1] ?? catCols[0] ?? "");
   // Dunn's post-hoc correction for Kruskal-Wallis. Bonferroni is the
   // conventional reporting choice in clinical journals; Holm is the
@@ -275,10 +282,11 @@ export default function HypothesisPanel() {
   const setResult = (r: any) => { _setResult(r); setCache("hypothesis", { result: r }); };
 
   const isCat = test === "chisquare" || test === "fisher";
-  const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "jonckheere", "ancova"].includes(test);
+  const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "jonckheere", "ancova", "mancova"].includes(test);
   const isKruskal = test === "kruskal";
   const needsSecondCat = isCat;
   const isAncova = test === "ancova";
+  const isMancova = test === "mancova";
   const isTwoWay = test === "two_way";
 
   const run = async () => {
@@ -295,6 +303,7 @@ export default function HypothesisPanel() {
       else if (test === "chisquare") res = await runChiSquare({ session_id: sid, row_column: col, col_column: col2 });
       else if (test === "fisher")    res = await runFisher({ session_id: sid, row_column: col, col_column: col2 });
       else if (test === "ancova")    res = await runAncova({ session_id: sid, outcome: col, group_col: groupCol, covariates });
+      else if (test === "mancova")   res = await runMancova({ session_id: sid, outcomes, group_col: groupCol, covariates });
       else if (test === "two_way")   res = await runTwoWayAnova({ session_id: sid, outcome: col, factor1: groupCol, factor2 });
       setResult(res?.data);
     } catch (e: any) {
@@ -336,14 +345,28 @@ export default function HypothesisPanel() {
 
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
-          <div>
-            <label className="text-xs text-gray-400 block mb-1">
-              {isCat ? "Row column" : "Outcome column"}
-            </label>
-            <select className="select w-full" value={col} onChange={(e) => setCol(e.target.value)}>
-              {(isCat ? catCols : numCols).map((c) => <option key={c}>{c}</option>)}
-            </select>
-          </div>
+          {!isMancova && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">
+                {isCat ? "Row column" : "Outcome column"}
+              </label>
+              <select className="select w-full" value={col} onChange={(e) => setCol(e.target.value)}>
+                {(isCat ? catCols : numCols).map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* MANCOVA: ≥2 dependent variables */}
+          {isMancova && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Outcomes (≥2 continuous)</label>
+              <select multiple className="select w-full h-24" value={outcomes}
+                onChange={(e) => setOutcomes(Array.from(e.target.selectedOptions, o => o.value))}>
+                {numCols.map((c) => <option key={c}>{c}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">{outcomes.length} selected · hold Ctrl/Cmd to pick multiple</p>
+            </div>
+          )}
 
           {test === "ttest_1sample" && (
             <div>
@@ -388,13 +411,13 @@ export default function HypothesisPanel() {
             </div>
           )}
 
-          {/* ANCOVA: covariates multi-select */}
-          {isAncova && (
+          {/* ANCOVA / MANCOVA: covariates multi-select */}
+          {(isAncova || isMancova) && (
             <div>
               <label className="text-xs text-gray-400 block mb-1">Covariates (continuous)</label>
               <select multiple className="select w-full h-24" value={covariates}
                 onChange={(e) => setCovariates(Array.from(e.target.selectedOptions, o => o.value))}>
-                {numCols.filter(c => c !== col).map((c) => <option key={c}>{c}</option>)}
+                {numCols.filter(c => isMancova ? !outcomes.includes(c) : c !== col).map((c) => <option key={c}>{c}</option>)}
               </select>
               <p className="text-[10px] text-gray-400 mt-1">Hold Ctrl/Cmd to select multiple</p>
             </div>
@@ -410,7 +433,7 @@ export default function HypothesisPanel() {
             </div>
           )}
 
-          <button className="btn-primary w-full" onClick={run} disabled={loading || (isAncova && covariates.length === 0)}>
+          <button className="btn-primary w-full" onClick={run} disabled={loading || (isAncova && covariates.length === 0) || (isMancova && outcomes.length < 2)}>
             {loading ? "Running…" : "Run Test"}
           </button>
           {error && <p className="text-red-500 text-xs">{error}</p>}

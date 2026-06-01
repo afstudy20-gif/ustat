@@ -125,6 +125,7 @@ export const runMixedAnova   = (data: object) => api.post("/api/repeated/mixed_a
 // Advanced ANOVA
 export const runAncova       = (data: object) => api.post("/api/advanced_anova/ancova", data);
 export const runTwoWayAnova  = (data: object) => api.post("/api/advanced_anova/two_way_anova", data);
+export const runMancova      = (data: object) => api.post("/api/advanced_anova/mancova", data);
 
 // Categorical
 export const runBinomial     = (data: object) => api.post("/api/categorical/binomial", data);

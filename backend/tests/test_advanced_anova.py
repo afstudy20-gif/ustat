@@ -168,3 +168,52 @@ def test_r_code_present(client):
     assert "r_code" in d
     assert "aov" in d["r_code"]
     assert "emmeans" in d["r_code"]
+
+
+# ── MANCOVA ──────────────────────────────────────────────────────────────────
+
+def test_mancova_significant_with_covariates(client):
+    rng = np.random.default_rng(1)
+    n = 120
+    grp = rng.choice(["ADHD", "Control"], n)
+    eff = (grp == "ADHD").astype(float)
+    df = pd.DataFrame({
+        "group": grp,
+        "age": rng.normal(12, 2, n), "sex": rng.integers(0, 2, n),
+        "SCARED": rng.normal(30, 8, n), "BMIpct": rng.uniform(5, 95, n), "smoke": rng.integers(0, 2, n),
+        "BDNF": rng.normal(20, 5, n) + 3 * eff, "GDNF": rng.normal(15, 4, n) + 2 * eff,
+        "NTF3": rng.normal(10, 3, n) + eff, "NGF": rng.normal(8, 2, n) + 1.5 * eff,
+    })
+    sid = make_session(df, "mancova1")
+    r = client.post("/api/advanced_anova/mancova", json={
+        "session_id": sid, "outcomes": ["BDNF", "GDNF", "NTF3", "NGF"], "group_col": "group",
+        "covariates": ["age", "sex", "SCARED", "BMIpct", "smoke"],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["test"] == "MANCOVA"
+    names = {t["test"] for t in d["multivariate_tests"]}
+    assert any("Pillai" in n for n in names) and any("Wilks" in n for n in names)
+    assert d["pillai"]["test"].startswith("Pillai")
+    assert 0.0 <= d["pillai"]["p"] <= 1.0
+    assert d["effect_size"]["magnitude"] in {"negligible", "small", "medium", "large"}
+    assert "Pillai" in d["result_text"] and "partial" in d["result_text"]
+    assert "Manova" in d["r_code"]
+
+
+def test_mancova_requires_two_outcomes(client):
+    df = pd.DataFrame({"group": ["A", "B"] * 20, "y1": np.random.rand(40)})
+    sid = make_session(df, "mancova_one")
+    r = client.post("/api/advanced_anova/mancova", json={
+        "session_id": sid, "outcomes": ["y1"], "group_col": "group", "covariates": [],
+    })
+    assert r.status_code == 400, r.text
+
+
+def test_mancova_missing_column_400(client):
+    df = pd.DataFrame({"group": ["A", "B"] * 20, "y1": np.random.rand(40), "y2": np.random.rand(40)})
+    sid = make_session(df, "mancova_miss")
+    r = client.post("/api/advanced_anova/mancova", json={
+        "session_id": sid, "outcomes": ["y1", "nope"], "group_col": "group", "covariates": [],
+    })
+    assert r.status_code == 400, r.text
