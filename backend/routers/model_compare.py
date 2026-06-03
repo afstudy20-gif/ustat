@@ -336,3 +336,220 @@ def compare_models(req: CompareModelsRequest):
         "export_rows": export_rows,
         "r_code": r_code,
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3. ADDED PREDICTIVE VALUE  (incremental value of a new predictor)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AddedValueRequest(BaseModel):
+    session_id: str
+    outcome: str                       # binary 0/1
+    base_predictors: List[str]         # known/established predictors
+    new_predictors: List[str]          # candidate predictor(s) to evaluate
+    model_type: str = "logistic"       # v1: logistic only
+    imputation: str = "listwise"
+    cv_folds: int = 0                  # 0 = apparent (in-sample); ≥5 = honest k-fold CV ΔAUC
+    bootstrap: int = 400               # bootstrap reps for NRI/IDI CIs (0 = skip)
+
+
+def _logit_oof_probs(X: pd.DataFrame, y: np.ndarray, cv_folds: int) -> np.ndarray:
+    """Cross-validated out-of-fold predicted probabilities (statsmodels Logit per fold)."""
+    from sklearn.model_selection import StratifiedKFold
+    oof = np.full(len(y), np.nan)
+    skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42)
+    for tr, te in skf.split(X.values, y):
+        try:
+            m = sm.Logit(y[tr], X.iloc[tr]).fit(disp=False, maxiter=100)
+            oof[te] = np.asarray(m.predict(X.iloc[te]))
+        except Exception:
+            oof[te] = float(np.mean(y[tr]))  # degenerate fold → base rate
+    return oof
+
+
+def _nagelkerke(fitted, n: int) -> float:
+    try:
+        llf, lln = float(fitted.llf), float(fitted.llnull)
+        cox_snell = 1.0 - np.exp((lln - llf) * 2.0 / n)
+        denom = 1.0 - np.exp(lln * 2.0 / n)
+        return float(cox_snell / denom) if denom > 0 else float("nan")
+    except Exception:
+        return float("nan")
+
+
+@router.post("/added_value")
+def added_value(req: AddedValueRequest):
+    """Quantify the incremental predictive value of adding new predictor(s) to a
+    base model — the right way to judge a "predictor", beyond a significant
+    coefficient p-value. Reports ΔAUC (DeLong test), continuous NRI, IDI, the
+    nested likelihood-ratio test, ΔAIC/BIC, pseudo-R² change, and the calibration
+    of both models, plus an integrated narrative.
+    """
+    from routers.stats.nonparametric import _delong_compare
+    from services.model_validation import compute_calibration_slope_intercept
+
+    if req.model_type != "logistic":
+        raise HTTPException(400, "added_value currently supports model_type='logistic' (binary outcome).")
+    if not req.new_predictors:
+        raise HTTPException(400, "Provide at least one new predictor to evaluate.")
+
+    base = list(dict.fromkeys(req.base_predictors))
+    new = [p for p in dict.fromkeys(req.new_predictors) if p not in base]
+    if not new:
+        raise HTTPException(400, "New predictor(s) are already in the base model.")
+    full = base + new
+    if not base:
+        raise HTTPException(400, "Base model needs at least one predictor (the established factors).")
+
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+    cols = list(dict.fromkeys([req.outcome] + full))
+    missing = [c for c in cols if c not in df_full.columns]
+    if missing:
+        raise HTTPException(400, f"Columns not found: {missing}")
+    df = apply_imputation(df_full, cols, req.imputation)
+    n_excluded = n_total - len(df)
+    if len(df) < len(full) + 10:
+        raise HTTPException(400, "Not enough complete observations relative to the number of predictors.")
+
+    # Fit both models (apparent fit drives likelihood-based metrics).
+    m_base, X_base, y_s = _fit_model(df, req.outcome, base, "logistic")
+    m_full, X_full, _ = _fit_model(df, req.outcome, full, "logistic")
+    y = y_s.values.astype(int)
+    if set(np.unique(y)) - {0, 1} or len(np.unique(y)) < 2:
+        raise HTTPException(400, "Outcome must be binary 0/1 with both classes present.")
+
+    # Predicted probabilities — apparent or cross-validated (honest).
+    cv = int(req.cv_folds)
+    if cv and cv >= 3:
+        p_base = _logit_oof_probs(X_base, y, cv)
+        p_full = _logit_oof_probs(X_full, y, cv)
+        pred_basis = f"{cv}-fold cross-validated"
+    else:
+        p_base = np.asarray(m_base.predict(X_base))
+        p_full = np.asarray(m_full.predict(X_full))
+        pred_basis = "apparent (in-sample)"
+
+    # ── Discrimination: AUCs + DeLong ΔAUC (full vs base) ────────────────────
+    delong = _delong_compare(y, p_full, p_base)
+    auc_base, auc_full = delong["auc_2"], delong["auc_1"]
+    delta_auc = delong["difference"]
+    delong_p = delong["p"]
+
+    # ── Reclassification: continuous NRI + IDI ───────────────────────────────
+    def _nri_idi(pf: np.ndarray, pb: np.ndarray) -> tuple:
+        ev, ne = y == 1, y == 0
+        d = pf - pb
+        nri_e = (np.mean(d[ev] > 0) - np.mean(d[ev] < 0)) if ev.any() else 0.0
+        nri_ne = (np.mean(d[ne] < 0) - np.mean(d[ne] > 0)) if ne.any() else 0.0
+        nri = nri_e + nri_ne
+        idi = (np.mean(pf[ev]) - np.mean(pb[ev])) - (np.mean(pf[ne]) - np.mean(pb[ne]))
+        return float(nri), float(idi), float(nri_e), float(nri_ne)
+
+    nri, idi, nri_ev, nri_ne = _nri_idi(p_full, p_base)
+
+    nri_ci = idi_ci = None
+    reps = int(req.bootstrap)
+    if reps and reps >= 50:
+        rng = np.random.default_rng(42)
+        nris, idis = [], []
+        idx_all = np.arange(len(y))
+        for _ in range(reps):
+            bi = rng.choice(idx_all, size=len(idx_all), replace=True)
+            if len(np.unique(y[bi])) < 2:
+                continue
+            # predictions are fixed per subject; resample subjects with replacement
+            ev, ne = y[bi] == 1, y[bi] == 0
+            d = p_full[bi] - p_base[bi]
+            nb = ((np.mean(d[ev] > 0) - np.mean(d[ev] < 0)) if ev.any() else 0.0) + \
+                 ((np.mean(d[ne] < 0) - np.mean(d[ne] > 0)) if ne.any() else 0.0)
+            ib = (np.mean(p_full[bi][ev]) - np.mean(p_base[bi][ev])) - \
+                 (np.mean(p_full[bi][ne]) - np.mean(p_base[bi][ne]))
+            nris.append(nb); idis.append(ib)
+        if nris:
+            nri_ci = [round(float(np.quantile(nris, 0.025)), 4), round(float(np.quantile(nris, 0.975)), 4)]
+            idi_ci = [round(float(np.quantile(idis, 0.025)), 4), round(float(np.quantile(idis, 0.975)), 4)]
+
+    # ── Nested likelihood-ratio test + information criteria (apparent fit) ────
+    ll_base, ll_full = float(m_base.llf), float(m_full.llf)
+    k_base, k_full = int(m_base.df_model) + 1, int(m_full.df_model) + 1
+    lr_stat = -2.0 * (ll_base - ll_full)
+    df_test = k_full - k_base
+    lr_p = float(sp.chi2.sf(lr_stat, df_test)) if df_test > 0 else 1.0
+    daic = float(m_full.aic) - float(m_base.aic)
+    dbic = float(m_full.bic) - float(m_base.bic)
+    r2_base, r2_full = _nagelkerke(m_base, len(y)), _nagelkerke(m_full, len(y))
+
+    # ── Calibration of each model ────────────────────────────────────────────
+    cal_base = compute_calibration_slope_intercept(y, probs=np.clip(p_base, 1e-6, 1 - 1e-6))
+    cal_full = compute_calibration_slope_intercept(y, probs=np.clip(p_full, 1e-6, 1 - 1e-6))
+    brier_base = round(float(brier_score_loss(y, p_base)), 4)
+    brier_full = round(float(brier_score_loss(y, p_full)), 4)
+
+    # ── Integrated verdict ───────────────────────────────────────────────────
+    disc_better = bool(delta_auc > 0 and delong_p < 0.05)
+    idi_pos = bool(idi > 0 and (idi_ci is None or idi_ci[0] > 0))
+    slope_full = cal_full["calibration_slope"]
+    calib_ok = bool(0.8 <= slope_full <= 1.2)
+    added = bool(disc_better or idi_pos or (lr_p < 0.05 and daic < 0))
+    new_str = ", ".join(new)
+
+    verdict = (
+        f"Adding {new_str} to the base model "
+        + ("**improved predictive performance**" if added else "**did not meaningfully improve predictive performance**")
+        + f". Discrimination: AUC {auc_base:.3f} → {auc_full:.3f} (ΔAUC = {delta_auc:+.3f}, DeLong p = {_p_str(delong_p)}). "
+        + f"Reclassification: IDI = {idi:+.4f}"
+        + (f" (95% CI {idi_ci[0]:+.4f} to {idi_ci[1]:+.4f})" if idi_ci else "")
+        + f", continuous NRI = {nri:+.4f}"
+        + (f" (95% CI {nri_ci[0]:+.4f} to {nri_ci[1]:+.4f})" if nri_ci else "")
+        + f". Overall fit: LR χ²({df_test}) = {lr_stat:.2f}, p = {_p_str(lr_p)}, ΔAIC = {daic:+.1f}, "
+        + f"Nagelkerke R² {r2_base:.3f} → {r2_full:.3f}. "
+        + f"Calibration of the full model: slope = {slope_full:.2f}, intercept = {cal_full['calibration_intercept']:.2f}, "
+        + f"Brier {brier_base:.3f} → {brier_full:.3f} "
+        + ("(calibration preserved)." if calib_ok else "(calibration slope outside 0.8–1.2 — check calibration plot).")
+        + " Note: a significant coefficient p-value alone does not establish added predictive value — "
+        + "the evidence above (discrimination + reclassification + calibration) does."
+    )
+
+    return {
+        "test": "Added Predictive Value",
+        "outcome": req.outcome,
+        "base_predictors": base,
+        "new_predictors": new,
+        "model_type": "logistic",
+        "n": int(len(df)),
+        "n_excluded": int(n_excluded),
+        "prediction_basis": pred_basis,
+        "discrimination": {
+            "auc_base": auc_base, "auc_full": auc_full, "delta_auc": delta_auc,
+            "delong_z": delong["z"], "delong_p": delong_p,
+            "delta_auc_ci": [delong["ci_diff_low"], delong["ci_diff_high"]],
+            "significant": bool(delong_p < 0.05),
+        },
+        "reclassification": {
+            "nri": round(nri, 4), "nri_ci": nri_ci,
+            "nri_events": round(nri_ev, 4), "nri_nonevents": round(nri_ne, 4),
+            "idi": round(idi, 4), "idi_ci": idi_ci,
+        },
+        "fit": {
+            "lr_stat": round(lr_stat, 4), "df": df_test, "lr_p": lr_p,
+            "delta_aic": round(daic, 4), "delta_bic": round(dbic, 4),
+            "nagelkerke_base": round(r2_base, 4), "nagelkerke_full": round(r2_full, 4),
+        },
+        "calibration": {
+            "base": {**cal_base, "brier": brier_base},
+            "full": {**cal_full, "brier": brier_full},
+            "preserved": calib_ok,
+        },
+        "added_value": added,
+        "interpretation": verdict,
+        "result_text": verdict,
+        "r_code": (
+            f'library(pROC); library(PredictABEL)\n'
+            f'base <- glm({req.outcome} ~ {" + ".join(base)}, family = binomial, data = data)\n'
+            f'full <- glm({req.outcome} ~ {" + ".join(full)}, family = binomial, data = data)\n'
+            f'roc.test(roc(data${req.outcome}, fitted(base)), roc(data${req.outcome}, fitted(full)))  # DeLong\n'
+            f'anova(base, full, test = "LRT")\n'
+            f'reclassification(data, cOutcome, fitted(base), fitted(full), ...)  # NRI / IDI'
+        ),
+    }

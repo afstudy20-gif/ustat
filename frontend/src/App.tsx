@@ -57,6 +57,7 @@ import HypothesisPanel from "./components/HypothesisPanel";
 import CorrelationPanel from "./components/CorrelationPanel";
 import ModelsPanel from "./components/ModelsPanel";
 import VisualModelPanel from "./components/VisualModelPanel";
+import AddedValuePanel from "./components/AddedValuePanel";
 import ROCPanel from "./components/ROCPanel";
 import Table1Panel from "./components/Table1Panel";
 import PowerPanel from "./components/PowerPanel";
@@ -118,6 +119,7 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "One-way ANOVA", tab: "tests", group: "Parametric", aliases: ["anova", "tek yönlü varyans"] },
   { name: "ANCOVA", tab: "tests", group: "Parametric", aliases: ["covariance analysis"] },
   { name: "MANCOVA", tab: "tests", group: "Parametric", aliases: ["multivariate ancova", "manova", "pillai", "wilks", "multivariate analysis of covariance", "çok değişkenli kovaryans"] },
+  { name: "Added Predictive Value", tab: "visual", group: "Models", aliases: ["incremental value", "delta auc", "nri", "idi", "reclassification", "added value", "predictor improves model", "discrimination calibration", "eklenen değer"] },
   { name: "Two-way ANOVA", tab: "tests", group: "Parametric", aliases: ["iki yönlü anova", "factorial"] },
   { name: "Mann-Whitney U", tab: "tests", group: "Non-parametric", aliases: ["m-w", "u test", "wilcoxon rank"] },
   { name: "Kruskal-Wallis", tab: "tests", group: "Non-parametric", aliases: ["kw", "nonparametric anova"] },
@@ -424,12 +426,13 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest">("models");
+  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest" | "addedvalue">("models");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
         {([
           ["models", "Models & Diagnostics"],
+          ["addedvalue", "Added Predictive Value"],
           ["charts", "Charts"],
           ["subgroup", "Subgroup Bar Chart"],
           ["forest", "Forest plot (sensitivity / multi-endpoint)"],
@@ -444,6 +447,7 @@ function VisualChartsCombo() {
       </div>
       <div className="flex-1 p-4 overflow-y-auto">
         {sub === "models" ? <VisualModelPanel />
+          : sub === "addedvalue" ? <AddedValuePanel />
           : sub === "charts" ? <ChartsPanel />
           : sub === "subgroup" ? <SubgroupBarPanel />
           : <ForestBuilderPanel />}
