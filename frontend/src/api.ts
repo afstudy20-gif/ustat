@@ -163,6 +163,7 @@ export const runDCA            = (data: object) => api.post("/api/decision_curve
 export const runNestedLR       = (data: object) => api.post("/api/model_compare/nested_lr_test", data);
 export const runCompareModels  = (data: object) => api.post("/api/model_compare/compare_models", data);
 export const runAddedValue     = (data: object) => api.post("/api/model_compare/added_value", data);
+export const runIV2SLS         = (data: object) => api.post("/api/causal/iv_2sls", data);
 
 // Survival advanced
 export const runMICE       = (data: object) => api.post("/api/survival_advanced/mice", data);

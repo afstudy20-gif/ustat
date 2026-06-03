@@ -58,6 +58,7 @@ import CorrelationPanel from "./components/CorrelationPanel";
 import ModelsPanel from "./components/ModelsPanel";
 import VisualModelPanel from "./components/VisualModelPanel";
 import AddedValuePanel from "./components/AddedValuePanel";
+import CausalPanel from "./components/CausalPanel";
 import ROCPanel from "./components/ROCPanel";
 import Table1Panel from "./components/Table1Panel";
 import PowerPanel from "./components/PowerPanel";
@@ -92,6 +93,7 @@ const TABS = [
   { id: "models",      label: "Models",      icon: Brain },
   { id: "psm",         label: "PSM",         icon: Target },
   { id: "iptw",        label: "IPTW",        icon: Scale },
+  { id: "causal",      label: "Causal+",     icon: GitMerge }, // IV / mediation / target-trial
   { id: "dca",         label: "DCA",         icon: Target }, // Decision Curve Analysis (Phase 13)
   { id: "meta",        label: "Meta",        icon: Layers },
   { id: "missing",     label: "Missing",     icon: Filter },
@@ -120,6 +122,7 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "ANCOVA", tab: "tests", group: "Parametric", aliases: ["covariance analysis"] },
   { name: "MANCOVA", tab: "tests", group: "Parametric", aliases: ["multivariate ancova", "manova", "pillai", "wilks", "multivariate analysis of covariance", "çok değişkenli kovaryans"] },
   { name: "Added Predictive Value", tab: "visual", group: "Models", aliases: ["incremental value", "delta auc", "nri", "idi", "reclassification", "added value", "predictor improves model", "discrimination calibration", "eklenen değer"] },
+  { name: "Instrumental Variable (2SLS)", tab: "causal", group: "Causal", aliases: ["iv", "instrumental variable", "2sls", "two stage least squares", "endogeneity", "wu-hausman", "sargan", "enstrümantal değişken"] },
   { name: "Two-way ANOVA", tab: "tests", group: "Parametric", aliases: ["iki yönlü anova", "factorial"] },
   { name: "Mann-Whitney U", tab: "tests", group: "Non-parametric", aliases: ["m-w", "u test", "wilcoxon rank"] },
   { name: "Kruskal-Wallis", tab: "tests", group: "Non-parametric", aliases: ["kw", "nonparametric anova"] },
@@ -784,6 +787,7 @@ export default function App() {
           {activeTab === "power"       && <div className="flex-1 p-4 overflow-y-auto"><PowerPanel /></div>}
           {activeTab === "psm"         && <div className="flex-1 p-4 overflow-y-auto"><PSMPanel /></div>}
           {activeTab === "iptw"        && <div className="flex-1 p-4 overflow-y-auto"><IPTWPanel /></div>}
+          {activeTab === "causal"      && <div className="flex-1 p-4 overflow-y-auto"><CausalPanel /></div>}
           {activeTab === "meta"        && <div className="flex-1 overflow-y-auto"><MetaPanel /></div>}
           {activeTab === "missing"     && <div className="flex-1 overflow-y-auto"><MissingDataPanel /></div>}
           {activeTab === "dca"         && <div className="flex-1 p-4 overflow-y-auto"><DecisionCurvePanel /></div>}
