@@ -1,14 +1,15 @@
 """Causal-inference methods that complement PSM/IPTW/E-value:
 
-  * /iv_2sls          — instrumental-variable estimation (two-stage least
-                        squares) with weak-instrument F, Wu-Hausman endogeneity
-                        test, and Sargan over-identification test.
+  * /iv_2sls          — instrumental-variable estimation (2SLS) + diagnostics.
+  * /mediation        — linear causal mediation (ACME/ADE/proportion mediated).
+  * /target_trial     — target-trial emulation: eligibility → IPTW-ATE on the
+                        emulated cohort + the 7-component protocol scaffold.
 
 (Additive router — does not touch the existing PSM/IPTW/sensitivity panels.)
 """
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -334,5 +335,217 @@ def mediation(req: MediationRequest):
             + (f' + {" + ".join(req.covariates)}' if req.covariates else "") + ', data = data)\n'
             f'med <- mediate(m.med, m.out, treat = "{req.treatment}", mediator = "{req.mediator}", boot = TRUE)\n'
             f'summary(med)  # ACME, ADE, total effect, proportion mediated'
+        ),
+    }
+
+
+# ── Target trial emulation ────────────────────────────────────────────────────
+
+_OPS = {
+    "eq": lambda s, v: s == v, "ne": lambda s, v: s != v,
+    "gt": lambda s, v: s > v, "lt": lambda s, v: s < v,
+    "gte": lambda s, v: s >= v, "lte": lambda s, v: s <= v,
+}
+
+
+class EligibilityCriterion(BaseModel):
+    column: str
+    op: str            # eq | ne | gt | lt | gte | lte
+    value: float
+
+
+class TargetTrialRequest(BaseModel):
+    session_id: str
+    treatment: str                       # binary 0/1 (arm assignment proxy)
+    outcome: str                         # binary 0/1
+    confounders: List[str]               # baseline covariates measured at time zero
+    eligibility: List[EligibilityCriterion] = []
+    strategies: List[str] = []           # arm labels [control, treated]; optional
+    time_zero: str = "Baseline (cohort entry)"
+    imputation: str = "listwise"
+    bootstrap: int = 400
+
+
+def _smd_bin_cont(t: np.ndarray, c: np.ndarray) -> float:
+    if len(t) < 2 or len(c) < 2:
+        return 0.0
+    m1, m0 = float(np.mean(t)), float(np.mean(c))
+    sd = float(np.sqrt((np.var(t, ddof=1) + np.var(c, ddof=1)) / 2))
+    return float(abs(m1 - m0) / sd) if sd > 1e-9 else 0.0
+
+
+@router.post("/target_trial")
+def target_trial(req: TargetTrialRequest):
+    """Target-trial emulation: apply explicit eligibility, estimate the
+    intention-to-treat-style average treatment effect on the eligible cohort via
+    stabilized IPTW (propensity on the baseline confounders), report covariate
+    balance before/after weighting, and return the 7-component target-trial
+    protocol scaffold plus the standard emulation caveats.
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.preprocessing import StandardScaler
+
+    if not req.confounders:
+        raise HTTPException(400, "Specify the baseline confounders to adjust for.")
+    df_full = _get_df(req.session_id)
+    cols = list(dict.fromkeys([req.treatment, req.outcome] + req.confounders
+                              + [c.column for c in req.eligibility]))
+    miss = [c for c in cols if c not in df_full.columns]
+    if miss:
+        raise HTTPException(400, f"Columns not found: {miss}")
+
+    df = apply_imputation(df_full, cols, req.imputation).reset_index(drop=True)
+    n_screened = len(df)
+
+    # ── Eligibility ──────────────────────────────────────────────────────────
+    mask = pd.Series(True, index=df.index)
+    applied = []
+    for crit in req.eligibility:
+        fn = _OPS.get(crit.op)
+        if fn is None:
+            raise HTTPException(400, f"Unknown eligibility op '{crit.op}'.")
+        col = pd.to_numeric(df[crit.column], errors="coerce")
+        mask &= fn(col, crit.value).fillna(False)
+        applied.append(f"{crit.column} {crit.op} {crit.value}")
+    elig = df[mask].reset_index(drop=True)
+    n_eligible = len(elig)
+    n_excluded_elig = n_screened - n_eligible
+    if n_eligible < len(req.confounders) + 20:
+        raise HTTPException(400, "Too few eligible patients after applying eligibility criteria.")
+
+    t = pd.to_numeric(elig[req.treatment], errors="coerce")
+    y = pd.to_numeric(elig[req.outcome], errors="coerce")
+    keep = t.notna() & y.notna()
+    elig, t, y = elig[keep].reset_index(drop=True), t[keep].astype(int).values, y[keep].astype(int).values
+    if set(np.unique(t)) - {0, 1} or len(np.unique(t)) < 2:
+        raise HTTPException(400, "Treatment must be binary 0/1 with both arms present.")
+    if set(np.unique(y)) - {0, 1} or len(np.unique(y)) < 2:
+        raise HTTPException(400, "Outcome must be binary 0/1 with both classes present.")
+    n = len(t)
+
+    # ── Propensity + stabilized ATE weights ──────────────────────────────────
+    Xc = _design(elig, req.confounders)
+    Xs = StandardScaler().fit_transform(Xc.values)
+    ps = LogisticRegression(max_iter=1000, C=1.0).fit(Xs, t).predict_proba(Xs)[:, 1]
+    ps = np.clip(ps, 1e-3, 1 - 1e-3)
+    p_t = float(np.mean(t))
+    w = np.where(t == 1, p_t / ps, (1 - p_t) / (1 - ps))           # stabilized ATE
+    cap = np.quantile(w, 0.99)
+    w = np.clip(w, None, cap)
+
+    # ── Balance (SMD) before vs weighted-after ───────────────────────────────
+    balance = []
+    for col in Xc.columns:
+        v = Xc[col].values.astype(float)
+        smd_before = _smd_bin_cont(v[t == 1], v[t == 0])
+        # weighted means/vars
+        def wstat(arr, ww):
+            m = np.sum(arr * ww) / np.sum(ww)
+            var = np.sum(ww * (arr - m) ** 2) / np.sum(ww)
+            return m, var
+        m1, var1 = wstat(v[t == 1], w[t == 1])
+        m0, var0 = wstat(v[t == 0], w[t == 0])
+        sd = np.sqrt((var1 + var0) / 2)
+        smd_after = float(abs(m1 - m0) / sd) if sd > 1e-9 else 0.0
+        balance.append({"covariate": str(col), "smd_before": round(smd_before, 4),
+                        "smd_after": round(smd_after, 4)})
+    balanced = bool(all(b["smd_after"] < 0.1 for b in balance))
+
+    # ── Weighted ATE: risk difference / ratio (bootstrap CI) ─────────────────
+    def _effect(ti, yi, wi):
+        r1 = np.sum(yi[ti == 1] * wi[ti == 1]) / np.sum(wi[ti == 1])
+        r0 = np.sum(yi[ti == 0] * wi[ti == 0]) / np.sum(wi[ti == 0])
+        rd = r1 - r0
+        rr = (r1 / r0) if r0 > 1e-9 else float("nan")
+        return r1, r0, rd, rr
+
+    risk1, risk0, rd, rr = _effect(t, y, w)
+    rd_ci = rr_ci = None
+    reps = int(req.bootstrap)
+    if reps and reps >= 100:
+        rng = np.random.default_rng(42)
+        idx = np.arange(n)
+        rds, rrs = [], []
+        for _ in range(reps):
+            bi = rng.choice(idx, size=n, replace=True)
+            tb, yb = t[bi], y[bi]
+            if len(np.unique(tb)) < 2:
+                continue
+            try:
+                psb = LogisticRegression(max_iter=500, C=1.0).fit(Xs[bi], tb).predict_proba(Xs[bi])[:, 1]
+                psb = np.clip(psb, 1e-3, 1 - 1e-3)
+                ptb = float(np.mean(tb))
+                wb = np.where(tb == 1, ptb / psb, (1 - ptb) / (1 - psb))
+                wb = np.clip(wb, None, np.quantile(wb, 0.99))
+                _, _, rdb, rrb = _effect(tb, yb, wb)
+                rds.append(rdb)
+                if np.isfinite(rrb):
+                    rrs.append(rrb)
+            except Exception:
+                continue
+        if rds:
+            rd_ci = [round(float(np.quantile(rds, 0.025)), 4), round(float(np.quantile(rds, 0.975)), 4)]
+        if rrs:
+            rr_ci = [round(float(np.quantile(rrs, 0.025)), 4), round(float(np.quantile(rrs, 0.975)), 4)]
+
+    rd_sig = bool(rd_ci is not None and (rd_ci[0] > 0 or rd_ci[1] < 0))
+    arm0 = req.strategies[0] if len(req.strategies) > 0 else "control / no treatment"
+    arm1 = req.strategies[1] if len(req.strategies) > 1 else "treated"
+
+    protocol = {
+        "eligibility": applied if applied else ["(whole cohort — no eligibility criteria specified)"],
+        "treatment_strategies": [arm0, arm1],
+        "assignment": "Emulated from observed treatment; confounding by indication addressed via stabilized IPTW on the baseline confounders.",
+        "time_zero": req.time_zero,
+        "outcome": req.outcome,
+        "causal_contrast": "Intention-to-treat-style average treatment effect (ATE) — risk difference and risk ratio.",
+        "analysis_plan": "Propensity-score logistic model on the baseline confounders; stabilized ATE weights (truncated at the 99th percentile); weighted outcome risks; bootstrap 95% CIs.",
+    }
+    caveats = [
+        "Unmeasured confounding is not addressed by IPTW — pair with an E-value sensitivity analysis.",
+        "Immortal-time bias: ensure treatment status and eligibility are defined at the same time zero.",
+        "Positivity: extreme weights (truncated here) flag regions of poor overlap.",
+    ]
+
+    result_text = (
+        f"Target-trial emulation on the eligible cohort (screened {n_screened}, "
+        f"eligible {n_eligible}{f', {n_excluded_elig} excluded by eligibility' if applied else ''}, "
+        f"analysed {n}). After stabilized IPTW on {', '.join(req.confounders)}, covariate balance was "
+        + ("achieved (all |SMD| < 0.10). " if balanced else "improved but not all |SMD| < 0.10. ")
+        + f"Weighted {req.outcome} risk: {risk1:.3f} ({arm1}) vs {risk0:.3f} ({arm0}); "
+        f"risk difference = {rd:+.3f}"
+        + (f" (95% CI {rd_ci[0]:+.3f} to {rd_ci[1]:+.3f})" if rd_ci else "")
+        + f", risk ratio = {rr:.3f}"
+        + (f" (95% CI {rr_ci[0]:.3f} to {rr_ci[1]:.3f})" if rr_ci else "") + ". "
+        + ("The effect is statistically significant (RD CI excludes 0)."
+           if rd_sig else "The effect is not statistically significant (RD CI includes 0).")
+    )
+
+    return {
+        "test": "Target Trial Emulation",
+        "treatment": req.treatment, "outcome": req.outcome, "confounders": req.confounders,
+        "n_screened": int(n_screened), "n_eligible": int(n_eligible),
+        "n_excluded_eligibility": int(n_excluded_elig), "n_analyzed": int(n),
+        "protocol": protocol,
+        "effect": {
+            "risk_treated": round(float(risk1), 4), "risk_control": round(float(risk0), 4),
+            "risk_difference": round(float(rd), 4), "rd_ci": rd_ci,
+            "risk_ratio": round(float(rr), 4) if np.isfinite(rr) else None, "rr_ci": rr_ci,
+            "significant": rd_sig,
+        },
+        "balance": balance, "balanced": balanced,
+        "weight_summary": {"max": round(float(np.max(w)), 3), "mean": round(float(np.mean(w)), 3),
+                           "truncated_at": round(float(cap), 3)},
+        "caveats": caveats,
+        "result_text": result_text,
+        "interpretation": result_text,
+        "r_code": (
+            f'# Target trial emulation (IPTW ATE)\n'
+            f'library(ipw); library(survey)\n'
+            f'ps <- glm({req.treatment} ~ {" + ".join(req.confounders)}, family = binomial, data = elig)\n'
+            f'elig$w <- ifelse(elig${req.treatment}==1, mean(elig${req.treatment})/fitted(ps),\n'
+            f'                 (1-mean(elig${req.treatment}))/(1-fitted(ps)))\n'
+            f'design <- svydesign(~1, weights = ~w, data = elig)\n'
+            f'svyglm({req.outcome} ~ {req.treatment}, design, family = quasibinomial)'
         ),
     }
