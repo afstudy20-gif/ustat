@@ -1,6 +1,34 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { writeFileSync, mkdirSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+// Build-time version stamp emitted to dist/version.json so the in-app
+// UpdatePrompt can poll it as a fallback when the service worker is
+// unavailable. Hash = current ISO build time (changes every build) so any
+// new deploy is detected immediately.
+const BUILD_TIME = new Date().toISOString()
+const APP_VERSION = process.env.npm_package_version ?? '0.0.0'
+
+function emitVersionJson(): Plugin {
+  return {
+    name: 'emit-version-json',
+    apply: 'build',
+    closeBundle() {
+      try {
+        const out = resolve(__dirname, 'dist')
+        mkdirSync(out, { recursive: true })
+        writeFileSync(
+          resolve(out, 'version.json'),
+          JSON.stringify({ version: APP_VERSION, build: BUILD_TIME }, null, 2),
+        )
+      } catch (e) {
+        console.warn('[emit-version-json] failed:', e)
+      }
+    },
+  }
+}
 
 function nodePolyfills(): Plugin {
   const V_BUFFER = '\0node-polyfill:buffer'
@@ -62,8 +90,12 @@ export default defineConfig({
   plugins: [
     react(),
     nodePolyfills(),
+    emitVersionJson(),
     VitePWA({
       registerType: 'autoUpdate',
+      // 'prompt' would surface needRefresh always; 'autoUpdate' silently
+      // installs in the background and exposes needRefresh too, so the
+      // UpdatePrompt component can show a toast on top of it.
       includeAssets: ['logo.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: 'uSTAT - Statistical Analysis',
@@ -84,18 +116,36 @@ export default defineConfig({
       workbox: {
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+        // version.json carries the build stamp; it must NEVER be precached,
+        // otherwise the fallback poll always sees the old version.
+        globIgnores: ['**/version.json'],
+        // Don't claim navigation requests for /api/* (FastAPI backend).
+        navigateFallbackDenylist: [/^\/api\//],
+        // Activate the new SW as soon as it finishes installing — without
+        // this, users would need TWO reloads to pick up a deploy.
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
             urlPattern: /^https?:\/\/.*\/api\//,
             handler: 'NetworkFirst',
             options: { cacheName: 'api-cache', expiration: { maxEntries: 50, maxAgeSeconds: 300 } },
           },
+          {
+            // Always fetch the version manifest fresh; never serve from cache.
+            urlPattern: /\/version\.json$/,
+            handler: 'NetworkOnly',
+          },
         ],
       },
     }),
   ],
 
-  define: { global: 'globalThis' },
+  define: {
+    global: 'globalThis',
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+    __BUILD_TIME__: JSON.stringify(BUILD_TIME),
+  },
 
   optimizeDeps: {
     include: ['plotly.js', 'react-plotly.js', 'xlsx'],
