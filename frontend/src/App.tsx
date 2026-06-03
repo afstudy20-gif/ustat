@@ -123,8 +123,8 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "ANCOVA", tab: "tests", group: "Parametric", aliases: ["covariance analysis"] },
   { name: "MANCOVA", tab: "tests", group: "Parametric", aliases: ["multivariate ancova", "manova", "pillai", "wilks", "multivariate analysis of covariance", "çok değişkenli kovaryans"] },
   { name: "Added Predictive Value", tab: "visual", group: "Models", aliases: ["incremental value", "delta auc", "nri", "idi", "reclassification", "added value", "predictor improves model", "discrimination calibration", "eklenen değer"] },
-  { name: "Internal Validation", tab: "visual", group: "Models", aliases: ["bootstrap", "optimism", "optimism correction", "harrell", "cross-validation", "cross validation", "k-fold", "10-fold", "overfitting", "optimism-corrected auc", "calibration slope", "shrinkage", "internal validation", "dahili doğrulama"] },
-  { name: "External Validation", tab: "visual", group: "Models", aliases: ["external validation", "validation cohort", "transportability", "calibration in the large", "delong", "hosmer lemeshow", "o/e ratio", "calibration plot", "val.prob", "dış doğrulama", "harici doğrulama"] },
+  { name: "Internal Validation", tab: "models", group: "Models", aliases: ["bootstrap", "optimism", "optimism correction", "harrell", "cross-validation", "cross validation", "k-fold", "10-fold", "overfitting", "optimism-corrected auc", "calibration slope", "shrinkage", "internal validation", "dahili doğrulama"] },
+  { name: "External Validation", tab: "models", group: "Models", aliases: ["external validation", "validation cohort", "transportability", "calibration in the large", "delong", "hosmer lemeshow", "o/e ratio", "calibration plot", "val.prob", "dış doğrulama", "harici doğrulama"] },
   { name: "Instrumental Variable (2SLS)", tab: "causal", group: "Causal", aliases: ["iv", "instrumental variable", "2sls", "two stage least squares", "endogeneity", "wu-hausman", "sargan", "enstrümantal değişken"] },
   { name: "Causal Mediation", tab: "causal", group: "Causal", aliases: ["mediation", "mediator", "acme", "ade", "indirect effect", "sobel", "proportion mediated", "baron kenny", "aracılık"] },
   { name: "Target Trial Emulation", tab: "causal", group: "Causal", aliases: ["target trial", "emulation", "iptw ate", "eligibility", "hernan", "emulated trial", "hedef çalışma"] },
@@ -412,11 +412,11 @@ function SummaryCombo() {
 }
 
 function ModelsCombo() {
-  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml" | "timeseries">("regression");
+  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml" | "timeseries" | "validation">("regression");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
-        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"], ["timeseries", "Time Series"]] as const).map(([id, label]) => (
+        {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"], ["timeseries", "Time Series"], ["validation", "Validation (internal / external)"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
               sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
@@ -430,6 +430,7 @@ function ModelsCombo() {
           : sub === "rcs" ? <div className="p-4"><RCSPanel /></div>
           : sub === "ml" ? <div className="p-4"><MLPanel /></div>
           : sub === "timeseries" ? <TimeSeriesPanel />
+          : sub === "validation" ? <div className="p-4"><InternalValidationPanel /></div>
           : <div className="p-4"><SurvivalAdvancedPanel /></div>}
       </div>
     </div>
@@ -437,14 +438,13 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest" | "addedvalue" | "internalval">("models");
+  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest" | "addedvalue">("models");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
         {([
           ["models", "Models & Diagnostics"],
           ["addedvalue", "Added Predictive Value"],
-          ["internalval", "Validation (internal / external)"],
           ["charts", "Charts"],
           ["subgroup", "Subgroup Bar Chart"],
           ["forest", "Forest plot (sensitivity / multi-endpoint)"],
@@ -460,7 +460,6 @@ function VisualChartsCombo() {
       <div className="flex-1 p-4 overflow-y-auto">
         {sub === "models" ? <VisualModelPanel />
           : sub === "addedvalue" ? <AddedValuePanel />
-          : sub === "internalval" ? <InternalValidationPanel />
           : sub === "charts" ? <ChartsPanel />
           : sub === "subgroup" ? <SubgroupBarPanel />
           : <ForestBuilderPanel />}
