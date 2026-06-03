@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { runIV2SLS, runMediation, runTargetTrial } from "../api";
+import { runIV2SLS, runMediation, runTargetTrial, runDiD, runRDD, runDAGAdjustment } from "../api";
 import ResultExporter from "./ResultExporter";
 
-type Method = "iv" | "mediation" | "target";
+type Method = "iv" | "mediation" | "target" | "did" | "rdd" | "dag";
 
 function MultiPick({ label, accent, exclude, value, onChange, columns }: {
   label: string; accent: string; exclude: string[]; value: string[];
@@ -375,16 +375,223 @@ function TargetTrialTab() {
   );
 }
 
+function DiDTab() {
+  const session = useStore((s) => s.session);
+  const cols = (session?.columns ?? []).map((c) => c.name);
+  const sid = session?.session_id ?? "";
+  const [outcome, setOutcome] = useState("");
+  const [groupCol, setGroupCol] = useState("");
+  const [timeCol, setTimeCol] = useState("");
+  const [covariates, setCovariates] = useState<string[]>([]);
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async () => {
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const r = await runDiD({ session_id: sid, outcome, group_col: groupCol, time_col: timeCol, covariates });
+      setResult(r.data);
+    } catch (e: any) { setError(e?.response?.data?.detail ?? "DiD failed."); } finally { setLoading(false); }
+  };
+  const canRun = sid && new Set([outcome, groupCol, timeCol].filter(Boolean)).size === 3 && !loading;
+  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
+  return (
+    <div className="flex gap-4">
+      <div className="w-72 flex-shrink-0 space-y-4">
+        <div className="panel bg-indigo-50 border-indigo-200 space-y-1">
+          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">Difference-in-Differences</p>
+          <p className="text-xs text-indigo-800 leading-relaxed">
+            Effect = the extra change in the <b>treated</b> group from pre→post over and above the
+            <b> control</b> group's change (the group×time interaction). Assumes <b>parallel trends</b>.
+            Continuous outcome; group &amp; time coded 0/1.
+          </p>
+        </div>
+        <div className="panel space-y-3">
+          <div><label className="text-xs text-gray-400 block mb-1">Outcome (continuous)</label>
+            <select className="select w-full" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+              <option value="">— select —</option>{cols.map((c) => <option key={c}>{c}</option>)}</select></div>
+          <div><label className="text-xs text-gray-400 block mb-1">Group (0=control, 1=treated)</label>
+            <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
+              <option value="">— select —</option>{cols.filter((c) => c !== outcome).map((c) => <option key={c}>{c}</option>)}</select></div>
+          <div><label className="text-xs text-gray-400 block mb-1">Time (0=pre, 1=post)</label>
+            <select className="select w-full" value={timeCol} onChange={(e) => setTimeCol(e.target.value)}>
+              <option value="">— select —</option>{cols.filter((c) => c !== outcome && c !== groupCol).map((c) => <option key={c}>{c}</option>)}</select></div>
+          <MultiPick label="Covariates (optional)" accent="accent-indigo-500" columns={cols}
+            exclude={[outcome, groupCol, timeCol]} value={covariates} onChange={setCovariates} />
+          <button className="btn-primary w-full" onClick={run} disabled={!canRun}>{loading ? "Running…" : "Run DiD"}</button>
+          {error && <p className="text-red-500 text-xs">{error}</p>}
+        </div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-4">
+        {!result ? <div className="panel h-64 flex items-center justify-center text-gray-400 text-sm">Pick outcome, group, and time.</div> : (
+          <>
+            <div className={`panel border ${result.significant ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
+              <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p></div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">DiD estimate</div>
+                <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.did_estimate > 0 ? "+" : ""}{result.did_estimate}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={p(result.p)}</div></div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Treated change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.treated_change > 0 ? "+" : ""}{result.treated_change}</div></div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Control change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.control_change > 0 ? "+" : ""}{result.control_change}</div></div>
+            </div>
+            <div className="text-xs text-gray-500">Cell means — control: {result.cell_means.control_pre} → {result.cell_means.control_post}; treated: {result.cell_means.treated_pre} → {result.cell_means.treated_post}.</div>
+            <ResultExporter title="did" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RDDTab() {
+  const session = useStore((s) => s.session);
+  const cols = (session?.columns ?? []).map((c) => c.name);
+  const sid = session?.session_id ?? "";
+  const [outcome, setOutcome] = useState("");
+  const [running, setRunning] = useState("");
+  const [cutoff, setCutoff] = useState("");
+  const [bandwidth, setBandwidth] = useState("");
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async () => {
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const r = await runRDD({ session_id: sid, outcome, running, cutoff: Number(cutoff), bandwidth: bandwidth ? Number(bandwidth) : null });
+      setResult(r.data);
+    } catch (e: any) { setError(e?.response?.data?.detail ?? "RDD failed."); } finally { setLoading(false); }
+  };
+  const canRun = sid && outcome && running && outcome !== running && cutoff !== "" && !loading;
+  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
+  return (
+    <div className="flex gap-4">
+      <div className="w-72 flex-shrink-0 space-y-4">
+        <div className="panel bg-indigo-50 border-indigo-200 space-y-1">
+          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">Regression Discontinuity (sharp)</p>
+          <p className="text-xs text-indigo-800 leading-relaxed">
+            When treatment is assigned by a <b>cutoff</b> on a running variable (e.g. a score ≥ threshold),
+            the jump in the outcome at the cutoff is the local causal effect (<b>LATE</b>). Local-linear fit,
+            triangular kernel within the bandwidth.
+          </p>
+        </div>
+        <div className="panel space-y-3">
+          <div><label className="text-xs text-gray-400 block mb-1">Outcome</label>
+            <select className="select w-full" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+              <option value="">— select —</option>{cols.map((c) => <option key={c}>{c}</option>)}</select></div>
+          <div><label className="text-xs text-gray-400 block mb-1">Running / forcing variable</label>
+            <select className="select w-full" value={running} onChange={(e) => setRunning(e.target.value)}>
+              <option value="">— select —</option>{cols.filter((c) => c !== outcome).map((c) => <option key={c}>{c}</option>)}</select></div>
+          <div><label className="text-xs text-gray-400 block mb-1">Cutoff</label>
+            <input className="select w-full" type="number" value={cutoff} onChange={(e) => setCutoff(e.target.value)} /></div>
+          <div><label className="text-xs text-gray-400 block mb-1">Bandwidth (blank = auto)</label>
+            <input className="select w-full" type="number" value={bandwidth} onChange={(e) => setBandwidth(e.target.value)} placeholder="auto" /></div>
+          <button className="btn-primary w-full" onClick={run} disabled={!canRun}>{loading ? "Running…" : "Run RDD"}</button>
+          {error && <p className="text-red-500 text-xs">{error}</p>}
+        </div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-4">
+        {!result ? <div className="panel h-64 flex items-center justify-center text-gray-400 text-sm">Pick outcome, running variable, and cutoff.</div> : (
+          <>
+            <div className={`panel border ${result.significant ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
+              <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p></div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">LATE at cutoff</div>
+                <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.late > 0 ? "+" : ""}{result.late}</div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={p(result.p)}</div></div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">±{result.bandwidth}</div></div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">N in bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.n_in_bandwidth}</div><div className="text-[11px] text-gray-500 mt-0.5">{result.n_left} below / {result.n_right} above</div></div>
+            </div>
+            <ResultExporter title="rdd" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DAGTab() {
+  const [edgeText, setEdgeText] = useState("Z -> T\nZ -> Y\nT -> M\nM -> Y\nT -> C\nY -> C");
+  const [treatment, setTreatment] = useState("T");
+  const [outcome, setOutcome] = useState("Y");
+  const [result, setResult] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async () => {
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const edges = edgeText.split("\n").map((l) => l.trim()).filter(Boolean)
+        .map((l) => l.split(/->|→/).map((s) => s.trim())).filter((e) => e.length === 2 && e[0] && e[1]);
+      const r = await runDAGAdjustment({ edges, treatment, outcome });
+      setResult(r.data);
+    } catch (e: any) { setError(e?.response?.data?.detail ?? "DAG analysis failed."); } finally { setLoading(false); }
+  };
+  const roleColor = (r: string) => r === "confounder" ? "text-amber-600" : r === "mediator" ? "text-blue-600" : r === "collider" ? "text-red-600" : "text-gray-500";
+  return (
+    <div className="flex gap-4">
+      <div className="w-72 flex-shrink-0 space-y-4">
+        <div className="panel bg-indigo-50 border-indigo-200 space-y-1">
+          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">DAG Backdoor Analysis</p>
+          <p className="text-xs text-indigo-800 leading-relaxed">
+            Enter your causal graph as edges (<code>A -&gt; B</code>, one per line). Returns each node's role
+            (<b>confounder / mediator / collider</b>) and the <b>minimal adjustment set</b> via the backdoor
+            criterion — which variables to control for, and which to <b>never</b> adjust for.
+          </p>
+        </div>
+        <div className="panel space-y-3">
+          <div><label className="text-xs text-gray-400 block mb-1">Edges (one per line, A -&gt; B)</label>
+            <textarea className="select w-full h-32 font-mono text-xs" value={edgeText} onChange={(e) => setEdgeText(e.target.value)} /></div>
+          <div className="flex gap-2">
+            <div className="flex-1"><label className="text-xs text-gray-400 block mb-1">Treatment</label>
+              <input className="select w-full" value={treatment} onChange={(e) => setTreatment(e.target.value)} /></div>
+            <div className="flex-1"><label className="text-xs text-gray-400 block mb-1">Outcome</label>
+              <input className="select w-full" value={outcome} onChange={(e) => setOutcome(e.target.value)} /></div>
+          </div>
+          <button className="btn-primary w-full" onClick={run} disabled={loading || !treatment || !outcome}>{loading ? "Running…" : "Analyse DAG"}</button>
+          {error && <p className="text-red-500 text-xs">{error}</p>}
+        </div>
+      </div>
+      <div className="flex-1 min-w-0 space-y-4">
+        {!result ? <div className="panel h-64 flex items-center justify-center text-gray-400 text-sm">Enter a DAG and the treatment → outcome of interest.</div> : (
+          <>
+            <div className="panel border border-emerald-300 bg-emerald-50">
+              <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Adjust for (minimal set)</div>
+                <div className="text-lg font-semibold mt-1 text-emerald-600">{result.adjustment_set.length ? result.adjustment_set.join(", ") : "∅ none"}</div></div>
+              <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Never adjust for</div>
+                <div className="text-lg font-semibold mt-1 text-red-600">{result.do_not_adjust.length ? result.do_not_adjust.join(", ") : "—"}</div></div>
+            </div>
+            <div className="panel">
+              <div className="text-xs font-semibold text-gray-600 mb-1">Node roles</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(result.roles).map(([nd, r]) => (
+                  <span key={nd} className={`text-xs px-2 py-1 rounded border border-gray-200 bg-white ${roleColor(r as string)}`}>
+                    <b>{nd}</b>: {r as string}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <ResultExporter title="dag_backdoor" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function CausalPanel() {
   const [method, setMethod] = useState<Method>("iv");
   const tabs: [Method, string][] = [
     ["iv", "Instrumental Variable (2SLS)"],
     ["mediation", "Mediation (X→M→Y)"],
     ["target", "Target Trial Emulation"],
+    ["did", "Difference-in-Differences"],
+    ["rdd", "Regression Discontinuity"],
+    ["dag", "DAG Backdoor"],
   ];
   return (
     <div className="space-y-3">
-      <div className="flex gap-1">
+      <div className="flex gap-1 flex-wrap">
         {tabs.map(([id, label]) => (
           <button key={id} onClick={() => setMethod(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
@@ -394,7 +601,12 @@ export default function CausalPanel() {
           </button>
         ))}
       </div>
-      {method === "iv" ? <IVTab /> : method === "mediation" ? <MediationTab /> : <TargetTrialTab />}
+      {method === "iv" ? <IVTab />
+        : method === "mediation" ? <MediationTab />
+        : method === "target" ? <TargetTrialTab />
+        : method === "did" ? <DiDTab />
+        : method === "rdd" ? <RDDTab />
+        : <DAGTab />}
     </div>
   );
 }

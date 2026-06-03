@@ -132,3 +132,53 @@ def test_target_trial_needs_confounders(client, tt_sid):
         "session_id": tt_sid, "treatment": "treatment", "outcome": "died", "confounders": [],
     })
     assert r.status_code == 400, r.text
+
+
+# ── Difference-in-Differences / RDD / DAG ─────────────────────────────────────
+
+def test_did_recovers_interaction(client):
+    rng = np.random.default_rng(11)
+    n = 400
+    g = rng.integers(0, 2, n); t = rng.integers(0, 2, n)
+    Y = 10 + 2 * g + 1 * t + 3 * (g * t) + rng.normal(0, 2, n)   # true DiD = 3
+    sid = make_session(pd.DataFrame({"Y": Y, "grp": g, "time": t, "age": rng.normal(50, 8, n)}), "did_main")
+    r = client.post("/api/causal/did", json={
+        "session_id": sid, "outcome": "Y", "group_col": "grp", "time_col": "time", "covariates": ["age"]})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert abs(d["did_estimate"] - 3.0) < 0.7
+    assert d["significant"] is True
+    assert set(d["cell_means"]) == {"control_pre", "control_post", "treated_pre", "treated_post"}
+
+
+def test_rdd_detects_jump(client):
+    rng = np.random.default_rng(12)
+    n = 500
+    x = rng.uniform(-5, 5, n)
+    Y = 2 + 0.8 * x + 5 * (x >= 0) + rng.normal(0, 1.5, n)        # jump of 5 at 0
+    sid = make_session(pd.DataFrame({"score": x, "out": Y}), "rdd_main")
+    r = client.post("/api/causal/rdd", json={"session_id": sid, "outcome": "out", "running": "score", "cutoff": 0})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ci_low"] <= 5 <= d["ci_high"]      # CI covers the true jump
+    assert d["significant"] is True
+    assert len(d["binned"]) > 0
+
+
+def test_dag_roles_and_adjustment_set(client):
+    r = client.post("/api/causal/dag_adjustment", json={
+        "edges": [["Z", "T"], ["Z", "Y"], ["T", "M"], ["M", "Y"], ["T", "C"], ["Y", "C"]],
+        "treatment": "T", "outcome": "Y"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["roles"]["Z"] == "confounder"
+    assert d["roles"]["M"] == "mediator"
+    assert d["roles"]["C"] == "collider"
+    assert d["adjustment_set"] == ["Z"]
+    assert set(d["do_not_adjust"]) == {"C", "M"}
+
+
+def test_dag_treatment_not_in_edges_400(client):
+    r = client.post("/api/causal/dag_adjustment", json={
+        "edges": [["A", "B"]], "treatment": "X", "outcome": "B"})
+    assert r.status_code == 400, r.text

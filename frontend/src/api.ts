@@ -166,6 +166,9 @@ export const runAddedValue     = (data: object) => api.post("/api/model_compare/
 export const runIV2SLS         = (data: object) => api.post("/api/causal/iv_2sls", data);
 export const runMediation      = (data: object) => api.post("/api/causal/mediation", data);
 export const runTargetTrial    = (data: object) => api.post("/api/causal/target_trial", data);
+export const runDiD            = (data: object) => api.post("/api/causal/did", data);
+export const runRDD            = (data: object) => api.post("/api/causal/rdd", data);
+export const runDAGAdjustment  = (data: object) => api.post("/api/causal/dag_adjustment", data);
 
 // Survival advanced
 export const runMICE       = (data: object) => api.post("/api/survival_advanced/mice", data);

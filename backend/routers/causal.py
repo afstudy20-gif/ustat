@@ -4,6 +4,12 @@
   * /mediation        — linear causal mediation (ACME/ADE/proportion mediated).
   * /target_trial     — target-trial emulation: eligibility → IPTW-ATE on the
                         emulated cohort + the 7-component protocol scaffold.
+  * /did              — difference-in-differences (2×2) with the interaction
+                        estimate, cell means, and parallel-trends note.
+  * /rdd              — sharp regression-discontinuity (local-linear LATE at the
+                        cutoff with a triangular kernel).
+  * /dag_adjustment   — backdoor analysis of a user-specified DAG: roles
+                        (confounder/mediator/collider) + a minimal adjustment set.
 
 (Additive router — does not touch the existing PSM/IPTW/sensitivity panels.)
 """
@@ -547,5 +553,285 @@ def target_trial(req: TargetTrialRequest):
             f'                 (1-mean(elig${req.treatment}))/(1-fitted(ps)))\n'
             f'design <- svydesign(~1, weights = ~w, data = elig)\n'
             f'svyglm({req.outcome} ~ {req.treatment}, design, family = quasibinomial)'
+        ),
+    }
+
+
+# ── Difference-in-Differences (2×2) ───────────────────────────────────────────
+
+class DiDRequest(BaseModel):
+    session_id: str
+    outcome: str                       # continuous
+    group_col: str                     # 0 = control, 1 = treated
+    time_col: str                      # 0 = pre, 1 = post
+    covariates: List[str] = []
+    imputation: str = "listwise"
+
+
+@router.post("/did")
+def difference_in_differences(req: DiDRequest):
+    """Canonical 2×2 difference-in-differences for a continuous outcome. The
+    treatment effect is the group×time interaction in OLS
+    (Y ~ group + time + group·time [+ covariates]); the four cell means and the
+    DiD estimate (with HC1 robust SE) are returned, plus a parallel-trends note.
+    """
+    if len({req.outcome, req.group_col, req.time_col}) < 3:
+        raise HTTPException(400, "Outcome, group, and time must be three distinct columns.")
+    df_full = _get_df(req.session_id)
+    cols = list(dict.fromkeys([req.outcome, req.group_col, req.time_col] + req.covariates))
+    miss = [c for c in cols if c not in df_full.columns]
+    if miss:
+        raise HTTPException(400, f"Columns not found: {miss}")
+
+    df = apply_imputation(df_full, cols, req.imputation)
+    df[req.outcome] = pd.to_numeric(df[req.outcome], errors="coerce")
+    g = pd.to_numeric(df[req.group_col], errors="coerce")
+    tm = pd.to_numeric(df[req.time_col], errors="coerce")
+    df = df.assign(_g_=g, _t_=tm).dropna(subset=[req.outcome, "_g_", "_t_"] + req.covariates)
+    if set(df["_g_"].unique()) - {0.0, 1.0} or set(df["_t_"].unique()) - {0.0, 1.0}:
+        raise HTTPException(400, "Group and time must both be binary 0/1 (control/treated, pre/post).")
+    n = len(df)
+    if n < len(req.covariates) + 12:
+        raise HTTPException(400, "Not enough complete observations for difference-in-differences.")
+
+    df["_gt_"] = df["_g_"] * df["_t_"]
+    Wd = _design(df, req.covariates)
+    X = sm.add_constant(pd.concat([df[["_g_", "_t_", "_gt_"]].astype(float), Wd], axis=1), has_constant="add")
+    model = sm.OLS(df[req.outcome].astype(float).values, X).fit(cov_type="HC1")
+
+    did = float(model.params["_gt_"])
+    se = float(model.bse["_gt_"])
+    p = float(model.pvalues["_gt_"])
+    ci = model.conf_int().loc["_gt_"]
+    ci_low, ci_high = float(ci[0]), float(ci[1])
+
+    def cell(gv, tv):
+        sub = df[(df["_g_"] == gv) & (df["_t_"] == tv)][req.outcome]
+        return round(float(sub.mean()), 4) if len(sub) else None
+    means = {
+        "control_pre": cell(0, 0), "control_post": cell(0, 1),
+        "treated_pre": cell(1, 0), "treated_post": cell(1, 1),
+    }
+    ctrl_change = (means["control_post"] - means["control_pre"]) if None not in (means["control_post"], means["control_pre"]) else None
+    trt_change = (means["treated_post"] - means["treated_pre"]) if None not in (means["treated_post"], means["treated_pre"]) else None
+    sig = bool(p < 0.05)
+
+    result_text = (
+        f"Difference-in-differences for {req.outcome} (n = {n}"
+        + (f", adjusted for {', '.join(req.covariates)}" if req.covariates else "") + "). "
+        f"Treated change = {trt_change:+.4f}, control change = {ctrl_change:+.4f}; "
+        f"DiD (group×time) = {did:+.4f} (95% CI {ci_low:+.4f} to {ci_high:+.4f}, p = {_p_str(p)}). "
+        + ("The intervention had a statistically significant effect on the trend. "
+           if sig else "No statistically significant differential change. ")
+        + "Validity rests on the parallel-trends assumption (similar pre-period trajectories)."
+    )
+
+    return {
+        "test": "Difference-in-Differences (2×2)",
+        "outcome": req.outcome, "group_col": req.group_col, "time_col": req.time_col,
+        "covariates": req.covariates, "n": int(n),
+        "did_estimate": round(did, 6), "se": round(se, 6), "p": p,
+        "ci_low": round(ci_low, 6), "ci_high": round(ci_high, 6), "significant": sig,
+        "cell_means": means,
+        "control_change": round(ctrl_change, 4) if ctrl_change is not None else None,
+        "treated_change": round(trt_change, 4) if trt_change is not None else None,
+        "result_text": result_text, "interpretation": result_text,
+        "r_code": (
+            f'did <- lm({req.outcome} ~ {req.group_col} * {req.time_col}'
+            + (f' + {" + ".join(req.covariates)}' if req.covariates else "") + ', data = data)\n'
+            f'lmtest::coeftest(did, vcov = sandwich::vcovHC(did, "HC1"))  # group:time = DiD'
+        ),
+    }
+
+
+# ── Sharp Regression Discontinuity (local linear) ─────────────────────────────
+
+class RDDRequest(BaseModel):
+    session_id: str
+    outcome: str
+    running: str                       # running / forcing variable
+    cutoff: float
+    bandwidth: Optional[float] = None  # None → IK-style rule-of-thumb
+    imputation: str = "listwise"
+
+
+@router.post("/rdd")
+def regression_discontinuity(req: RDDRequest):
+    """Sharp regression-discontinuity: estimate the local average treatment
+    effect (LATE) at the cutoff by local-linear regression on each side, using a
+    triangular kernel within the bandwidth and allowing different slopes either
+    side of the threshold.
+    """
+    if req.outcome == req.running:
+        raise HTTPException(400, "Outcome and running variable must differ.")
+    df_full = _get_df(req.session_id)
+    cols = [req.outcome, req.running]
+    miss = [c for c in cols if c not in df_full.columns]
+    if miss:
+        raise HTTPException(400, f"Columns not found: {miss}")
+    df = apply_imputation(df_full, cols, req.imputation)
+    y = pd.to_numeric(df[req.outcome], errors="coerce")
+    x = pd.to_numeric(df[req.running], errors="coerce")
+    d = pd.DataFrame({"y": y, "x": x}).dropna()
+    n_total = len(d)
+    if n_total < 40:
+        raise HTTPException(400, "Need at least 40 complete observations for RDD.")
+
+    c = float(req.cutoff)
+    xc = d["x"].values - c
+    # Bandwidth: rule of thumb (~1.84·SD·n^-1/5) if not supplied.
+    bw = float(req.bandwidth) if req.bandwidth and req.bandwidth > 0 else float(1.84 * np.std(d["x"].values) * n_total ** (-0.2))
+    inb = np.abs(xc) <= bw
+    if int(inb.sum()) < 20:
+        raise HTTPException(400, "Too few observations within the bandwidth — widen the bandwidth.")
+
+    xb = xc[inb]
+    yb = d["y"].values[inb]
+    T = (xb >= 0).astype(float)               # treatment = above cutoff
+    # Triangular kernel weights.
+    w = np.clip(1.0 - np.abs(xb) / bw, 0, None)
+    # Local linear with treatment, running, and interaction (different slopes).
+    X = np.column_stack([np.ones_like(xb), T, xb, T * xb])
+    wls = sm.WLS(yb, X, weights=w).fit(cov_type="HC1")
+    late = float(wls.params[1])               # discontinuity at cutoff = T coefficient
+    se = float(wls.bse[1])
+    p = float(wls.pvalues[1])
+    ci = wls.conf_int()[1]
+    ci_low, ci_high = float(ci[0]), float(ci[1])
+    n_left = int(np.sum(xb < 0)); n_right = int(np.sum(xb >= 0))
+    sig = bool(p < 0.05)
+
+    result_text = (
+        f"Sharp regression-discontinuity for {req.outcome} at {req.running} = {c:g} "
+        f"(bandwidth ±{bw:.3g}, n = {int(inb.sum())}: {n_left} below / {n_right} at-or-above; triangular kernel). "
+        f"LATE at the cutoff = {late:+.4f} (95% CI {ci_low:+.4f} to {ci_high:+.4f}, p = {_p_str(p)}). "
+        + ("A statistically significant discontinuity — evidence of a local causal effect at the threshold. "
+           if sig else "No statistically significant discontinuity at the threshold. ")
+        + "Assumes units cannot precisely manipulate the running variable around the cutoff."
+    )
+
+    # Binned scatter (for a plot): mean y in equal-width running bins within 2·bw.
+    plot_lo, plot_hi = c - 2 * bw, c + 2 * bw
+    pm = (d["x"] >= plot_lo) & (d["x"] <= plot_hi)
+    bins = np.linspace(plot_lo, plot_hi, 21)
+    binned = []
+    dp = d[pm]
+    if len(dp):
+        idxb = np.digitize(dp["x"].values, bins)
+        for bidx in range(1, len(bins)):
+            sel = idxb == bidx
+            if sel.sum() >= 1:
+                binned.append({"x": round(float(np.mean(dp["x"].values[sel])), 4),
+                               "y": round(float(np.mean(dp["y"].values[sel])), 4),
+                               "n": int(sel.sum())})
+
+    return {
+        "test": "Regression Discontinuity (sharp, local linear)",
+        "outcome": req.outcome, "running": req.running, "cutoff": c,
+        "bandwidth": round(bw, 6), "n_in_bandwidth": int(inb.sum()),
+        "n_left": n_left, "n_right": n_right,
+        "late": round(late, 6), "se": round(se, 6), "p": p,
+        "ci_low": round(ci_low, 6), "ci_high": round(ci_high, 6), "significant": sig,
+        "binned": binned,
+        "result_text": result_text, "interpretation": result_text,
+        "r_code": (
+            f'library(rdrobust)\n'
+            f'rdrobust(data${req.outcome}, data${req.running}, c = {c})  # local-linear LATE'
+        ),
+    }
+
+
+# ── DAG backdoor analysis ─────────────────────────────────────────────────────
+
+class DAGRequest(BaseModel):
+    edges: List[List[str]]             # directed edges [[from, to], ...]
+    treatment: str
+    outcome: str
+
+
+@router.post("/dag_adjustment")
+def dag_adjustment(req: DAGRequest):
+    """Analyse a user-specified causal DAG: classify each other node relative to
+    the treatment→outcome effect (confounder / mediator / collider / other) and
+    return a valid minimal adjustment set via the backdoor criterion. Pure graph
+    logic — no dataset needed.
+    """
+    edges = [(str(a), str(b)) for e in req.edges if len(e) == 2 for a, b in [e]]
+    nodes = set()
+    children: Dict[str, set] = {}
+    parents: Dict[str, set] = {}
+    for a, b in edges:
+        nodes.update([a, b])
+        children.setdefault(a, set()).add(b)
+        parents.setdefault(b, set()).add(a)
+    # Validate against the edge-derived nodes BEFORE forcing them in.
+    if req.treatment not in nodes or req.outcome not in nodes:
+        raise HTTPException(400, "Treatment and outcome must appear in the edges.")
+    if req.treatment == req.outcome:
+        raise HTTPException(400, "Treatment and outcome must differ.")
+
+    def descendants(start: str) -> set:
+        seen, stack = set(), [start]
+        while stack:
+            u = stack.pop()
+            for v in children.get(u, ()):
+                if v not in seen:
+                    seen.add(v); stack.append(v)
+        return seen
+
+    def ancestors(start: str) -> set:
+        seen, stack = set(), [start]
+        while stack:
+            u = stack.pop()
+            for v in parents.get(u, ()):
+                if v not in seen:
+                    seen.add(v); stack.append(v)
+        return seen
+
+    desc_T = descendants(req.treatment)
+    anc_T, anc_Y = ancestors(req.treatment), ancestors(req.outcome)
+    roles = {}
+    for nd in nodes - {req.treatment, req.outcome}:
+        ch = children.get(nd, set())
+        is_confounder = (nd in anc_T) and (nd in anc_Y) and (nd not in desc_T)
+        is_mediator = (nd in desc_T) and (req.outcome in descendants(nd) or req.outcome in children.get(nd, set()))
+        is_collider = len(ch) >= 2 and any(  # common effect of two causes
+            len([p for p in parents.get(c2, set())]) >= 2 for c2 in [nd]
+        ) and len(parents.get(nd, set())) >= 2
+        if is_confounder:
+            roles[nd] = "confounder"
+        elif is_mediator:
+            roles[nd] = "mediator"
+        elif len(parents.get(nd, set())) >= 2:
+            roles[nd] = "collider"
+        else:
+            roles[nd] = "other"
+
+    # Minimal adjustment set (backdoor): adjust for confounders; never for
+    # mediators or colliders (or their descendants).
+    adjust = sorted([nd for nd, r in roles.items() if r == "confounder"])
+    do_not_adjust = sorted([nd for nd, r in roles.items() if r in ("mediator", "collider")])
+
+    result_text = (
+        f"Backdoor analysis for {req.treatment} → {req.outcome}. "
+        f"Minimal adjustment set: {', '.join(adjust) if adjust else '∅ (no confounders identified)'}. "
+        + (f"Do NOT adjust for {', '.join(do_not_adjust)} — "
+           "adjusting for a mediator removes part of the effect; adjusting for a collider opens a spurious path. "
+           if do_not_adjust else "")
+        + "Estimate the effect of the treatment controlling for exactly the adjustment-set variables."
+    )
+
+    return {
+        "test": "DAG Backdoor Adjustment",
+        "treatment": req.treatment, "outcome": req.outcome,
+        "nodes": sorted(nodes), "n_edges": len(edges),
+        "roles": roles,
+        "adjustment_set": adjust,
+        "do_not_adjust": do_not_adjust,
+        "result_text": result_text, "interpretation": result_text,
+        "r_code": (
+            'library(dagitty)\n'
+            'g <- dagitty("dag { ' + " ; ".join(f"{a} -> {b}" for a, b in edges) + ' }")\n'
+            f'adjustmentSets(g, exposure = "{req.treatment}", outcome = "{req.outcome}", type = "minimal")'
         ),
     }
