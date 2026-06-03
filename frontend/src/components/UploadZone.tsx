@@ -1,9 +1,10 @@
 import { useCallback, useState } from "react";
-import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers } from "lucide-react";
+import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle } from "lucide-react";
 import { uploadFile } from "../api";
 import api from "../api";
 import { useStore } from "../store";
 import AboutModal from "./AboutModal";
+import HelpModal from "./HelpModal";
 import PowerPanel from "./PowerPanel";
 import RefreshAppButton from "./RefreshAppButton";
 
@@ -13,6 +14,7 @@ export default function UploadZone() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [mode, setMode] = useState<"home" | "power">("home");
 
   const handle = useCallback(async (file: File) => {
@@ -67,6 +69,7 @@ export default function UploadZone() {
     return (
       <div className="flex flex-col h-screen bg-gray-50">
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+        {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -77,6 +80,12 @@ export default function UploadZone() {
           </div>
           <div className="flex items-center gap-2">
             <RefreshAppButton />
+            <button onClick={() => setShowHelp(true)}
+              title="Open Help & Analysis Guide"
+              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
+              <HelpCircle size={14} />
+              Help &amp; Guide
+            </button>
             <button onClick={() => setMode("home")}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
               <BarChart2 size={14} />
@@ -99,6 +108,7 @@ export default function UploadZone() {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen gap-8 p-8 bg-gray-50">
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
+      {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       <div className="flex flex-col items-center gap-3">
         <img src="/logo.png" alt="uSTAT logo" className="w-32 h-32 object-contain drop-shadow-md" />
         <div className="text-center">
@@ -211,13 +221,21 @@ export default function UploadZone() {
       {loading && <p className="text-indigo-600 animate-pulse">Opening and parsing your data…</p>}
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-4 flex-wrap justify-center">
+        <button
+          onClick={() => setShowHelp(true)}
+          className="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-800 text-xs font-semibold transition-colors border border-indigo-200 hover:border-indigo-400 bg-indigo-50/60 hover:bg-indigo-100 rounded-full px-3 py-1.5"
+          title="7-section walkthrough: Quick Start, Tests, Regression, Causal, Prediction & Validation, EFA/Bayes/Meta, R Hub"
+        >
+          <HelpCircle size={14} />
+          Help &amp; Analysis Guide
+        </button>
         <button
           onClick={() => setShowAbout(true)}
           className="flex items-center gap-1.5 text-gray-400 hover:text-indigo-600 text-xs transition-colors"
         >
           <Info size={14} />
-          About uSTAT — packages & methods
+          About uSTAT — packages &amp; methods
         </button>
         <RefreshAppButton variant="inline" />
       </div>
