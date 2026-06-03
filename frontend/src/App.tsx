@@ -123,6 +123,7 @@ const TEST_CATALOG: TestEntry[] = [
   { name: "MANCOVA", tab: "tests", group: "Parametric", aliases: ["multivariate ancova", "manova", "pillai", "wilks", "multivariate analysis of covariance", "çok değişkenli kovaryans"] },
   { name: "Added Predictive Value", tab: "visual", group: "Models", aliases: ["incremental value", "delta auc", "nri", "idi", "reclassification", "added value", "predictor improves model", "discrimination calibration", "eklenen değer"] },
   { name: "Instrumental Variable (2SLS)", tab: "causal", group: "Causal", aliases: ["iv", "instrumental variable", "2sls", "two stage least squares", "endogeneity", "wu-hausman", "sargan", "enstrümantal değişken"] },
+  { name: "Causal Mediation", tab: "causal", group: "Causal", aliases: ["mediation", "mediator", "acme", "ade", "indirect effect", "sobel", "proportion mediated", "baron kenny", "aracılık"] },
   { name: "Two-way ANOVA", tab: "tests", group: "Parametric", aliases: ["iki yönlü anova", "factorial"] },
   { name: "Mann-Whitney U", tab: "tests", group: "Non-parametric", aliases: ["m-w", "u test", "wilcoxon rank"] },
   { name: "Kruskal-Wallis", tab: "tests", group: "Non-parametric", aliases: ["kw", "nonparametric anova"] },

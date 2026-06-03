@@ -208,3 +208,131 @@ def iv_2sls(req: IV2SLSRequest):
             f'summary(iv, diagnostics = TRUE)  # weak instruments, Wu-Hausman, Sargan'
         ),
     }
+
+
+# ── Causal mediation (X → M → Y) ──────────────────────────────────────────────
+
+class MediationRequest(BaseModel):
+    session_id: str
+    outcome: str                       # continuous Y
+    treatment: str                     # exposure X
+    mediator: str                      # continuous M
+    covariates: List[str] = []
+    bootstrap: int = 1000              # nonparametric bootstrap reps for the ACME CI
+    imputation: str = "listwise"
+
+
+@router.post("/mediation")
+def mediation(req: MediationRequest):
+    """Linear causal mediation (Baron-Kenny / Preacher-Hayes) for a continuous
+    mediator and outcome. Decomposes the total effect into the indirect effect
+    through the mediator (ACME = a·b) and the direct effect (ADE = c'), with a
+    percentile bootstrap CI for the indirect effect, a Sobel test, and the
+    proportion mediated.
+    """
+    for nm, c in [("outcome", req.outcome), ("treatment", req.treatment), ("mediator", req.mediator)]:
+        if not c:
+            raise HTTPException(400, f"{nm} is required.")
+    if len({req.outcome, req.treatment, req.mediator}) < 3:
+        raise HTTPException(400, "Outcome, treatment, and mediator must be three distinct columns.")
+
+    df_full = _get_df(req.session_id)
+    cols = list(dict.fromkeys([req.outcome, req.treatment, req.mediator] + req.covariates))
+    miss = [c for c in cols if c not in df_full.columns]
+    if miss:
+        raise HTTPException(400, f"Columns not found: {miss}")
+
+    df = apply_imputation(df_full, cols, req.imputation)
+    for c in [req.outcome, req.treatment, req.mediator]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    df = df.dropna(subset=cols)
+    n = len(df)
+    if n < len(cols) + 10:
+        raise HTTPException(400, "Not enough complete observations for mediation analysis.")
+
+    def _fit(d: pd.DataFrame):
+        Wd = _design(d, req.covariates)
+        Xm = sm.add_constant(pd.concat([d[[req.treatment]].astype(float), Wd], axis=1), has_constant="add")
+        m_model = sm.OLS(d[req.mediator].astype(float).values, Xm).fit()
+        a, a_se = float(m_model.params[req.treatment]), float(m_model.bse[req.treatment])
+        Xy = sm.add_constant(pd.concat([d[[req.treatment, req.mediator]].astype(float), Wd], axis=1), has_constant="add")
+        y_model = sm.OLS(d[req.outcome].astype(float).values, Xy).fit()
+        b, b_se = float(y_model.params[req.mediator]), float(y_model.bse[req.mediator])
+        cprime = float(y_model.params[req.treatment])
+        return a, a_se, b, b_se, cprime
+
+    a, a_se, b, b_se, cprime = _fit(df)
+    acme = a * b
+    ade = cprime
+    total = acme + ade
+    prop_med = (acme / total) if abs(total) > 1e-9 else float("nan")
+
+    sobel_se = float(np.sqrt(b * b * a_se * a_se + a * a * b_se * b_se))
+    sobel_z = float(acme / sobel_se) if sobel_se > 0 else float("nan")
+    sobel_p = float(2 * sp.norm.sf(abs(sobel_z))) if np.isfinite(sobel_z) else float("nan")
+
+    reps = int(req.bootstrap)
+    acme_ci = ade_ci = total_ci = prop_ci = None
+    if reps and reps >= 100:
+        rng = np.random.default_rng(42)
+        idx = np.arange(n)
+        a_bs, ad_bs, t_bs, pm_bs = [], [], [], []
+        dfr = df.reset_index(drop=True)
+        for _ in range(reps):
+            bi = rng.choice(idx, size=n, replace=True)
+            try:
+                ab, _, bb, _, cb = _fit(dfr.iloc[bi])
+            except Exception:
+                continue
+            ind = ab * bb
+            tot = ind + cb
+            a_bs.append(ind); ad_bs.append(cb); t_bs.append(tot)
+            if abs(tot) > 1e-9:
+                pm_bs.append(ind / tot)
+        if a_bs:
+            def q(arr):
+                return [round(float(np.quantile(arr, 0.025)), 5), round(float(np.quantile(arr, 0.975)), 5)]
+            acme_ci, ade_ci, total_ci = q(a_bs), q(ad_bs), q(t_bs)
+            prop_ci = q(pm_bs) if pm_bs else None
+
+    acme_sig = bool(acme_ci is not None and (acme_ci[0] > 0 or acme_ci[1] < 0))
+    result_text = (
+        f"Causal mediation of {req.treatment} → {req.mediator} → {req.outcome} (n = {n}"
+        + (f", adjusted for {', '.join(req.covariates)}" if req.covariates else "") + "). "
+        f"Indirect effect (ACME = a·b) = {acme:.4f}"
+        + (f" (95% bootstrap CI {acme_ci[0]} to {acme_ci[1]})" if acme_ci else "")
+        + f"; direct effect (ADE) = {ade:.4f}; total effect = {total:.4f}. "
+        f"Proportion mediated = {prop_med*100:.1f}%"
+        + (f" (95% CI {prop_ci[0]*100:.1f}% to {prop_ci[1]*100:.1f}%)" if prop_ci else "") + ". "
+        f"Sobel z = {sobel_z:.2f}, p = {_p_str(sobel_p)}. "
+        + ("The indirect (mediated) effect is statistically significant (bootstrap CI excludes 0)."
+           if acme_sig else "The indirect (mediated) effect is not statistically significant.")
+    )
+
+    return {
+        "test": "Causal Mediation (linear)",
+        "outcome": req.outcome, "treatment": req.treatment, "mediator": req.mediator,
+        "covariates": req.covariates, "n": int(n),
+        "paths": {"a": round(a, 6), "a_se": round(a_se, 6), "b": round(b, 6),
+                  "b_se": round(b_se, 6), "c_prime": round(cprime, 6)},
+        "effects": {
+            "acme": round(acme, 6), "acme_ci": acme_ci,
+            "ade": round(ade, 6), "ade_ci": ade_ci,
+            "total": round(total, 6), "total_ci": total_ci,
+            "proportion_mediated": round(prop_med, 4) if np.isfinite(prop_med) else None,
+            "proportion_mediated_ci": prop_ci,
+        },
+        "sobel": {"z": round(sobel_z, 4), "p": sobel_p, "se": round(sobel_se, 6)},
+        "acme_significant": acme_sig,
+        "result_text": result_text,
+        "interpretation": result_text,
+        "r_code": (
+            f'library(mediation)\n'
+            f'm.med <- lm({req.mediator} ~ {req.treatment}'
+            + (f' + {" + ".join(req.covariates)}' if req.covariates else "") + ', data = data)\n'
+            f'm.out <- lm({req.outcome} ~ {req.treatment} + {req.mediator}'
+            + (f' + {" + ".join(req.covariates)}' if req.covariates else "") + ', data = data)\n'
+            f'med <- mediate(m.med, m.out, treat = "{req.treatment}", mediator = "{req.mediator}", boot = TRUE)\n'
+            f'summary(med)  # ACME, ADE, total effect, proportion mediated'
+        ),
+    }

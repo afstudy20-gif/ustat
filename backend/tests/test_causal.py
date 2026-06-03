@@ -58,3 +58,37 @@ def test_iv_missing_column_400(client, iv_sid):
         "session_id": iv_sid, "outcome": "Y", "endogenous": "X", "instruments": ["nope"],
     })
     assert r.status_code == 400, r.text
+
+
+# ── Mediation ─────────────────────────────────────────────────────────────────
+
+@pytest.fixture(scope="module")
+def med_sid():
+    rng = np.random.default_rng(7)
+    n = 400
+    X = rng.normal(0, 1, n)
+    M = 0.6 * X + rng.normal(0, 0.8, n)          # a = 0.6
+    Y = 0.5 * M + 0.2 * X + rng.normal(0, 1, n)  # b = 0.5, c' = 0.2 → ACME ≈ 0.30
+    df = pd.DataFrame({"X": X, "M": M, "Y": Y, "age": rng.normal(50, 8, n)})
+    return make_session(df, "med_main")
+
+
+def test_mediation_detects_indirect_effect(client, med_sid):
+    r = client.post("/api/causal/mediation", json={
+        "session_id": med_sid, "outcome": "Y", "treatment": "X", "mediator": "M",
+        "covariates": ["age"], "bootstrap": 400,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["acme_significant"] is True
+    assert d["effects"]["acme"] > 0.1
+    assert d["effects"]["acme_ci"][0] > 0          # bootstrap CI excludes 0
+    assert 0.0 < d["effects"]["proportion_mediated"] <= 1.0
+    assert d["sobel"]["p"] < 0.05
+
+
+def test_mediation_requires_distinct_columns(client, med_sid):
+    r = client.post("/api/causal/mediation", json={
+        "session_id": med_sid, "outcome": "Y", "treatment": "X", "mediator": "X",
+    })
+    assert r.status_code == 400, r.text
