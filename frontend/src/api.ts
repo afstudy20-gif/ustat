@@ -154,6 +154,8 @@ export const runImputationCompare = (data: object) => api.post("/api/missing_dat
 export const runLinearDiagFull = (data: object) => api.post("/api/diagnostics/linear_full", data);
 export const runLogisticDiag   = (data: object) => api.post("/api/model_diagnostics/logistic_diagnostics", data);
 export const runCoxDiag        = (data: object) => api.post("/api/model_diagnostics/cox_diagnostics", data);
+export const runModelValidation = (data: object) => api.post("/api/model_diagnostics/model_validation", data);
+export const runExternalValidationLogistic = (data: object) => api.post("/api/model_diagnostics/external_validation_logistic", data);
 
 // Decision curve
 export const runCalibration    = (data: object) => api.post("/api/decision_curve/calibration", data);

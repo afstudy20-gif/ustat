@@ -621,6 +621,202 @@ class ValidationRequest(BaseModel):
     event_col: Optional[str] = None
     linear_predictor_col: Optional[str] = None   # LP or risk score column for Cox
 
+    # Predictors mode (proper, refit-based internal validation). When supplied,
+    # the model is refit on each bootstrap/CV fold instead of scoring a fixed
+    # precomputed probability column.
+    predictors: List[str] = []
+    cv_folds: int = 0                            # ≥3 → also run k-fold CV
+
+
+def _internal_validation_predictors(req: "ValidationRequest", df_full: pd.DataFrame) -> dict:
+    """Refit-based internal validation for a user-specified model.
+
+    Binary: Harrell bootstrap optimism (refit per resample) for AUC + calibration
+    slope, plus optional k-fold cross-validated AUC + calibration slope.
+    Cox: bootstrap- and CV-based C-index optimism (refit CoxPHFitter).
+    """
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import roc_auc_score, brier_score_loss
+    from sklearn.model_selection import StratifiedKFold, KFold
+
+    is_cox = req.model_type == "cox"
+    if is_cox:
+        if not (req.duration_col and req.event_col):
+            raise HTTPException(400, "Cox predictors mode needs duration_col and event_col.")
+        cols = list(dict.fromkeys([req.duration_col, req.event_col] + req.predictors))
+    else:
+        if not req.outcome:
+            raise HTTPException(400, "Binary predictors mode needs an outcome column.")
+        cols = list(dict.fromkeys([req.outcome] + req.predictors))
+    missing = [c for c in cols if c not in df_full.columns]
+    if missing:
+        raise HTTPException(400, f"Columns not found: {missing}")
+
+    df = apply_imputation(df_full, cols, req.imputation or "listwise").reset_index(drop=True)
+    Xd = pd.get_dummies(df[req.predictors], drop_first=True).astype(float)
+    if Xd.shape[1] == 0:
+        raise HTTPException(400, "Predictors produced no usable columns.")
+
+    n_boot = int(min(max(req.n_boot, 50), 500))
+    cv_folds = int(req.cv_folds)
+    rng = np.random.default_rng(42)
+
+    if not is_cox:
+        from services.model_validation import compute_calibration_slope_intercept
+        y = pd.to_numeric(df[req.outcome], errors="coerce")
+        keep = y.notna() & Xd.notna().all(axis=1)
+        X = Xd[keep].values
+        y = y[keep].astype(int).values
+        if len(np.unique(y)) != 2:
+            raise HTTPException(400, "Outcome must be binary 0/1 with both classes present.")
+        n = len(y)
+        if n < max(40, Xd.shape[1] + 20):
+            raise HTTPException(400, "Not enough complete observations for internal validation.")
+
+        def _fit(Xt, yt):
+            return LogisticRegression(max_iter=1000, C=1e6).fit(Xt, yt)
+
+        # Apparent performance
+        m = _fit(X, y)
+        p_app = m.predict_proba(X)[:, 1]
+        auc_app = float(roc_auc_score(y, p_app))
+        slope_app = compute_calibration_slope_intercept(y, probs=p_app)["calibration_slope"]
+        brier_app = float(brier_score_loss(y, p_app))
+
+        # Harrell optimism (refit per bootstrap, score original)
+        opt_auc, opt_slope, ok = [], [], 0
+        for _ in range(n_boot):
+            bi = rng.choice(n, n, replace=True)
+            if len(np.unique(y[bi])) < 2:
+                continue
+            try:
+                mb = _fit(X[bi], y[bi])
+                pb = mb.predict_proba(X[bi])[:, 1]      # boot performance
+                po = mb.predict_proba(X)[:, 1]          # tested on original
+                auc_b = roc_auc_score(y[bi], pb); auc_o = roc_auc_score(y, po)
+                sl_b = compute_calibration_slope_intercept(y[bi], probs=pb)["calibration_slope"]
+                sl_o = compute_calibration_slope_intercept(y, probs=po)["calibration_slope"]
+                opt_auc.append(auc_b - auc_o); opt_slope.append(sl_b - sl_o); ok += 1
+            except Exception:
+                continue
+        o_auc = float(np.mean(opt_auc)) if opt_auc else 0.0
+        o_slope = float(np.mean(opt_slope)) if opt_slope else 0.0
+
+        cv_block = None
+        if cv_folds >= 3:
+            oof = np.full(n, np.nan)
+            for tr, te in StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42).split(X, y):
+                if len(np.unique(y[tr])) < 2:
+                    continue
+                oof[te] = _fit(X[tr], y[tr]).predict_proba(X[te])[:, 1]
+            valid = ~np.isnan(oof)
+            if valid.sum() > 10 and len(np.unique(y[valid])) == 2:
+                cv_block = {
+                    "auc": round(float(roc_auc_score(y[valid], oof[valid])), 4),
+                    "calibration_slope": compute_calibration_slope_intercept(y[valid], probs=oof[valid])["calibration_slope"],
+                    "brier": round(float(brier_score_loss(y[valid], oof[valid])), 4),
+                    "folds": cv_folds,
+                }
+
+        return {
+            "test": "Internal Validation (logistic, refit bootstrap optimism)",
+            "model_type": "binary", "n": int(n), "n_boot": ok, "n_predictors": int(Xd.shape[1]),
+            "apparent": {"auc": round(auc_app, 4), "calibration_slope": round(slope_app, 4), "brier": round(brier_app, 4)},
+            "optimism": {"auc": round(o_auc, 4), "calibration_slope": round(o_slope, 4)},
+            "corrected": {"auc": round(auc_app - o_auc, 4), "calibration_slope": round(slope_app - o_slope, 4)},
+            "cv": cv_block,
+            "overfit_gap": round(o_auc, 4),
+            "interpretation": (
+                f"Internal validation of a logistic model with {Xd.shape[1]} predictor term(s) (n = {n}). "
+                f"Apparent AUC = {auc_app:.3f}; optimism = {o_auc:.3f}; "
+                f"optimism-corrected AUC = {auc_app - o_auc:.3f}"
+                + (f"; {cv_folds}-fold CV AUC = {cv_block['auc']:.3f}" if cv_block else "")
+                + f". Optimism-corrected calibration slope = {slope_app - o_slope:.3f} "
+                + ("(shrinkage advisable if « 1)." if (slope_app - o_slope) < 0.9 else "(close to 1 — good).")
+            ),
+            "r_code": (
+                f'library(rms)\n'
+                f'f <- lrm({req.outcome} ~ {" + ".join(req.predictors)}, data = data, x = TRUE, y = TRUE)\n'
+                f'validate(f, B = {n_boot})  # optimism-corrected Dxy → C = Dxy/2 + 0.5, slope'
+            ),
+        }
+
+    # ── Cox predictors mode ──────────────────────────────────────────────────
+    from lifelines import CoxPHFitter
+    from lifelines.utils import concordance_index
+    dur = pd.to_numeric(df[req.duration_col], errors="coerce")
+    evt = pd.to_numeric(df[req.event_col], errors="coerce")
+    base = pd.concat([dur.rename("_d_"), evt.rename("_e_"), Xd], axis=1).dropna()
+    base = base[base["_d_"] > 0]
+    n = len(base)
+    if n < max(50, Xd.shape[1] + 25):
+        raise HTTPException(400, "Not enough complete observations for Cox internal validation.")
+
+    def _cfit_predict(train: pd.DataFrame, test: pd.DataFrame):
+        cph = CoxPHFitter(penalizer=0.01).fit(train, duration_col="_d_", event_col="_e_")
+        lp = cph.predict_partial_hazard(test).values
+        return cph, np.log(np.clip(lp, 1e-12, None))
+
+    cph_app, lp_app = _cfit_predict(base, base)
+    c_app = float(concordance_index(base["_d_"].values, -lp_app, base["_e_"].values.astype(int)))
+
+    opt_c, ok = [], 0
+    arr = base.reset_index(drop=True)
+    for _ in range(n_boot):
+        bi = rng.choice(n, n, replace=True)
+        bs = arr.iloc[bi].reset_index(drop=True)
+        if bs["_e_"].sum() < 5:
+            continue
+        try:
+            _, lp_b = _cfit_predict(bs, bs)
+            _, lp_o = _cfit_predict(bs, arr)
+            c_b = concordance_index(bs["_d_"].values, -lp_b, bs["_e_"].values.astype(int))
+            c_o = concordance_index(arr["_d_"].values, -lp_o, arr["_e_"].values.astype(int))
+            opt_c.append(c_b - c_o); ok += 1
+        except Exception:
+            continue
+    o_c = float(np.mean(opt_c)) if opt_c else 0.0
+
+    cv_block = None
+    if cv_folds >= 3:
+        oof = np.full(n, np.nan)
+        for tr, te in KFold(n_splits=cv_folds, shuffle=True, random_state=42).split(arr):
+            trd, ted = arr.iloc[tr], arr.iloc[te]
+            if trd["_e_"].sum() < 5:
+                continue
+            try:
+                _, lp_te = _cfit_predict(trd, ted)
+                oof[te] = lp_te
+            except Exception:
+                continue
+        valid = ~np.isnan(oof)
+        if valid.sum() > 20:
+            cv_block = {"c_index": round(float(concordance_index(arr["_d_"].values[valid], -oof[valid],
+                                                                  arr["_e_"].values.astype(int)[valid])), 4),
+                        "folds": cv_folds}
+
+    return {
+        "test": "Internal Validation (Cox, refit bootstrap optimism)",
+        "model_type": "cox", "n": int(n), "n_boot": ok, "n_predictors": int(Xd.shape[1]),
+        "apparent": {"c_index": round(c_app, 4)},
+        "optimism": {"c_index": round(o_c, 4)},
+        "corrected": {"c_index": round(c_app - o_c, 4)},
+        "cv": cv_block,
+        "overfit_gap": round(o_c, 4),
+        "interpretation": (
+            f"Internal validation of a Cox model with {Xd.shape[1]} predictor term(s) (n = {n}, "
+            f"{int(arr['_e_'].sum())} events). Apparent C = {c_app:.3f}; optimism = {o_c:.3f}; "
+            f"optimism-corrected C = {c_app - o_c:.3f}"
+            + (f"; {cv_folds}-fold CV C = {cv_block['c_index']:.3f}" if cv_block else "") + "."
+        ),
+        "r_code": (
+            f'library(rms)\n'
+            f'f <- cph(Surv({req.duration_col}, {req.event_col}) ~ {" + ".join(req.predictors)}, '
+            f'data = data, x = TRUE, y = TRUE)\n'
+            f'validate(f, B = {n_boot})  # optimism-corrected Dxy / C-index'
+        ),
+    }
+
 
 @router.post("/model_validation")
 def model_validation(req: ValidationRequest):
@@ -629,6 +825,10 @@ def model_validation(req: ValidationRequest):
     Supports binary outcomes and Cox models.
     """
     df_full = _get_df(req.session_id)
+
+    # Predictors mode → proper refit-based optimism + optional k-fold CV.
+    if req.predictors:
+        return _internal_validation_predictors(req, df_full)
 
     if req.model_type == "cox":
         # Cox validation path
@@ -825,4 +1025,114 @@ def causal_sensitivity(req: CausalSensitivityRequest):
         "result_text": result_text,
         "export_rows": export_rows,
         "r_code": "# See VanderWeele & Ding (2017) E-value paper\n# R: EValue::evalues.RR(est=..., lo=..., hi=...)",
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 6. External validation (logistic / binary) — apply a model's predicted
+#    probabilities to a new cohort and assess discrimination + calibration.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ExternalValLogisticRequest(BaseModel):
+    session_id: str                    # validation cohort
+    outcome: str                       # binary 0/1 in the validation cohort
+    prob_column: str                   # predicted probabilities (dev model applied here)
+    dev_auc: Optional[float] = None    # development AUC (for dev→val drop)
+    dev_calibration_slope: Optional[float] = None
+    imputation: str = "listwise"
+
+
+@router.post("/external_validation_logistic")
+def external_validation_logistic(req: ExternalValLogisticRequest):
+    """External validation of a binary prediction model: take the predicted
+    probabilities from the development model applied to a new (validation) cohort
+    and report discrimination (AUC + DeLong CI), calibration (slope, intercept,
+    Hosmer-Lemeshow, O/E), Brier score, a calibration plot, and the dev→val drop.
+    """
+    from sklearn.metrics import roc_auc_score, brier_score_loss
+    from services.model_validation import compute_calibration_slope_intercept
+    from routers.decision_curve import _hosmer_lemeshow
+    from routers.stats.nonparametric import _delong_placement_values
+
+    df_full = _get_df(req.session_id)
+    for c in [req.outcome, req.prob_column]:
+        if c not in df_full.columns:
+            raise HTTPException(400, f"Column '{c}' not found.")
+    df = apply_imputation(df_full, [req.outcome, req.prob_column], req.imputation or "listwise")
+    y = pd.to_numeric(df[req.outcome], errors="coerce")
+    p = pd.to_numeric(df[req.prob_column], errors="coerce")
+    m = y.notna() & p.notna()
+    y = y[m].astype(int).values
+    p_raw = p[m].astype(float).values
+    n = len(y)
+    if n < 30 or len(np.unique(y)) != 2:
+        raise HTTPException(400, "Need ≥30 validation rows with a binary 0/1 outcome (both classes).")
+    if p_raw.size == 0 or np.nanmax(p_raw) > 1.0 or np.nanmin(p_raw) < 0.0:
+        raise HTTPException(400, "prob_column must hold predicted probabilities in [0, 1].")
+    p = np.clip(p_raw, 1e-6, 1 - 1e-6)
+
+    # Discrimination + DeLong CI for a single AUC.
+    auc = float(roc_auc_score(y, p))
+    Vp, Vn = _delong_placement_values(y, p)
+    var = np.var(Vp, ddof=1) / len(Vp) + np.var(Vn, ddof=1) / len(Vn)
+    se = float(np.sqrt(max(var, 1e-12)))
+    auc_lo, auc_hi = max(0.0, auc - 1.96 * se), min(1.0, auc + 1.96 * se)
+
+    cal = compute_calibration_slope_intercept(y, probs=p)
+    brier = float(brier_score_loss(y, p))
+    hl = _hosmer_lemeshow(y, p)
+    oe = float(np.mean(y) / np.mean(p)) if np.mean(p) > 1e-9 else None   # observed / expected
+
+    # Calibration plot (decile bins: mean predicted vs observed).
+    order = np.argsort(p)
+    bins = np.array_split(order, min(10, n // 5)) if n >= 10 else [order]
+    cal_plot = []
+    for b in bins:
+        if len(b):
+            cal_plot.append({"pred": round(float(np.mean(p[b])), 4),
+                             "obs": round(float(np.mean(y[b])), 4), "n": int(len(b))})
+
+    slope, intercept = cal["calibration_slope"], cal["calibration_intercept"]
+    calib_ok = bool(0.8 <= slope <= 1.2 and abs(intercept) <= 0.2)
+    drop = {}
+    if req.dev_auc is not None:
+        drop["auc_drop"] = round(float(req.dev_auc) - auc, 4)
+    if req.dev_calibration_slope is not None:
+        drop["slope_shift"] = round(slope - float(req.dev_calibration_slope), 4)
+
+    hl_p_str = _p_str(hl["p"])
+    dev_txt = (
+        f"; development AUC was {req.dev_auc:.3f} (drop {drop['auc_drop']:+.3f})"
+        if "auc_drop" in drop else ""
+    )
+    calib_txt = (
+        "Calibration is acceptable (slope ≈ 1, intercept ≈ 0)."
+        if calib_ok else
+        "Calibration is off (slope away from 1 and/or intercept away from 0) — "
+        "the model may need recalibration in this population."
+    )
+    oe_txt = f"{oe:.2f}" if oe is not None else "n/a"
+    result_text = (
+        f"External validation on {n} patients. Discrimination: AUC = {auc:.3f} "
+        f"(95% CI {auc_lo:.3f}–{auc_hi:.3f}){dev_txt}. "
+        f"Calibration: slope = {slope:.2f}, intercept = {intercept:.2f}, O/E = {oe_txt}, "
+        f"Hosmer-Lemeshow χ²({hl['df']}) = {hl['chi2']:.2f}, p = {hl_p_str}; "
+        f"Brier = {brier:.3f}. {calib_txt}"
+    )
+
+    return {
+        "test": "External Validation (logistic)",
+        "outcome": req.outcome, "prob_column": req.prob_column, "n": int(n),
+        "discrimination": {"auc": round(auc, 4), "auc_ci": [round(auc_lo, 4), round(auc_hi, 4)], "se": round(se, 5)},
+        "calibration": {"slope": round(slope, 4), "intercept": round(intercept, 4),
+                        "oe_ratio": round(oe, 4) if oe is not None else None,
+                        "hosmer_lemeshow": {"chi2": hl["chi2"], "df": hl["df"], "p": hl["p"]},
+                        "brier": round(brier, 4), "acceptable": calib_ok},
+        "calibration_plot": cal_plot,
+        "dev_vs_val": drop or None,
+        "result_text": result_text, "interpretation": result_text,
+        "r_code": (
+            'library(rms)\n'
+            f'val.prob({req.prob_column}, {req.outcome})  # C (AUC), slope, intercept, Brier, calibration plot'
+        ),
     }
