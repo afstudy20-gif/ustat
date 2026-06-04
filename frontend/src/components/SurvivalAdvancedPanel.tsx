@@ -1674,16 +1674,22 @@ export default function SurvivalAdvancedPanel() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500 font-medium">Horizon cut-points (time unit, comma-sep)</span>
+            <span className="text-xs text-gray-500 font-medium">Horizon cut-points (comma-sep)</span>
             <input value={chHorizons} onChange={(e) => setChHorizons(e.target.value)}
               placeholder="365, 730"
               className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
+            <span className="text-[10px] text-gray-400">
+              In your Duration column's unit. Days → 365, 730 · months → 12, 24 · years → 1, 2.
+            </span>
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs text-gray-500 font-medium">Labels (comma-sep, optional)</span>
             <input value={chLabels} onChange={(e) => setChLabels(e.target.value)}
               placeholder="1 year, 2 years"
               className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
+            <span className="text-[10px] text-gray-400">
+              One label per cut-point. Blank → auto "≤ 365". Count must match cut-points.
+            </span>
           </label>
         </div>
 
@@ -1693,9 +1699,16 @@ export default function SurvivalAdvancedPanel() {
             excludeNames={[chDuration, chEvent, chPredictor].filter(Boolean)} />
         </div>
 
-        <p className="text-[11px] text-gray-400 mt-1">
-          A "Full follow-up" row (all events, no censoring) is added automatically. Each window applies administrative censoring at its cut-point.
-        </p>
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">
+          <span className="text-amber-500 text-sm leading-none mt-0.5">ⓘ</span>
+          <p className="text-[11px] text-amber-800 leading-relaxed">
+            <b>Cut-points use the same time unit as your Duration column.</b> Follow-up in days → write
+            {" "}<span className="font-mono">365, 730</span>; in months → <span className="font-mono">12, 24</span>;
+            in years → <span className="font-mono">1, 2</span>. A <b>"Full follow-up"</b> row (all events,
+            no censoring) is appended automatically. Each window applies administrative censoring at its
+            cut-point, so shorter windows have fewer events and wider CIs.
+          </p>
+        </div>
 
         <div className="flex items-center gap-3 flex-wrap mt-2">
           <RunButton
