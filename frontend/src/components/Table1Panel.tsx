@@ -162,20 +162,63 @@ export default function Table1Panel() {
   // its own session-persisted map (services/store.get_decimals); passing
   // the client snapshot here lets unsaved tweaks preview immediately.
   const columnDecimals = useStore((s) => s.columnDecimals);
+  // Persisted form snapshot across tab switches — the per-panel cache
+  // already used elsewhere in the store for the same purpose. Holds the
+  // user's variable selection, group column, stat picks, kind overrides,
+  // and within-group normality flag so leaving the tab and coming back
+  // does not nuke ten minutes of clicking.
+  const cachedForm = useStore((s) => s.panelCache?.table1Form) as
+    | {
+        groupCol?: string;
+        selected?: string[];
+        kindOverrides?: Record<string, "numeric" | "categorical">;
+        selectedStats?: string[];
+        withinGroupNormality?: boolean;
+      }
+    | undefined;
+  const setPanelCache = useStore((s) => s.setPanelCache);
   if (!session) return null;
 
   const allCols = session.columns.map((c) => c.name);
 
-  const [groupCol, setGroupCol] = useState<string>("");
-  const [selected, setSelected] = useState<Set<string>>(new Set(allCols));
-  const [kindOverrides, setKindOverrides] = useState<Record<string, "numeric" | "categorical">>({});
-  const [selectedStats, setSelectedStats] = useState<Set<string>>(new Set(["auto"]));
+  const [groupCol, setGroupCol] = useState<string>(cachedForm?.groupCol ?? "");
+  // Hydrate the selected-variables set from cache when available; intersect
+  // with the current dataset's columns so a stale cache referencing a
+  // dropped column does not crash anything downstream.
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    if (cachedForm?.selected) {
+      const allowed = new Set(allCols);
+      return new Set(cachedForm.selected.filter((c) => allowed.has(c)));
+    }
+    return new Set(allCols);
+  });
+  const [kindOverrides, setKindOverrides] = useState<Record<string, "numeric" | "categorical">>(
+    cachedForm?.kindOverrides ?? {}
+  );
+  const [selectedStats, setSelectedStats] = useState<Set<string>>(
+    new Set(cachedForm?.selectedStats ?? ["auto"])
+  );
   const [showStats, setShowStats] = useState(false);
   const [showSMD, setShowSMD] = useState(false);
-  const [withinGroupNormality, setWithinGroupNormality] = useState(false);
+  const [withinGroupNormality, setWithinGroupNormality] = useState<boolean>(
+    cachedForm?.withinGroupNormality ?? false
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+
+  // Mirror form state back into the panel cache on every change so the
+  // selection survives a tab switch. Sets are serialised to arrays so
+  // the cache stays JSON-safe.
+  useEffect(() => {
+    setPanelCache("table1Form", {
+      groupCol,
+      selected: Array.from(selected),
+      kindOverrides,
+      selectedStats: Array.from(selectedStats),
+      withinGroupNormality,
+    });
+  }, [groupCol, selected, kindOverrides, selectedStats, withinGroupNormality, setPanelCache]);
 
   // ── Table editing state ──────────────────────────────────────────────────
   const [editRowIdx, setEditRowIdx] = useState<number | null>(null);
@@ -249,10 +292,16 @@ export default function Table1Panel() {
   };
 
   useEffect(() => {
+    // New dataset → reset the form to defaults (don't carry a stale
+    // selection across sessions). The cache useEffect above will then
+    // overwrite the stored snapshot with the fresh defaults.
     setSelected(new Set(allCols.filter((c) => c !== groupCol)));
     setKindOverrides({});
+    setSelectedStats(new Set(["auto"]));
+    setWithinGroupNormality(false);
     clearTable1();
     setError(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.session_id]);
 
   const toggleKind = (col: string) => {
