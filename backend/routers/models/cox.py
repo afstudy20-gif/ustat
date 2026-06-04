@@ -376,6 +376,218 @@ async def cox_regression(req: CoxRequest):
     return result
 
 
+# ── Cox time-horizon sensitivity (forest) ──────────────────────────────────────
+# Runs the SAME Cox model at several administrative-censoring horizons
+# (e.g. 1-year, 2-year, full follow-up) so the user can see how the hazard
+# ratio for one predictor moves with the time window. Output is directly
+# consumable by the Forest Builder.
+
+class CoxHorizonsRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predictor: str                              # variable whose HR is tracked
+    covariates: Optional[List[str]] = None      # optional adjustment set
+    horizons: List[float]                       # cut-points in the time unit (e.g. [365, 730])
+    horizon_labels: Optional[List[str]] = None  # display labels, 1:1 with horizons
+    include_full: bool = True                   # append an un-censored "Full follow-up" row
+    full_label: str = "Full follow-up"
+    imputation: Optional[str] = "listwise"
+
+
+def _encode_predictors(df: pd.DataFrame, cols: List[str]) -> Tuple[pd.DataFrame, List[str], List[str]]:
+    """Numeric-vs-categorical split + dummy coding (reference = first level).
+
+    Mirrors the encoding used by the main Cox endpoint so the horizon
+    model is identical to a single-window fit at full follow-up.
+    """
+    raw = df[cols].copy()
+    numeric_pred: List[str] = []
+    cat_pred: List[str] = []
+    for c in cols:
+        col = raw[c]
+        if pd.api.types.is_numeric_dtype(col):
+            numeric_pred.append(c)
+        else:
+            coerced = pd.to_numeric(col, errors="coerce")
+            if coerced.notna().mean() >= 0.8 and len(coerced.dropna().unique()) > 2:
+                raw[c] = coerced
+                numeric_pred.append(c)
+            else:
+                cat_pred.append(c)
+    num_part = raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=raw.index)
+    cat_part = pd.get_dummies(raw[cat_pred], drop_first=True, dummy_na=False) if cat_pred else pd.DataFrame(index=raw.index)
+    enc = pd.concat([num_part, cat_part], axis=1).astype(float)
+    return enc, numeric_pred, cat_pred
+
+
+@router.post("/survival/cox_horizons")
+async def cox_horizons(req: CoxHorizonsRequest):
+    df_full = _get_df(req.session_id)
+    n_total = len(df_full)
+
+    # Validate columns up-front.
+    cov = req.covariates or []
+    needed = [req.duration_col, req.event_col, req.predictor] + cov
+    missing = [c for c in needed if c not in df_full.columns]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Columns not found: {missing}")
+    if not req.horizons:
+        raise HTTPException(status_code=422, detail="Provide at least one horizon cut-point.")
+    if req.horizon_labels is not None and len(req.horizon_labels) != len(req.horizons):
+        raise HTTPException(status_code=422, detail="horizon_labels must match horizons length.")
+
+    # Coerce + impute the full predictor set once; per-horizon we only
+    # recompute event/time, never re-impute, so every window uses the
+    # identical analysis sample.
+    df_full = df_full.copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
+    work_cols = [req.duration_col, req.event_col, req.predictor] + cov
+    df = apply_imputation(df_full, work_cols, req.imputation or "listwise")
+    if len(df) == 0:
+        raise HTTPException(status_code=400, detail="No valid rows after coercing/imputing.")
+
+    event_vals = sorted(df[req.event_col].dropna().unique())
+    if set(event_vals) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {event_vals[:10]}")
+    if (df[req.duration_col] < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
+
+    # Encode predictors once — the encoded design is reused across windows.
+    enc, _num, _cat = _encode_predictors(df, [req.predictor] + cov)
+    # Which encoded columns belong to the tracked predictor? (a binary/
+    # numeric predictor → one column; a multi-level categorical → several).
+    if req.predictor in enc.columns:
+        pred_terms = [req.predictor]
+    else:
+        prefix = f"{req.predictor}_"
+        pred_terms = [c for c in enc.columns if c.startswith(prefix)]
+    if not pred_terms:
+        raise HTTPException(status_code=400, detail=f"Predictor '{req.predictor}' produced no usable terms after encoding.")
+
+    base_time = df[req.duration_col].astype(float)
+    base_event = df[req.event_col].astype(float)
+
+    # Build the window list: each requested horizon, then optionally full.
+    windows: List[Tuple[str, Optional[float]]] = []
+    labels = req.horizon_labels or [f"≤ {h:g}" for h in req.horizons]
+    for lab, h in zip(labels, req.horizons):
+        windows.append((lab, float(h)))
+    if req.include_full:
+        windows.append((req.full_label, None))
+
+    horizon_results: List[dict] = []
+    forest_rows: List[dict] = []
+
+    for label, tau in windows:
+        if tau is None:
+            t_h = base_time
+            e_h = base_event
+        else:
+            # Administrative censoring at tau: anyone whose event/censor is
+            # after tau is censored AT tau; events at/before tau are kept.
+            t_h = base_time.clip(upper=tau)
+            e_h = base_event.where(base_time <= tau, other=0.0)
+
+        fit_df = pd.concat(
+            [t_h.rename(req.duration_col), e_h.rename(req.event_col), enc],
+            axis=1,
+        ).dropna()
+        n_events = int(fit_df[req.event_col].sum())
+        n_win = int(len(fit_df))
+
+        # Need enough events to fit; skip windows that are too sparse but
+        # report why so the forest doesn't silently drop rows.
+        if n_win < 10 or n_events < 3:
+            horizon_results.append({
+                "label": label, "tau": tau, "n": n_win, "n_events": n_events,
+                "terms": [], "skipped": "too few events at this horizon",
+            })
+            continue
+
+        cph = CoxPHFitter()
+        try:
+            await asyncio.to_thread(cph.fit, fit_df, duration_col=req.duration_col, event_col=req.event_col)
+        except Exception as exc:
+            logger.exception("Cox horizon fit failed at tau=%s", tau)
+            horizon_results.append({
+                "label": label, "tau": tau, "n": n_win, "n_events": n_events,
+                "terms": [], "skipped": f"fit error: {exc}",
+            })
+            continue
+
+        summary = cph.summary
+        terms = []
+        for term in pred_terms:
+            if term not in summary.index:
+                continue
+            row = summary.loc[term]
+            terms.append({
+                "variable": term,
+                "hr": _safe_float(row["exp(coef)"]),
+                "hr_ci_low": _safe_float(row["exp(coef) lower 95%"]),
+                "hr_ci_high": _safe_float(row["exp(coef) upper 95%"]),
+                "p": _safe_float(row["p"]),
+            })
+
+        horizon_results.append({
+            "label": label, "tau": tau, "n": n_win, "n_events": n_events, "terms": terms,
+        })
+
+        # Forest convenience rows — one per predictor term. When there's a
+        # single tracked term (the common binary case) the label is just
+        # the horizon; with multi-level predictors we disambiguate.
+        for t in terms:
+            row_label = label if len(pred_terms) == 1 else f"{label} · {t['variable']}"
+            forest_rows.append({
+                "label": row_label,
+                "est": t["hr"],
+                "ci_low": t["hr_ci_low"],
+                "ci_high": t["hr_ci_high"],
+                "p": t["p"],
+                "extra": f"({horizon_results[-1]['n_events']} events)",
+            })
+
+    if not forest_rows:
+        raise HTTPException(status_code=400, detail="No horizon produced an estimable HR (too few events in every window).")
+
+    cov_txt = (" + ".join(cov)) if cov else "none (unadjusted)"
+    horizons_txt = ", ".join(f"{lab} (tau={tau})" for lab, tau in windows)
+    interpretation = (
+        f"Cox PH hazard ratio for '{req.predictor}' across {len(windows)} time horizons "
+        f"[{horizons_txt}], adjustment: {cov_txt}. Each window applies administrative "
+        f"censoring at its cut-point; the full-follow-up row uses all events. Widening "
+        f"confidence intervals at short horizons reflect fewer accrued events."
+    )
+
+    r_code = (
+        "library(survival)\n"
+        "horizons <- c(" + ", ".join(f"{h:g}" for h in req.horizons) + ")\n"
+        "rows <- lapply(horizons, function(tau) {\n"
+        f"  d <- dat; d$ev <- ifelse(d${req.duration_col} <= tau & d${req.event_col}==1, 1, 0)\n"
+        f"  d$t <- pmin(d${req.duration_col}, tau)\n"
+        f"  fit <- coxph(Surv(t, ev) ~ {req.predictor}"
+        + ("".join(f' + {c}' for c in cov)) + ", data = d)\n"
+        "  s <- summary(fit); c(HR=s$conf.int[1,1], lo=s$conf.int[1,3], hi=s$conf.int[1,4])\n"
+        "})\n"
+        f"# Full follow-up: coxph(Surv({req.duration_col}, {req.event_col}) ~ {req.predictor}"
+        + ("".join(f' + {c}' for c in cov)) + ", data = dat)\n"
+    )
+
+    return {
+        "model": "Cox PH — time-horizon sensitivity",
+        "predictor": req.predictor,
+        "covariates": cov,
+        "n_total": n_total,
+        "n_analyzed": int(len(df)),
+        "horizons": horizon_results,
+        "forest_rows": forest_rows,
+        "interpretation": interpretation,
+        "r_code": r_code,
+    }
+
+
 # ── Cox with time-varying covariates ───────────────────────────────────────────
 
 class CoxTVRequest(BaseModel):
