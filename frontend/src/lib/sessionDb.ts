@@ -65,6 +65,12 @@ function getDb(): SessionDB {
     // (dedup lookups on autosave).
     sessions: "id, savedAt, serverSessionId",
   });
+  // v2 adds a `name` index for filename-based dedup — the server
+  // session_id isn't stable across reloads, so the filename is the
+  // identity that collapses duplicate rows.
+  db.version(2).stores({
+    sessions: "id, savedAt, serverSessionId, name",
+  });
   _db = db;
   return db;
 }
@@ -106,8 +112,32 @@ function newLocalId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Collapse records that share a display name down to the newest one.
+ *  The server session_id changes on every upload / reload / restore, so
+ *  the same logical file accumulates a row per browser session. Identity
+ *  that survives reloads is the *name*, so we keep the freshest snapshot
+ *  per name and drop the stale ones. */
+async function dedupeByName(): Promise<void> {
+  const db = getDb();
+  const rows = await db.sessions.orderBy("savedAt").reverse().toArray();
+  const seen = new Set<string>();
+  const stale: string[] = [];
+  for (const r of rows) {
+    const key = r.name || r.id;
+    if (seen.has(key)) {
+      stale.push(r.id);   // older (rows already sorted newest-first)
+    } else {
+      seen.add(key);
+    }
+  }
+  if (stale.length) {
+    await db.sessions.bulkDelete(stale);
+  }
+}
+
 export async function listRecentSessions(): Promise<RecentSessionMeta[]> {
   const db = getDb();
+  await dedupeByName();
   const rows = await db.sessions.orderBy("savedAt").reverse().toArray();
   return rows.map((row) => {
     const { payload: _ignored, ...meta } = row;
@@ -128,9 +158,19 @@ export async function clearAllRecentSessions(): Promise<void> {
   await getDb().sessions.clear();
 }
 
-/** Upsert a session blob. If a record already exists for the same
- *  `serverSessionId`, overwrite it (keeps the auto-save stream from
- *  multiplying duplicates as the user works). */
+/** Upsert a session blob, deduping so the same logical file occupies a
+ *  single row.
+ *
+ *  The server session_id is NOT stable — every upload, reload, and
+ *  restore mints a fresh one — so keying only on it spawns a new row per
+ *  browser session (the "why are there 3 copies of my file" bug). We
+ *  match in two passes:
+ *    1. by serverSessionId  → same in-progress session (covers renames,
+ *       where the id is stable but the name just changed)
+ *    2. by name             → same file across reloads / re-uploads /
+ *       restores (the id differs but the filename is the user's stable
+ *       identity)
+ */
 export async function upsertRecentSession(input: {
   serverSessionId: string;
   name: string;
@@ -141,12 +181,13 @@ export async function upsertRecentSession(input: {
   source: "auto" | "manual";
 }): Promise<RecentSessionMeta> {
   const db = getDb();
-  const existing = input.serverSessionId
-    ? await db.sessions
-        .where("serverSessionId")
-        .equals(input.serverSessionId)
-        .first()
-    : undefined;
+  let existing =
+    input.serverSessionId
+      ? await db.sessions.where("serverSessionId").equals(input.serverSessionId).first()
+      : undefined;
+  if (!existing && input.name) {
+    existing = await db.sessions.where("name").equals(input.name).first();
+  }
   const id = existing?.id ?? newLocalId();
   const rec: RecentSessionRecord = {
     id,
