@@ -292,6 +292,38 @@ export default function ForestBuilderPanel() {
   const yIdx = validRows.map((_, i) => n - 1 - i); // top-down order
   const colors = validRows.map((r) => rowColor(r));
 
+  // Clean log-axis ticks. Plotly's default log axis labels every minor tick
+  // (0.06, 0.07, … shown as bare "6 7 8") which clutters the figure. Pick a
+  // 1–2–5 sequence spanning the data and label those only.
+  const logTicks = useMemo(() => {
+    if (layout.xScale !== "log" || validRows.length === 0) return null;
+    const vals: number[] = [layout.nullLine];
+    for (const r of validRows) {
+      if (r.ci_low != null && r.ci_low > 0) vals.push(r.ci_low);
+      if (r.ci_high != null && r.ci_high > 0) vals.push(r.ci_high);
+      if (r.est != null && r.est > 0) vals.push(r.est);
+    }
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    if (!(lo > 0) || !(hi > 0) || !isFinite(lo) || !isFinite(hi)) return null;
+    const ticks: number[] = [];
+    const startDec = Math.floor(Math.log10(lo));
+    const endDec = Math.ceil(Math.log10(hi));
+    for (let d = startDec; d <= endDec; d++) {
+      for (const m of [1, 2, 5]) {
+        const v = m * Math.pow(10, d);
+        if (v >= lo * 0.9 && v <= hi * 1.1) ticks.push(v);
+      }
+    }
+    if (ticks.length === 0) return null;
+    const fmt = (v: number) => {
+      if (v >= 1) return String(Math.round(v * 100) / 100).replace(/\.0+$/, "");
+      // strip trailing zeros for sub-1 values: 0.10 → 0.1, 0.50 → 0.5
+      return String(parseFloat(v.toPrecision(2)));
+    };
+    return { tickvals: ticks, ticktext: ticks.map(fmt) };
+  }, [layout.xScale, layout.nullLine, validRows]);
+
   // One trace PER ROW. Plotly's error_x.color only accepts a single color
   // string (an array is silently ignored → default black whiskers), so to
   // colour each confidence interval to match its marker we emit a separate
@@ -759,6 +791,16 @@ export default function ForestBuilderPanel() {
                   zeroline: false,
                   domain: [0, forestRight],
                   title: { text: layout.xLabel, font: { size: 11, color: "#374151" } },
+                  // Clean 1–2–5 ticks on log scale; suppress Plotly's noisy
+                  // minor-tick labels (the "6 7 8 9" clutter) and minor grid.
+                  ...(logTicks
+                    ? {
+                        tickmode: "array",
+                        tickvals: logTicks.tickvals,
+                        ticktext: logTicks.ticktext,
+                        minor: { showgrid: false, ticks: "" },
+                      }
+                    : {}),
                 },
                 yaxis: {
                   tickvals: yIdx,
