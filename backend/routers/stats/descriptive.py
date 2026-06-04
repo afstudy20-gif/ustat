@@ -84,6 +84,10 @@ def descriptive(session_id: str, column: Optional[str] = None):
             raise HTTPException(status_code=400, detail="Column not numeric")
         num_cols = [column]
 
+    # Resolve session-persisted decimal overrides once so each column
+    # carries its display hint to the frontend (Summary tile, exports).
+    decimals_override = _resolve_decimals_override(session_id, None)
+
     results = {}
     for col in num_cols:
         s = df[col].dropna().replace([np.inf, -np.inf], np.nan).dropna()
@@ -110,6 +114,10 @@ def descriptive(session_id: str, column: Optional[str] = None):
             "normality_p": float(p_norm),
             "normality_test": norm_test,
             "normal": bool(p_norm > 0.05),
+            # Suggested decimal places for displaying sample-valued stats
+            # (mean, median, quartiles, min/max). Honours user overrides
+            # and auto-detects integer-valued columns.
+            "display_decimals": _col_decimals(df, col, decimals_override, fallback=2),
         }
     return _sanitize(results)
 
@@ -329,6 +337,10 @@ class Table1Request(BaseModel):
     variable_kinds: Optional[dict] = None
     selected_stats: Optional[list[str]] = None
     normality_mode: Optional[str] = "overall"
+    # Optional per-column decimal overrides keyed by column name. Values
+    # supplied here win over (a) the session-persisted decimals map and
+    # (b) the auto integer-detection logic in _col_decimals().
+    column_decimals: Optional[Dict[str, int]] = None
 
 
 def _fmt_p(p: float) -> str:
@@ -359,16 +371,103 @@ def _f(v: float, d: int = 2) -> str:
     return f"{v:.{d}f}"
 
 
-def _fmt_one_stat(a: pd.Series, stat: str) -> str:
+def _col_decimals(
+    df: pd.DataFrame,
+    col: str,
+    override: Optional[Dict[str, int]] = None,
+    fallback: int = 2,
+) -> int:
+    """Resolve per-column decimal places for descriptive display.
+
+    Resolution order:
+      1. Explicit ``override`` mapping (request body / session store).
+      2. Integer-dtype column → 0 (e.g. counts, days, ages).
+      3. Float column whose values are all whole numbers → 0 (e.g. days
+         column re-read from SPSS as float64 but holding integers only).
+      4. Otherwise the supplied fallback (default 2).
+
+    Industry convention (AMA, ICMJE) is that Table 1 statistics inherit the
+    precision of the source variable; a follow-up-days column should report
+    integer medians, not 1697.50.
+    """
+    if override and col in override:
+        try:
+            return max(0, int(override[col]))
+        except (TypeError, ValueError):
+            pass
+    if col not in df.columns:
+        return fallback
+    s = df[col]
+    if pd.api.types.is_integer_dtype(s):
+        return 0
+    if pd.api.types.is_float_dtype(s):
+        clean = s.dropna()
+        if len(clean) > 0:
+            try:
+                if (clean.mod(1) == 0).all():
+                    return 0
+            except (TypeError, ValueError):
+                pass
+    return fallback
+
+
+def _resolve_decimals_override(
+    session_id: Optional[str],
+    request_override: Optional[Dict[str, int]],
+) -> Dict[str, int]:
+    """Merge the persisted per-session decimals map with a request-supplied
+    one. Request values take precedence so callers can preview overrides
+    without committing them to the session."""
+    base: Dict[str, int] = {}
+    if session_id:
+        try:
+            base = dict(store.get_decimals(session_id) or {})
+        except Exception:  # pragma: no cover — defensive
+            base = {}
+    if request_override:
+        for k, v in request_override.items():
+            try:
+                base[k] = max(0, int(v))
+            except (TypeError, ValueError):
+                continue
+    return base
+
+
+def _fmt_one_stat(
+    a: pd.Series,
+    stat: str,
+    *,
+    df: Optional[pd.DataFrame] = None,
+    col: Optional[str] = None,
+    override: Optional[Dict[str, int]] = None,
+) -> str:
+    """Format a single Table 1 statistic.
+
+    When ``df`` + ``col`` are supplied, the column's natural decimal places
+    are honoured (integer columns render as integers, float overrides win).
+    SE / variance keep an extra digit of precision per AMA convention.
+    """
     if len(a) == 0:
         return "—"
+    # Column-aware decimal places for sample-valued statistics (mean,
+    # median, quartiles, min/max). Falls back to the legacy 2-decimal
+    # default when no column context is supplied.
+    if df is not None and col is not None:
+        d = _col_decimals(df, col, override, fallback=2)
+    else:
+        d = 2
+
+    def fc(v: float, dd: Optional[int] = None) -> str:
+        return _f(v, d if dd is None else dd)
+
     if stat == "mean_sd":
-        return f"{_f(a.mean())} ± {_f(a.std())}"
+        return f"{fc(a.mean())} ± {fc(a.std())}"
     if stat == "median_iqr":
         q1, q3 = a.quantile(0.25), a.quantile(0.75)
-        return f"{_f(a.median())} [{_f(q1)}–{_f(q3)}]"
+        return f"{fc(a.median())} [{fc(q1)}–{fc(q3)}]"
     if stat == "se":
-        return _f(a.sem(), 3)
+        # SE keeps an extra digit of precision since it shrinks with √n.
+        return fc(a.sem(), max(d, 3))
     if stat == "ci95":
         if len(a) < 2:
             return "—"
@@ -376,18 +475,18 @@ def _fmt_one_stat(a: pd.Series, stat: str) -> str:
         m = a.mean()
         t_crit = scipy_stats.t.ppf(0.975, df=len(a) - 1)
         ci = t_crit * se
-        return f"{_f(m)} [{_f(m - ci)}–{_f(m + ci)}]"
+        return f"{fc(m)} [{fc(m - ci)}–{fc(m + ci)}]"
     if stat == "variance":
-        return _f(a.var(), 3)
+        return fc(a.var(), max(d, 3))
     if stat == "min_max":
-        return f"{_f(a.min())} – {_f(a.max())}"
+        return f"{fc(a.min())} – {fc(a.max())}"
     if stat == "n":
         return str(int(len(a)))
     if stat == "missing":
         return str(int(a.isna().sum()) if hasattr(a, 'isna') else 0)
     pct_map = {"p10": 0.10, "p25": 0.25, "p75": 0.75, "p90": 0.90, "p95": 0.95}
     if stat in pct_map:
-        return _f(a.quantile(pct_map[stat]))
+        return fc(a.quantile(pct_map[stat]))
     return "—"
 
 
@@ -396,6 +495,10 @@ def _build_stat_rows(
     group_series: dict[str, pd.Series],
     stats: list[str],
     normal: bool,
+    *,
+    df: Optional[pd.DataFrame] = None,
+    col: Optional[str] = None,
+    override: Optional[Dict[str, int]] = None,
 ) -> list[dict]:
     rows_out = []
     s_all = s_col.dropna().astype(float)
@@ -410,9 +513,14 @@ def _build_stat_rows(
             overall_val = str(int(s_col.isna().sum()))
             grp_vals = {gl: str(int(gs.isna().sum())) for gl, gs in group_series.items()}
         else:
-            overall_val = _fmt_one_stat(s_all, resolved)
+            overall_val = _fmt_one_stat(
+                s_all, resolved, df=df, col=col, override=override,
+            )
             grp_vals = {
-                gl: _fmt_one_stat(gs.dropna().astype(float), resolved)
+                gl: _fmt_one_stat(
+                    gs.dropna().astype(float), resolved,
+                    df=df, col=col, override=override,
+                )
                 for gl, gs in group_series.items()
             }
 
@@ -476,6 +584,10 @@ def table1(req: Table1Request):
     df = _get_df(req.session_id)
     rows = []
     sel_stats: list[str] = req.selected_stats if req.selected_stats else ["auto"]
+    # Per-column decimal overrides: merge the session-persisted map with
+    # any request-supplied overrides (request wins). Auto-detection still
+    # applies for columns absent from both.
+    decimals_override = _resolve_decimals_override(req.session_id, req.column_decimals)
 
     groups = None
     group_labels = []
@@ -535,7 +647,10 @@ def table1(req: Table1Request):
             else:
                 normal = normal_overall
 
-            stat_rows = _build_stat_rows(s, group_series, sel_stats, normal)
+            stat_rows = _build_stat_rows(
+                s, group_series, sel_stats, normal,
+                df=df, col=var, override=decimals_override,
+            )
 
             p_value_str: Optional[str] = None
             test_name_str: Optional[str] = None
