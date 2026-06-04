@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runDCA } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runDCA, runCoxHorizons } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -163,6 +163,10 @@ export default function SurvivalAdvancedPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
+  // Cross-panel handoff to the Forest Builder + Visual-tab deep link.
+  const setForestHandoff = useStore((s) => s.setForestHandoff);
+  const setVisualSubTab = useStore((s) => s.setVisualSubTab);
+  const setActiveTab = useStore((s) => s.setActiveTab);
 
   const baseLayout = usePlotLayout();
   const pal = usePalette();
@@ -241,6 +245,17 @@ export default function SurvivalAdvancedPanel() {
   const [dcaResult, setDcaResult] = useState<any>(null);
   const [dcaLoading, setDcaLoading] = useState(false);
   const [dcaError, setDcaError] = useState<string | null>(null);
+
+  // Time-horizon sensitivity (Cox at multiple administrative-censoring windows)
+  const [chDuration, setChDuration] = useState("");
+  const [chEvent, setChEvent] = useState("");
+  const [chPredictor, setChPredictor] = useState("");
+  const [chCovariates, setChCovariates] = useState<string[]>([]);
+  const [chHorizons, setChHorizons] = useState("365, 730");
+  const [chLabels, setChLabels] = useState("1 year, 2 years");
+  const [chResult, setChResult] = useState<any>(null);
+  const [chLoading, setChLoading] = useState(false);
+  const [chError, setChError] = useState<string | null>(null);
 
   // RMST state — Restricted Mean Survival Time (PH-free alternative)
   const [rmstDuration, setRmstDuration] = useState("");
@@ -1640,6 +1655,137 @@ export default function SurvivalAdvancedPanel() {
             )}
 
             <ResultExporter title="decision_curve" plotRef={dcaPlotRef} />
+          </div>
+        )}
+      </Section>
+
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      {/* Time-horizon sensitivity → Forest plot                               */}
+      {/* ───────────────────────────────────────────────────────────────────── */}
+      <Section
+        title="Time-horizon HR (forest)"
+        description="Run the same Cox model at several follow-up windows (1-year, 2-year, full) and send the hazard ratios straight to the Forest Builder. Answers 'does the effect hold early vs. late?'."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <VarSelect label="Duration / Time" value={chDuration} onChange={setChDuration} columns={columns} kinds={["numeric"]} />
+          <VarSelect label="Event (0/1)" value={chEvent} onChange={setChEvent} columns={columns} kinds={["numeric", "binary"]} />
+          <VarSelect label="Predictor (HR tracked)" value={chPredictor} onChange={setChPredictor} columns={columns} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 font-medium">Horizon cut-points (time unit, comma-sep)</span>
+            <input value={chHorizons} onChange={(e) => setChHorizons(e.target.value)}
+              placeholder="365, 730"
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 font-medium">Labels (comma-sep, optional)</span>
+            <input value={chLabels} onChange={(e) => setChLabels(e.target.value)}
+              placeholder="1 year, 2 years"
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
+          </label>
+        </div>
+
+        <div className="mt-2">
+          <MultiSelect label="Adjustment covariates (optional)" columns={columns}
+            selected={chCovariates} onChange={setChCovariates}
+            excludeNames={[chDuration, chEvent, chPredictor].filter(Boolean)} />
+        </div>
+
+        <p className="text-[11px] text-gray-400 mt-1">
+          A "Full follow-up" row (all events, no censoring) is added automatically. Each window applies administrative censoring at its cut-point.
+        </p>
+
+        <div className="flex items-center gap-3 flex-wrap mt-2">
+          <RunButton
+            loading={chLoading}
+            label="Run horizons"
+            onClick={async () => {
+              if (!chDuration || !chEvent || !chPredictor) {
+                setChError("Select duration, event, and a predictor.");
+                return;
+              }
+              const horizons = chHorizons.split(",").map((s) => parseFloat(s.trim())).filter((x) => !Number.isNaN(x) && x > 0);
+              if (horizons.length === 0) {
+                setChError("Enter at least one positive horizon cut-point.");
+                return;
+              }
+              const labels = chLabels.split(",").map((s) => s.trim()).filter(Boolean);
+              setChResult(null); setChError(null); setChLoading(true);
+              try {
+                const res = await runCoxHorizons({
+                  session_id: sid,
+                  duration_col: chDuration,
+                  event_col: chEvent,
+                  predictor: chPredictor,
+                  covariates: chCovariates.length ? chCovariates : undefined,
+                  horizons,
+                  horizon_labels: labels.length === horizons.length ? labels : undefined,
+                  include_full: true,
+                });
+                setChResult(res.data);
+              } catch (e: any) {
+                setChError(e?.response?.data?.detail ?? "Time-horizon analysis failed");
+              } finally {
+                setChLoading(false);
+              }
+            }}
+          />
+          {chResult?.forest_rows?.length > 0 && (
+            <button
+              onClick={() => {
+                const cov = (chResult.covariates ?? []) as string[];
+                setForestHandoff(chResult.forest_rows, {
+                  customTitle: "",
+                  customSubtitle: cov.length ? `Adjusted for ${cov.join(" + ")}` : "(unadjusted; red = 95% CI excludes 1)",
+                  xLabel: `Hazard ratio for ${chResult.predictor} (95% CI), log scale`,
+                });
+                setVisualSubTab("forest");
+                setActiveTab("visual");
+              }}
+              className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+            >
+              → Send to Forest Builder
+            </button>
+          )}
+        </div>
+
+        {chError && <p className="text-sm text-red-500 mt-2">{chError}</p>}
+
+        {chResult && (
+          <div className="mt-3 space-y-3">
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
+              <table className="w-full text-xs">
+                <thead className="bg-gray-50 text-gray-500">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-medium">Horizon</th>
+                    <th className="text-right px-3 py-2 font-medium">n events</th>
+                    <th className="text-right px-3 py-2 font-medium">HR</th>
+                    <th className="text-right px-3 py-2 font-medium">95% CI</th>
+                    <th className="text-right px-3 py-2 font-medium">p</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(chResult.forest_rows ?? []).map((row: any, i: number) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-3 py-1.5 text-gray-800">{row.label}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-500">{(row.extra ?? "").replace(/[()]/g, "").replace(" events", "")}</td>
+                      <td className="px-3 py-1.5 text-right font-semibold text-gray-900">{row.est != null ? row.est.toFixed(2) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-600">
+                        {row.ci_low != null && row.ci_high != null ? `${row.ci_low.toFixed(2)}–${row.ci_high.toFixed(2)}` : "—"}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-600">{row.p != null ? (row.p < 0.001 ? "<0.001" : row.p.toFixed(3)) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {chResult.interpretation && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 text-sm text-indigo-900">
+                {chResult.interpretation}
+              </div>
+            )}
           </div>
         )}
       </Section>

@@ -47,6 +47,7 @@ export const runPoisson  = (data: object) => api.post("/api/models/poisson", dat
 export const runKM = (data: object) => api.post("/api/models/survival/km", data);
 export const runCox = (data: object) => api.post("/api/models/survival/cox", data);
 export const runCoxRCS = (data: object) => api.post("/api/models/survival/cox_rcs", data);
+export const runCoxHorizons = (data: object) => api.post("/api/models/survival/cox_horizons", data);
 export const runPolynomial  = (data: object) => api.post("/api/models/polynomial", data);
 export const runLMM         = (data: object) => api.post("/api/models/lmm", data);
 export const runGamma       = (data: object) => api.post("/api/models/gamma", data);

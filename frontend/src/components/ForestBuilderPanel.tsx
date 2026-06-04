@@ -95,6 +95,28 @@ export default function ForestBuilderPanel() {
   const [pasteOpen, setPasteOpen] = useState(false);
 
   const session = useStore((s) => s.session);
+  const forestHandoff = useStore((s) => s.forestHandoff);
+  const forestHandoffLayout = useStore((s) => s.forestHandoffLayout);
+  const setForestHandoff = useStore((s) => s.setForestHandoff);
+
+  // Consume a cross-panel handoff (e.g. from the Cox time-horizon panel):
+  // load the supplied rows + layout, then clear the buffer so a later
+  // visit doesn't re-inject stale rows.
+  useEffect(() => {
+    if (forestHandoff && forestHandoff.length > 0) {
+      setRows(forestHandoff.map((r) => ({ ...r })));
+      if (forestHandoffLayout) {
+        setLayout((l) => ({
+          ...l,
+          xScale: "log",
+          nullLine: 1,
+          ...forestHandoffLayout,
+        }));
+      }
+      setForestHandoff(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forestHandoff]);
 
   const [mapLabel, setMapLabel] = useState("");
   const [mapEst, setMapEst] = useState("");

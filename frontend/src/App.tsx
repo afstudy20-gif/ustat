@@ -440,6 +440,17 @@ function ModelsCombo() {
 
 function VisualChartsCombo() {
   const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest" | "addedvalue">("models");
+  // Deep-link: another panel can request a specific inner sub-tab (e.g.
+  // the Cox time-horizon panel jumps straight to "forest"). Consume once.
+  const visualSubTab = useStore((s) => s.visualSubTab);
+  const setVisualSubTab = useStore((s) => s.setVisualSubTab);
+  useEffect(() => {
+    if (visualSubTab) {
+      setSub(visualSubTab as typeof sub);
+      setVisualSubTab(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visualSubTab]);
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">

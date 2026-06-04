@@ -101,6 +101,19 @@ interface AppState {
   panelCache: Record<string, any>;
   setPanelCache: (panel: string, data: any) => void;
   clearPanelCache: (panel: string) => void;
+  // Cross-panel forest handoff — one panel (e.g. Cox time-horizon) drops
+  // a set of forest rows here, the Forest Builder picks them up on mount
+  // and clears it. Shape matches ForestRowInput.
+  forestHandoff: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> | null;
+  forestHandoffLayout: { customTitle?: string; customSubtitle?: string; xLabel?: string } | null;
+  setForestHandoff: (
+    rows: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> | null,
+    layout?: { customTitle?: string; customSubtitle?: string; xLabel?: string } | null,
+  ) => void;
+  // Deep-link target for the Visual tab's inner sub-tab ("forest", etc.).
+  // Consumed once by VisualChartsCombo then cleared.
+  visualSubTab: string | null;
+  setVisualSubTab: (sub: string | null) => void;
   // Column decimal formatting
   columnDecimals: Record<string, number>;  // col name → decimal places
   setColumnDecimals: (col: string, decimals: number) => void;
@@ -265,6 +278,11 @@ export const useStore = create<AppState>((set) => ({
     delete next[panel];
     return { panelCache: next };
   }),
+  forestHandoff: null,
+  forestHandoffLayout: null,
+  setForestHandoff: (rows, layout = null) => set({ forestHandoff: rows, forestHandoffLayout: layout }),
+  visualSubTab: null,
+  setVisualSubTab: (sub) => set({ visualSubTab: sub }),
   // Column decimal formatting
   columnDecimals: {},
   setColumnDecimals: (col, decimals) => set((state) => {
