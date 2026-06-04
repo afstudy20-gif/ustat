@@ -86,33 +86,38 @@ function MultiSelect({ label, columns, selected, onChange, kinds, excludeNames }
 
 /**
  * Event columns for Cox must be binary 0/1. The session ColMeta `kind`
- * enum has no "binary" value, so a plain `kinds={["numeric"]}` filter
- * leaks every continuous column into the Event dropdown. Detect
- * binary-like columns from the preview instead: ≤2 distinct non-null
- * values, all numerically coercible. Falls back to all numeric columns
- * when detection finds none (so the user is never stuck).
+ * enum has no "binary" value AND a 0/1 column is frequently classified as
+ * `categorical` (e.g. SEX, DM, HT), so a kind-based filter both leaks
+ * continuous numerics and hides the real event columns. Detect binary
+ * columns purely from the data: scan every column's preview values and
+ * keep those whose non-null values are all numerically coercible with
+ * ≤2 distinct values (0/1, 1/2, …) — regardless of `kind`.
+ *
+ * Falls back to the full column list only when nothing qualifies (e.g.
+ * preview unavailable) so the user is never stuck with an empty dropdown.
  */
 function binaryLikeColumns(
   columns: { name: string; kind: string }[],
   preview: Record<string, unknown>[] | undefined,
 ): { name: string; kind: string }[] {
-  const numeric = columns.filter((c) => c.kind === "numeric");
-  if (!preview || preview.length === 0) return numeric;
+  if (!preview || preview.length === 0) return columns;
   const out: { name: string; kind: string }[] = [];
-  for (const c of numeric) {
+  for (const c of columns) {
     const distinct = new Set<number>();
     let ok = true;
+    let seen = 0;
     for (const row of preview) {
       const v = row[c.name];
       if (v === null || v === undefined || v === "") continue;
       const n = Number(v);
-      if (!Number.isFinite(n)) { ok = false; break; }
+      if (!Number.isFinite(n)) { ok = false; break; }  // non-numeric → not an event col
+      seen += 1;
       distinct.add(n);
-      if (distinct.size > 2) break;
+      if (distinct.size > 2) { ok = false; break; }
     }
-    if (ok && distinct.size > 0 && distinct.size <= 2) out.push(c);
+    if (ok && seen > 0 && distinct.size >= 1 && distinct.size <= 2) out.push(c);
   }
-  return out.length > 0 ? out : numeric;
+  return out.length > 0 ? out : columns;
 }
 
 function RunButton({ onClick, loading, label }: { onClick: () => void; loading: boolean; label: string }) {
