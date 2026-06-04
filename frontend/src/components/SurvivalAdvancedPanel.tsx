@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runDCA, runCoxHorizons } from "../api";
@@ -84,6 +84,37 @@ function MultiSelect({ label, columns, selected, onChange, kinds, excludeNames }
   );
 }
 
+/**
+ * Event columns for Cox must be binary 0/1. The session ColMeta `kind`
+ * enum has no "binary" value, so a plain `kinds={["numeric"]}` filter
+ * leaks every continuous column into the Event dropdown. Detect
+ * binary-like columns from the preview instead: ≤2 distinct non-null
+ * values, all numerically coercible. Falls back to all numeric columns
+ * when detection finds none (so the user is never stuck).
+ */
+function binaryLikeColumns(
+  columns: { name: string; kind: string }[],
+  preview: Record<string, unknown>[] | undefined,
+): { name: string; kind: string }[] {
+  const numeric = columns.filter((c) => c.kind === "numeric");
+  if (!preview || preview.length === 0) return numeric;
+  const out: { name: string; kind: string }[] = [];
+  for (const c of numeric) {
+    const distinct = new Set<number>();
+    let ok = true;
+    for (const row of preview) {
+      const v = row[c.name];
+      if (v === null || v === undefined || v === "") continue;
+      const n = Number(v);
+      if (!Number.isFinite(n)) { ok = false; break; }
+      distinct.add(n);
+      if (distinct.size > 2) break;
+    }
+    if (ok && distinct.size > 0 && distinct.size <= 2) out.push(c);
+  }
+  return out.length > 0 ? out : numeric;
+}
+
 function RunButton({ onClick, loading, label }: { onClick: () => void; loading: boolean; label: string }) {
   return (
     <button onClick={onClick} disabled={loading}
@@ -163,6 +194,12 @@ export default function SurvivalAdvancedPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
+  // Binary 0/1-like columns for Cox event selectors (the `kind` enum has
+  // no "binary", so a numeric filter would leak continuous columns).
+  const binaryCols = useMemo(
+    () => binaryLikeColumns(columns, session?.preview),
+    [columns, session?.preview],
+  );
   // Cross-panel handoff to the Forest Builder + Visual-tab deep link.
   const setForestHandoff = useStore((s) => s.setForestHandoff);
   const setVisualSubTab = useStore((s) => s.setVisualSubTab);
@@ -526,7 +563,7 @@ export default function SurvivalAdvancedPanel() {
             <>
               <div className="grid grid-cols-1 gap-2">
                 <VarSelect label="Duration" value={rmstDuration} onChange={setRmstDuration} columns={columns} kinds={["numeric"]} />
-                <VarSelect label="Event (0/1)" value={rmstEvent} onChange={setRmstEvent} columns={columns} />
+                <VarSelect label="Event (0/1)" value={rmstEvent} onChange={setRmstEvent} columns={binaryCols} />
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 font-medium">τ (time horizon)</span>
                   <input type="number" min="0" step="any" value={rmstTau}
@@ -766,7 +803,7 @@ export default function SurvivalAdvancedPanel() {
             <>
               <div className="grid grid-cols-1 gap-2">
                 <VarSelect label="Duration" value={lmDuration} onChange={setLmDuration} columns={columns} kinds={["numeric"]} />
-                <VarSelect label="Event (0/1)" value={lmEvent} onChange={setLmEvent} columns={columns} />
+                <VarSelect label="Event (0/1)" value={lmEvent} onChange={setLmEvent} columns={binaryCols} />
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 font-medium">Landmark time</span>
                   <input type="number" step="1" value={lmTime} onChange={(e) => setLmTime(e.target.value)}
@@ -831,7 +868,7 @@ export default function SurvivalAdvancedPanel() {
       <Section title="Kaplan-Meier Survival" description="Visualise time-to-event data with survival curves and log-rank test">
         <div className="grid grid-cols-4 gap-3">
           <VarSelect label="Duration (time)" value={kmDuration} onChange={setKmDuration} columns={columns} kinds={["numeric"]} />
-          <VarSelect label="Event (0/1)" value={kmEvent} onChange={setKmEvent} columns={columns} />
+          <VarSelect label="Event (0/1)" value={kmEvent} onChange={setKmEvent} columns={binaryCols} />
           <VarSelect label="Group (optional)" value={kmGroup} onChange={setKmGroup} columns={columns} kinds={["categorical"]} />
           <VarSelect label="Stratify by (optional)" value={kmStratify} onChange={setKmStratify} columns={columns} kinds={["categorical"]} />
         </div>
@@ -1269,7 +1306,7 @@ export default function SurvivalAdvancedPanel() {
       <Section title="Cox Proportional Hazards" description="Regression for time-to-event data — outputs Hazard Ratios (HR)">
         <div className="grid grid-cols-2 gap-3">
           <VarSelect label="Duration (time)" value={coxDuration} onChange={setCoxDuration} columns={columns} kinds={["numeric"]} />
-          <VarSelect label="Event (0/1)" value={coxEvent} onChange={setCoxEvent} columns={columns} />
+          <VarSelect label="Event (0/1)" value={coxEvent} onChange={setCoxEvent} columns={binaryCols} />
         </div>
 
         {/* Checkbox predictor list */}
@@ -1520,7 +1557,7 @@ export default function SurvivalAdvancedPanel() {
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <VarSelect label="Duration / Time" value={dcaDuration} onChange={setDcaDuration} columns={columns} kinds={["numeric"]} />
-          <VarSelect label="Event (0/1)" value={dcaEvent} onChange={setDcaEvent} columns={columns} kinds={["numeric", "binary"]} />
+          <VarSelect label="Event (0/1)" value={dcaEvent} onChange={setDcaEvent} columns={binaryCols} />
           <VarSelect label="Risk Score / LP (higher = worse)" value={dcaRisk} onChange={setDcaRisk} columns={columns} kinds={["numeric"]} />
         </div>
 
@@ -1668,7 +1705,7 @@ export default function SurvivalAdvancedPanel() {
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <VarSelect label="Duration / Time" value={chDuration} onChange={setChDuration} columns={columns} kinds={["numeric"]} />
-          <VarSelect label="Event (0/1)" value={chEvent} onChange={setChEvent} columns={columns} kinds={["numeric", "binary"]} />
+          <VarSelect label="Event (0/1)" value={chEvent} onChange={setChEvent} columns={binaryCols} />
           <VarSelect label="Predictor (HR tracked)" value={chPredictor} onChange={setChPredictor} columns={columns} />
         </div>
 
