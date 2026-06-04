@@ -74,6 +74,11 @@ interface AppState {
   caseFilter: CaseFilter | null;
   setSession: (s: Session) => void;
   setOriginalSession: (s: Session | null) => void;
+  /** Rename the active session. Updates the React store immediately and
+   *  fires a backend POST /sessions/{sid}/rename so the renamed value is
+   *  round-tripped on subsequent save_session calls. Errors swallowed —
+   *  the local rename succeeds regardless. */
+  renameSession: (name: string) => void;
   setActiveTab: (t: string) => void;
   toggleGrid: () => void;
   clearSession: () => void;
@@ -126,6 +131,20 @@ export const useStore = create<AppState>((set) => ({
   session: null,
   originalSession: null,
   setOriginalSession: (s) => set({ originalSession: s }),
+  renameSession: (rawName: string) => {
+    const name = (rawName || "").trim();
+    if (!name) return;
+    set((state) => {
+      if (!state.session) return {};
+      const sid = state.session.session_id;
+      // Fire-and-forget backend sync so save_session round-trips the
+      // new value. Failure is non-fatal — local rename still applied.
+      import("./api").then(({ default: api }) => {
+        api.post(`/api/sessions/${sid}/rename`, { filename: name }).catch(() => null);
+      });
+      return { session: { ...state.session, filename: name } };
+    });
+  },
   activeTab: "data",
   descriptiveTab: "histogram",
   setDescriptiveTab: (t) => set({ descriptiveTab: t }),

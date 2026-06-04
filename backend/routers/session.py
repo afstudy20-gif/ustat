@@ -346,9 +346,12 @@ async def save_session(session_id: str):
         kind = kind_overrides.get(col) or _detect_kind(df[col])
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
 
+    # User-chosen display name (set via /rename) wins over the hardcoded
+    # fallback so the saved JSON round-trips the rename.
+    user_filename = store.get_filename(session_id) or f"session_{session_id[:8]}.json"
     payload = {
         "version": "1.2",
-        "filename": f"session_{session_id[:8]}.json",
+        "filename": user_filename,
         "created": time.time(),
         "columns": columns,
         "col_metadata": store.get_metadata(session_id),
@@ -412,6 +415,12 @@ async def load_session(file: UploadFile = File(...)):
     decimals_overrides = payload.get("decimals_overrides") or {}
     if decimals_overrides:
         store.save_decimals(new_session_id, decimals_overrides)
+
+    # Restore user-chosen display name so subsequent save_session calls
+    # keep round-tripping the rename.
+    restored_filename = payload.get("filename")
+    if restored_filename:
+        store.set_filename(new_session_id, restored_filename)
 
     # Build columns info — overrides win over auto-detection.
     from routers.upload import _detect_kind
@@ -569,6 +578,28 @@ async def get_column_decimals(session_id: str):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return store.get_decimals(session_id)
+
+
+# ── Session rename ────────────────────────────────────────────────────────────
+# Lets the user choose a display name for the session — surfaced in the
+# header pill, the auto-save IndexedDB record, and the round-tripped JSON.
+
+class RenameRequest(BaseModel):
+    filename: str
+
+
+@router.post("/{session_id}/rename")
+async def rename_session(session_id: str, body: RenameRequest):
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    name = (body.filename or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="filename cannot be empty")
+    if len(name) > 200:
+        raise HTTPException(status_code=422, detail="filename too long (>200 chars)")
+    store.set_filename(session_id, name)
+    return {"status": "ok", "filename": name}
 
 
 @router.get("/{session_id}")

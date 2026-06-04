@@ -17,6 +17,7 @@ _audit: Dict[str, list] = {}
 _metadata: Dict[str, dict] = {}
 _kinds: Dict[str, Dict[str, str]] = {}  # {session_id: {col: "numeric"|"categorical"|...}}
 _decimals: Dict[str, Dict[str, int]] = {}  # {session_id: {col: decimal_places}} for cell-format overrides
+_filenames: Dict[str, str] = {}  # {session_id: user-chosen display name}
 _undo: Dict[str, list] = {}   # {session_id: [DataFrame snapshots]}
 _redo: Dict[str, list] = {}
 _lock = Lock()
@@ -326,6 +327,28 @@ def rename_decimal_key(session_id: str, old: str, new: str) -> None:
     """Move the decimal entry to a new column name (called on rename)."""
     if session_id in _decimals and old in _decimals[session_id]:
         _decimals[session_id][new] = _decimals[session_id].pop(old)
+
+
+# ── Session display name (user-facing rename) ────────────────────────────────
+
+def set_filename(session_id: str, name: str) -> None:
+    """Store a user-chosen display name for the session.
+
+    Independent of the original upload filename. Used by save_session so
+    the round-tripped JSON carries the renamed value, and by the
+    /sessions/{sid}/filename endpoint so the React store can sync on
+    rehydrate.
+    """
+    if name:
+        _filenames[session_id] = str(name)
+
+
+def get_filename(session_id: str) -> Optional[str]:
+    return _filenames.get(session_id)
+
+
+def clear_filename(session_id: str) -> None:
+    _filenames.pop(session_id, None)
 
 
 def get_df(session_id: str) -> "pd.DataFrame":

@@ -469,6 +469,67 @@ function VisualChartsCombo() {
   );
 }
 
+/**
+ * Header pill that displays the session filename and lets the user
+ * rename it in place. Click → input opens with the current name
+ * selected. Enter / blur commits via store.renameSession (which also
+ * fires POST /api/sessions/{sid}/rename so save_session round-trips
+ * the new value). Escape cancels.
+ */
+function SessionNamePill() {
+  const session = useStore((s) => s.session);
+  const renameSession = useStore((s) => s.renameSession);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  if (!session) return null;
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next && next !== session.filename) renameSession(next);
+    setEditing(false);
+  };
+
+  return (
+    <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-0 max-w-xs">
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); commit(); }
+            if (e.key === "Escape") { e.preventDefault(); setEditing(false); }
+          }}
+          maxLength={200}
+          className="text-xs text-gray-800 bg-white border border-indigo-300 rounded px-1 py-0 outline-none focus:border-indigo-500 min-w-0 w-44"
+          aria-label="Oturum adını düzenle"
+        />
+      ) : (
+        <button
+          onClick={() => { setDraft(session.filename); setEditing(true); }}
+          title="Oturum adını değiştirmek için tıklayın"
+          className="text-xs text-gray-600 truncate hover:text-indigo-700 hover:underline decoration-dotted underline-offset-2 cursor-pointer text-left"
+        >
+          {session.filename}
+        </button>
+      )}
+      <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
+        {session.rows.toLocaleString()} × {session.columns.length}
+      </span>
+    </div>
+  );
+}
+
 export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter, originalSession, setOriginalSession, setSession } = useStore();
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -611,12 +672,8 @@ export default function App() {
             <span className="font-bold text-gray-900 text-sm tracking-tight">uSTAT</span>
           </button>
 
-          <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-0 max-w-xs">
-            <span className="text-xs text-gray-600 truncate">{session.filename}</span>
-            <span className="text-xs text-gray-400 ml-2 flex-shrink-0">
-              {session.rows.toLocaleString()} × {session.columns.length}
-            </span>
-          </div>
+          <SessionNamePill />
+
 
           {caseFilter && caseFilter.conditions && caseFilter.conditions.length > 0 && (
             <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 font-semibold rounded-lg px-2 py-1 text-[10px] animate-pulse flex-shrink-0" title="All active analyses are automatically filtered by this subset.">
