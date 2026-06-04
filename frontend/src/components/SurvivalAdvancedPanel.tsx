@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runDCA, runCoxHorizons } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -210,7 +210,6 @@ export default function SurvivalAdvancedPanel() {
   const traceDefaults = useTraceDefaults();
 
   const fgPlotRef = useRef<any>(null);
-  const dcaPlotRef = useRef<any>(null);
   const lmPlotRef = useRef<any>(null);
 
   // Fine-Gray state
@@ -275,13 +274,6 @@ export default function SurvivalAdvancedPanel() {
   const [coxScanResult, setCoxScanResult] = useState<any[]>([]);
   const [coxScanLoading, setCoxScanLoading] = useState(false);
 
-  // Phase 13 DCA state (inside SurvivalAdvancedPanel)
-  const [dcaDuration, setDcaDuration] = useState("");
-  const [dcaEvent, setDcaEvent] = useState("");
-  const [dcaRisk, setDcaRisk] = useState("");
-  const [dcaResult, setDcaResult] = useState<any>(null);
-  const [dcaLoading, setDcaLoading] = useState(false);
-  const [dcaError, setDcaError] = useState<string | null>(null);
 
   // Time-horizon sensitivity (Cox at multiple administrative-censoring windows)
   const [chDuration, setChDuration] = useState("");
@@ -1544,154 +1536,6 @@ export default function SurvivalAdvancedPanel() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-      </Section>
-
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      {/* Phase 13: Decision Curve Analysis (Clinical Utility)                 */}
-      {/* ───────────────────────────────────────────────────────────────────── */}
-      <Section
-        title="Decision Curve Analysis (Net Clinical Benefit)"
-        description="Evaluate at which threshold probabilities a model (Cox LP or ML risk score) provides more net benefit than 'treat all' or 'treat none'. Essential after external validation or ML benchmark."
-      >
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <VarSelect label="Duration / Time" value={dcaDuration} onChange={setDcaDuration} columns={columns} kinds={["numeric"]} />
-          <VarSelect label="Event (0/1)" value={dcaEvent} onChange={setDcaEvent} columns={binaryCols} />
-          <VarSelect label="Risk Score / LP (higher = worse)" value={dcaRisk} onChange={setDcaRisk} columns={columns} kinds={["numeric"]} />
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap mt-2">
-          <RunButton
-            onClick={async () => {
-              if (!dcaDuration || !dcaEvent || !dcaRisk) {
-                setDcaError("Select duration, event, and a risk/LP column");
-                return;
-              }
-              setDcaResult(null); setDcaError(null); setDcaLoading(true);
-              try {
-                const res = await runDCA({
-                  session_id: sid,
-                  duration_col: dcaDuration,
-                  event_col: dcaEvent,
-                  risk_col: dcaRisk,
-                  n_thresholds: 80,
-                  threshold_range: [0.02, 0.6],
-                });
-                setDcaResult(res.data);
-              } catch (e: any) {
-                setDcaError(e?.response?.data?.detail ?? "DCA failed");
-              } finally {
-                setDcaLoading(false);
-              }
-            }}
-            loading={dcaLoading}
-            label="Run Decision Curve Analysis"
-          />
-          {dcaError && <p className="text-xs text-red-500">{dcaError}</p>}
-        </div>
-
-        {dcaResult && (
-          <div className="space-y-4 mt-3">
-            {/* Summary cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="rounded-xl border border-gray-200 p-3 bg-white">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500">Prevalence (at horizon)</div>
-                <div className="text-2xl font-semibold text-gray-900 mt-1">{(dcaResult.prevalence ?? dcaResult.summary?.prevalence ?? 0).toFixed(3)}</div>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3 bg-white">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500">Max Net Benefit</div>
-                <div className="text-2xl font-semibold text-emerald-600 mt-1">
-                  {dcaResult.summary?.max_net_benefit?.toFixed(4) ?? "—"}
-                </div>
-                <div className="text-xs text-gray-500">at threshold {dcaResult.summary?.max_net_benefit_threshold?.toFixed(3) ?? "—"}</div>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3 bg-white">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500">Positive NB Range</div>
-                <div className="text-lg font-semibold text-gray-800 mt-1">
-                  {dcaResult.summary?.positive_nb_range
-                    ? `${dcaResult.summary.positive_nb_range[0]} – ${dcaResult.summary.positive_nb_range[1]}`
-                    : "—"}
-                </div>
-              </div>
-              <div className="rounded-xl border border-gray-200 p-3 bg-white">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500">Interventions Avoided /100</div>
-                <div className="text-2xl font-semibold text-indigo-600 mt-1">
-                  {dcaResult.summary?.interventions_avoided_per_100_at_max?.toFixed(1) ?? "—"}
-                </div>
-              </div>
-            </div>
-
-            {/* Net Benefit Plot */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-semibold text-gray-600">Net Benefit Curves</span>
-                <PlotExporter plotRef={dcaPlotRef} title="decision_curve" />
-              </div>
-              <div className="relative" ref={dcaPlotRef}>
-              <Plot
-                data={[
-                  {
-                    x: dcaResult.curves?.model?.thresholds ?? dcaResult.curves?.thresholds,
-                    y: dcaResult.curves?.model?.net_benefit ?? dcaResult.curves?.model_net_benefit,
-                    type: "scatter",
-                    mode: "lines",
-                    name: "Model",
-                    line: { color: "#4f46e5", width: 2.5 },
-                  },
-                  {
-                    x: dcaResult.curves?.treat_all?.thresholds ?? dcaResult.curves?.thresholds,
-                    y: dcaResult.curves?.treat_all?.net_benefit ?? dcaResult.curves?.treat_all_net_benefit,
-                    type: "scatter",
-                    mode: "lines",
-                    name: "Treat All",
-                    line: { color: "#f59e0b", width: 2, dash: "dash" },
-                  },
-                  {
-                    x: dcaResult.curves?.treat_none?.thresholds ?? dcaResult.curves?.thresholds,
-                    y: dcaResult.curves?.treat_none?.net_benefit ?? dcaResult.curves?.treat_none_net_benefit,
-                    type: "scatter",
-                    mode: "lines",
-                    name: "Treat None",
-                    line: { color: "#6b7280", width: 2, dash: "dot" },
-                  },
-                ]}
-                layout={{
-                  height: 340,
-                  margin: { t: 10, r: 10, b: 40, l: 50 },
-                  xaxis: { title: "Threshold Probability", range: [0, 0.7] },
-                  yaxis: { title: "Net Benefit" },
-                  legend: { orientation: "h", y: -0.2 },
-                  hovermode: "x unified",
-                }}
-                style={{ width: "100%" }}
-              />
-              </div>
-            </div>
-
-            {/* Result text + Assumptions / Warnings */}
-            {dcaResult.result_text && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                {dcaResult.result_text}
-              </div>
-            )}
-
-            {dcaResult.assumptions && dcaResult.assumptions.length > 0 && (
-              <div className="text-xs">
-                <span className="font-semibold text-gray-600">Assumptions:</span>
-                <ul className="list-disc ml-4 mt-1 text-gray-600 space-y-0.5">
-                  {dcaResult.assumptions.map((a: string, i: number) => <li key={i}>{a}</li>)}
-                </ul>
-              </div>
-            )}
-
-            {dcaResult.warnings && dcaResult.warnings.length > 0 && (
-              <div className="text-xs text-amber-700">
-                <span className="font-semibold">Warnings:</span> {dcaResult.warnings.join(" • ")}
-              </div>
-            )}
-
-            <ResultExporter title="decision_curve" plotRef={dcaPlotRef} />
           </div>
         )}
       </Section>
