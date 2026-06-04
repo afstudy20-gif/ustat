@@ -763,6 +763,10 @@ export default function DescriptivePanel() {
   const session = useStore((s) => s.session);
   const updateColumnKind = useStore((s) => s.updateColumnKind);
   const reorderColumns   = useStore((s) => s.reorderColumns);
+  // Per-column decimal overrides set in the Data tab. The backend has
+  // already auto-detected integer columns (it returns `display_decimals`
+  // on /api/stats/descriptive), but user overrides from the store win.
+  const columnDecimals = useStore((s) => s.columnDecimals);
   const [dragIdx,  setDragIdx]  = useState<number | null>(null);
   const [dropIdx,  setDropIdx]  = useState<number | null>(null);
   const [colMeta, setColMeta] = useState<any[]>([]);
@@ -971,10 +975,31 @@ export default function DescriptivePanel() {
     c.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const fmt = (v: number, d = 2) => {
+  // Per-column decimal resolver. Resolution order:
+  //   1. Explicit `d` argument (lets callers force a precision for things
+  //      like p-values).
+  //   2. User override from the Data-tab decimals control.
+  //   3. Server-supplied `display_decimals` from the active summary block
+  //      (auto-detected integer columns → 0).
+  //   4. Fallback 2.
+  const colDecimals = (col: string | null | undefined): number => {
+    if (col && col in columnDecimals) return columnDecimals[col];
+    if (
+      col &&
+      summary &&
+      summary.type === "numeric" &&
+      typeof summary.display_decimals === "number"
+    ) {
+      return summary.display_decimals;
+    }
+    return 2;
+  };
+
+  const fmt = (v: number, d?: number) => {
     if (typeof v !== "number") return "—";
     if (Math.abs(v) < 0.0001 && v !== 0) return v.toExponential(2);
-    return v.toFixed(d);
+    const dd = typeof d === "number" ? d : colDecimals(selected);
+    return v.toFixed(dd);
   };
 
   return (
@@ -1148,22 +1173,33 @@ export default function DescriptivePanel() {
                         ? ["Statistic", "Value"]
                         : ["Category", "Count", "Percent"]}
                       rows={summary.type === "numeric"
-                        ? [
-                            ["N", summary.n],
-                            ["Missing", summary.missing],
-                            ["Mean", summary.mean?.toFixed(4) ?? ""],
-                            ["SD", summary.std?.toFixed(4) ?? ""],
-                            ["Median", summary.median?.toFixed(4) ?? ""],
-                            ["Q1", summary.q1?.toFixed(4) ?? ""],
-                            ["Q3", summary.q3?.toFixed(4) ?? ""],
-                            ["IQR", summary.iqr?.toFixed(4) ?? ""],
-                            ["Min", summary.min?.toFixed(4) ?? ""],
-                            ["Max", summary.max?.toFixed(4) ?? ""],
-                            ["Skewness", summary.skewness?.toFixed(4) ?? ""],
-                            ["Kurtosis", summary.kurtosis?.toFixed(4) ?? ""],
-                            ["Normality test", summary.normality_test ?? ""],
-                            ["Normality p", summary.normality_p?.toFixed(4) ?? summary.shapiro_p?.toFixed(4) ?? ""],
-                          ]
+                        ? (() => {
+                            // Exports keep one extra digit of precision over
+                            // the on-screen display, but never less than the
+                            // user's column rule (integer columns stay integer).
+                            const dCol = colDecimals(selected);
+                            const dExp = Math.max(dCol, dCol === 0 ? 0 : 4);
+                            const fix = (x: number | undefined) =>
+                              typeof x === "number" ? x.toFixed(dExp) : "";
+                            return [
+                              ["N", summary.n],
+                              ["Missing", summary.missing],
+                              ["Mean", fix(summary.mean)],
+                              ["SD", fix(summary.std)],
+                              ["Median", fix(summary.median)],
+                              ["Q1", fix(summary.q1)],
+                              ["Q3", fix(summary.q3)],
+                              ["IQR", fix(summary.iqr)],
+                              ["Min", fix(summary.min)],
+                              ["Max", fix(summary.max)],
+                              ["Skewness", summary.skewness?.toFixed(4) ?? ""],
+                              ["Kurtosis", summary.kurtosis?.toFixed(4) ?? ""],
+                              ["Normality test", summary.normality_test ?? ""],
+                              ["Normality p",
+                                summary.normality_p?.toFixed(4) ??
+                                summary.shapiro_p?.toFixed(4) ?? ""],
+                            ];
+                          })()
                         : (summary.categories ?? []).map((c: any) => [
                             c.value, c.count,
                             c.pct != null ? `${c.pct.toFixed(1)}%` : "",
@@ -1209,10 +1245,18 @@ export default function DescriptivePanel() {
                 {summary.type === "numeric" && (
                   <div className="px-4 py-1.5 border-b border-gray-100 bg-amber-50 flex-shrink-0">
                     <p className="text-[10px] text-amber-800 leading-relaxed">
-                      {summary.normal
-                        ? `Normal distribution (${summary.normality_test}, p=${summary.normality_p?.toFixed(3)}) \u2014 report Mean \u00B1 SD (${summary.mean?.toFixed(1)} \u00B1 ${summary.std?.toFixed(1)}).`
-                        : `Non-normal (${summary.normality_test}, p=${summary.normality_p?.toFixed(3)}) \u2014 report Median [IQR] (${summary.median?.toFixed(1)} [${summary.q1?.toFixed(1)}\u2013${summary.q3?.toFixed(1)}]).`
-                      }
+                      {(() => {
+                        // Narrative inherits the column's display rule
+                        // (integer column \u2192 no decimals), so the suggested
+                        // report-this string is publication-ready.
+                        const d = colDecimals(selected);
+                        const f = (v?: number) =>
+                          typeof v === "number" ? v.toFixed(d) : "\u2014";
+                        const pNorm = summary.normality_p?.toFixed(3);
+                        return summary.normal
+                          ? `Normal distribution (${summary.normality_test}, p=${pNorm}) \u2014 report Mean \u00B1 SD (${f(summary.mean)} \u00B1 ${f(summary.std)}).`
+                          : `Non-normal (${summary.normality_test}, p=${pNorm}) \u2014 report Median [IQR] (${f(summary.median)} [${f(summary.q1)}\u2013${f(summary.q3)}]).`;
+                      })()}
                       {Math.abs(summary.skewness) > 2 ? " Highly skewed \u2014 consider log-transformation." :
                        Math.abs(summary.skewness) > 1 ? " Moderately skewed." : ""}
                     </p>

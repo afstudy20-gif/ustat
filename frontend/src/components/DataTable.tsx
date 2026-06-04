@@ -1021,26 +1021,34 @@ export default function DataTable() {
           </button>
           {/* Decimal places selector */}
           {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
-            <div className="px-3 py-1 flex items-center gap-1.5">
-              <span className="text-xs text-gray-500">🔢 Decimals:</span>
-              {[0, 1, 2, 3, 4, "auto"].map((d) => (
-                <button key={String(d)}
-                  onClick={() => {
-                    if (d === "auto") {
-                      clearColumnDecimals(ctxMenu.col);
-                    } else {
-                      setColumnDecimals(ctxMenu.col, d as number);
-                    }
-                    setCtxMenu(null);
-                  }}
-                  className={`text-[10px] w-6 h-5 rounded flex items-center justify-center transition-colors ${
-                    (d === "auto" && !(ctxMenu.col in columnDecimals)) || columnDecimals[ctxMenu.col] === d
-                      ? "bg-indigo-600 text-white"
-                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }`}>
-                  {d === "auto" ? "A" : d}
-                </button>
-              ))}
+            <div className="px-3 py-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-500">🔢 Decimals:</span>
+                {[0, 1, 2, 3, 4, "auto"].map((d) => (
+                  <button key={String(d)}
+                    onClick={() => {
+                      if (d === "auto") {
+                        clearColumnDecimals(ctxMenu.col);
+                      } else {
+                        setColumnDecimals(ctxMenu.col, d as number);
+                      }
+                      setCtxMenu(null);
+                    }}
+                    className={`text-[10px] w-6 h-5 rounded flex items-center justify-center transition-colors ${
+                      (d === "auto" && !(ctxMenu.col in columnDecimals)) || columnDecimals[ctxMenu.col] === d
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}>
+                    {d === "auto" ? "A" : d}
+                  </button>
+                ))}
+              </div>
+              {/* Hint — surfaces that the decimals control now affects more
+                  than just this data table. */}
+              <p className="text-[9px] text-gray-400 mt-1 leading-snug">
+                Summary, Histogram &amp; Tablo 1 metriklerine de uygulanır. "A" =
+                otomatik (integer kolonlar 0, diğerleri 2 ondalık).
+              </p>
             </div>
           )}
           <button onClick={() => { toggleSort(ctxMenu.col); setCtxMenu(null); }}

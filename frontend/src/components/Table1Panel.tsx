@@ -158,6 +158,10 @@ export default function Table1Panel() {
   const result = useStore((s) => s.table1Result) as T1Result | null;
   const setResult = useStore((s) => s.setTable1Result);
   const clearTable1 = useStore((s) => s.clearTable1);
+  // Per-column decimal overrides set in the Data tab. Backend also has
+  // its own session-persisted map (services/store.get_decimals); passing
+  // the client snapshot here lets unsaved tweaks preview immediately.
+  const columnDecimals = useStore((s) => s.columnDecimals);
   if (!session) return null;
 
   const allCols = session.columns.map((c) => c.name);
@@ -296,6 +300,9 @@ export default function Table1Panel() {
         variable_kinds,
         selected_stats: Array.from(selectedStats),
         normality_mode: (groupCol && withinGroupNormality) ? "within_group" : "overall",
+        // Pass the client-side decimals map so request-time overrides
+        // win over the session-persisted snapshot.
+        column_decimals: columnDecimals,
       });
 
       const rawResult = res.data as T1Result;
