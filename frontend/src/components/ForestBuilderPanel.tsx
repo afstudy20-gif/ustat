@@ -95,6 +95,12 @@ export default function ForestBuilderPanel() {
   const [rows, setRows] = useState<ForestRowInput[]>([emptyRow()]);
   const [layout, setLayout] = useState<ForestLayout>(DEFAULT_LAYOUT);
   const plotRef = useRef<any>(null);
+  // Resizable plot box: the user can drag the bottom-right corner. A
+  // ResizeObserver writes the dragged height back into layout.height (so it
+  // persists across re-renders) and nudges Plotly to re-fit its width.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const manualResizeRef = useRef(false);
+  const firstObsRef = useRef(true);
   const [pastebox, setPastebox] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);
 
@@ -323,6 +329,33 @@ export default function ForestBuilderPanel() {
     };
     return { tickvals: ticks, ticktext: ticks.map(fmt) };
   }, [layout.xScale, layout.nullLine, validRows]);
+
+  // Height that snugly fits the rows — used as the initial size so the plot
+  // isn't stretched tall over a few rows. The user can override by dragging.
+  const fittedHeight = Math.min(
+    660,
+    Math.max(220, 70 + (layout.customTitle ? 46 : 0) + Math.max(n, 1) * 72),
+  );
+  useEffect(() => {
+    if (!manualResizeRef.current) {
+      setLayout((l) => (l.height === fittedHeight ? l : { ...l, height: fittedHeight }));
+    }
+  }, [fittedHeight]);
+
+  // Sync user drags (bottom-right corner) back into layout.height + refit width.
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      if (firstObsRef.current) { firstObsRef.current = false; return; }
+      manualResizeRef.current = true;
+      const h = Math.round(el.clientHeight);
+      setLayout((l) => (Math.abs(l.height - h) <= 2 ? l : { ...l, height: h }));
+      window.dispatchEvent(new Event("resize"));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // One trace PER ROW. Plotly's error_x.color only accepts a single color
   // string (an array is silently ignored → default black whiskers), so to
@@ -770,16 +803,32 @@ export default function ForestBuilderPanel() {
         <div className="panel space-y-2 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-700">Forest plot</h3>
-            <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400 select-none">drag ⌟ corner to resize</span>
+              <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
+            </div>
           </div>
-          <div ref={plotRef}>
+          {/* Resizable box — bottom-right corner handle (CSS resize). */}
+          <div
+            ref={boxRef}
+            style={{
+              height: layout.height,
+              width: "100%",
+              minHeight: 200,
+              minWidth: 360,
+              maxWidth: "100%",
+              resize: "both",
+              overflow: "hidden",
+            }}
+            className="border border-dashed border-gray-200 rounded-lg"
+          >
+          <div ref={plotRef} style={{ width: "100%", height: "100%" }}>
             <Plot
               data={forestTraces}
               layout={{
                 paper_bgcolor: "transparent",
                 plot_bgcolor: "#ffffff",
                 font: { color: "#374151", size: 12 },
-                height: layout.height,
                 autosize: true,
                 margin: { t: layout.customTitle ? 60 : 30, r: 30, b: 60, l: 240 },
                 title: layout.customTitle
@@ -820,10 +869,11 @@ export default function ForestBuilderPanel() {
                 annotations,
                 showlegend: false,
               }}
-              style={{ width: "100%", height: layout.height }}
+              style={{ width: "100%", height: "100%" }}
               useResizeHandler
               config={{ responsive: true, displaylogo: false }}
             />
+          </div>
           </div>
         </div>
       )}
