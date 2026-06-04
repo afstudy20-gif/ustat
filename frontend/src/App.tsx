@@ -4,6 +4,7 @@ import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, Clipbo
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import HelpModal from "./components/HelpModal";
+import { useAutoSession } from "./hooks/useAutoSession";
 import { exportDataset, downloadSessionJson, type ExportFmt } from "./lib/exportDataset";
 
 class ErrorBoundary extends Component<
@@ -473,6 +474,17 @@ export default function App() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // Header auto-save status indicator.
+  const [autoSaveStatus, setAutoSaveStatus] = useState<{
+    state: "idle" | "saving" | "saved" | "error";
+    at?: number;
+  }>({ state: "idle" });
+  // Stream every session change to IndexedDB (debounced + periodic +
+  // beforeunload flush). Surfaces "Otomatik kayıt · …" next to the
+  // header Save menu when the user has an open session.
+  useAutoSession({
+    onStatus: (state, at) => setAutoSaveStatus({ state, at }),
+  });
   // Header Save-As dropdown (consolidates dataset export + session JSON
   // — supersedes the dropdown previously hidden inside the DataTable
   // toolbar). Closes on outside-click.
@@ -681,6 +693,37 @@ export default function App() {
             >
               <Info size={16} />
             </button>
+            {/* Auto-save status pill — sits to the LEFT of the Save menu
+                so the user always sees that work is being mirrored to
+                local IndexedDB (and can hit Save explicitly if not). */}
+            {session && (
+              <div
+                className="flex items-center gap-1 text-[10px] text-gray-400 px-2"
+                title={
+                  autoSaveStatus.state === "saving" ? "Otomatik kayıt sürüyor…"
+                  : autoSaveStatus.state === "saved" && autoSaveStatus.at
+                    ? `Otomatik kayıt: ${new Date(autoSaveStatus.at).toLocaleTimeString()} — tarayıcınızda saklanıyor (sunucuya gönderilmez)`
+                  : autoSaveStatus.state === "error" ? "Otomatik kayıt başarısız oldu — Save tuşunu kullanın"
+                  : "Otomatik kayıt aktif (her 60 sn + değişiklikten 5 sn sonra)"
+                }
+              >
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${
+                    autoSaveStatus.state === "saving"  ? "bg-amber-400 animate-pulse"
+                    : autoSaveStatus.state === "saved" ? "bg-emerald-500"
+                    : autoSaveStatus.state === "error" ? "bg-red-500"
+                    : "bg-gray-300"
+                  }`}
+                />
+                <span className="hidden md:inline">
+                  {autoSaveStatus.state === "saving"  ? "Kaydediliyor…"
+                   : autoSaveStatus.state === "saved" && autoSaveStatus.at
+                     ? `Auto-saved · ${new Date(autoSaveStatus.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                   : autoSaveStatus.state === "error" ? "Auto-save hata"
+                   : "Auto-save"}
+                </span>
+              </div>
+            )}
             <div className="relative" ref={headerSaveMenuRef}>
               <button
                 onClick={() => setShowHeaderSaveMenu(v => !v)}

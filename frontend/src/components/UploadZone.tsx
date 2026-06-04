@@ -5,6 +5,7 @@ import api from "../api";
 import { useStore } from "../store";
 import AboutModal from "./AboutModal";
 import HelpModal from "./HelpModal";
+import RecentSessionsPanel from "./RecentSessionsPanel";
 import PowerPanel from "./PowerPanel";
 import RefreshAppButton from "./RefreshAppButton";
 
@@ -161,6 +162,11 @@ export default function UploadZone() {
           <span className="text-xs text-gray-400">No data needed</span>
         </button>
       </div>
+
+      {/* Recent sessions (auto-saved in IndexedDB) — only renders when
+          the user has at least one saved snapshot. Lets them resume
+          exactly where they left off without re-uploading the dataset. */}
+      <RecentSessionsPanel />
 
       {/* Quick facts — privacy, scope, cost */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full max-w-2xl text-xs">
