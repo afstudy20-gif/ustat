@@ -37,7 +37,8 @@ def _make_dataset(seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame({
         "fu_days_int": rng.integers(low=6, high=1827, size=n),                # int dtype
         "fu_days_float": rng.integers(low=6, high=1827, size=n).astype(float),  # float but whole
-        "weight_kg": rng.normal(loc=73.4, scale=12.0, size=n).round(2),       # true float
+        "weight_kg": rng.normal(loc=73.4, scale=12.0, size=n).round(2),       # true float, 2 dec
+        "bmi_1dec": rng.normal(loc=25.0, scale=4.0, size=n).round(1),         # 1-decimal source
         "group": rng.choice(["A", "B"], size=n),
     })
 
@@ -72,6 +73,31 @@ def test_table1_float_holding_integers_also_integer_displayed():
     assert r.status_code == 200, r.text
     overall = r.json()["rows"][0]["overall"]
     assert "." not in overall, f"whole-valued float column should still be integer-displayed: {overall!r}"
+
+
+def test_table1_one_decimal_source_inherits_one_decimal():
+    # A column whose raw values carry exactly one decimal (15.4, 25.1, …)
+    # should report stats with one decimal, not a spurious second one.
+    df = _make_dataset(seed=11)
+    sid = _seed(df, "dec_one")
+    r = client.post("/api/stats/table1", json={
+        "session_id": sid,
+        "variables": ["bmi_1dec"],
+        "selected_stats": ["mean_sd"],
+    })
+    assert r.status_code == 200, r.text
+    overall = r.json()["rows"][0]["overall"]
+    for p in overall.replace("±", " ").split():
+        if "." in p and any(ch.isdigit() for ch in p):
+            assert len(p.split(".")[1]) == 1, f"1-decimal source gained a decimal: {overall!r}"
+
+
+def test_descriptive_one_decimal_source_display_decimals():
+    df = _make_dataset(seed=12)
+    sid = _seed(df, "dec_one_desc")
+    r = client.get(f"/api/stats/{sid}/descriptive")
+    assert r.status_code == 200, r.text
+    assert r.json()["bmi_1dec"]["display_decimals"] == 1
 
 
 def test_table1_true_float_keeps_two_decimals():

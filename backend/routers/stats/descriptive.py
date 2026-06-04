@@ -371,6 +371,40 @@ def _f(v: float, d: int = 2) -> str:
     return f"{v:.{d}f}"
 
 
+_NATURAL_DECIMALS_CAP = 6  # never auto-detect beyond this many places
+
+
+def _natural_decimals(series: pd.Series, cap: int = _NATURAL_DECIMALS_CAP) -> Optional[int]:
+    """Smallest number of decimal places that losslessly represents every
+    value in the column.
+
+    A column of {15.4, 16.2, 17.0} round-trips at 1 decimal; {15.42, 16.0}
+    needs 2. Returns None when the column is empty or non-finite so the
+    caller can fall back. Capped at ``cap`` so a float-noise column
+    (0.1 + 0.2 == 0.30000000000000004) doesn't return 17.
+
+    Used so Table 1 / Summary inherit the *source variable's* precision —
+    a 1-decimal lab value reads "15.4", not "15.42".
+    """
+    clean = series.dropna()
+    if len(clean) == 0:
+        return None
+    try:
+        arr = clean.astype(float).to_numpy()
+    except (TypeError, ValueError):
+        return None
+    if not np.all(np.isfinite(arr)):
+        arr = arr[np.isfinite(arr)]
+        if arr.size == 0:
+            return None
+    for d in range(0, cap + 1):
+        # rint avoids banker's-rounding surprises; tolerance absorbs the
+        # float64 representation error of e.g. 15.4.
+        if np.allclose(arr, np.round(arr, d), rtol=0.0, atol=0.5 * 10 ** (-d - 4)):
+            return d
+    return cap
+
+
 def _col_decimals(
     df: pd.DataFrame,
     col: str,
@@ -384,11 +418,16 @@ def _col_decimals(
       2. Integer-dtype column → 0 (e.g. counts, days, ages).
       3. Float column whose values are all whole numbers → 0 (e.g. days
          column re-read from SPSS as float64 but holding integers only).
-      4. Otherwise the supplied fallback (default 2).
+      4. Float column's *natural* precision — the fewest decimals that
+         represent every value losslessly, capped at ``fallback`` so a
+         1-decimal lab value (15.4) reads "15.4" not "15.42" while a
+         high-precision column still tops out at the 2-decimal default.
+      5. Otherwise the supplied fallback (default 2).
 
     Industry convention (AMA, ICMJE) is that Table 1 statistics inherit the
     precision of the source variable; a follow-up-days column should report
-    integer medians, not 1697.50.
+    integer medians, not 1697.50, and a 1-decimal column should not gain a
+    spurious second decimal.
     """
     if override and col in override:
         try:
@@ -408,6 +447,11 @@ def _col_decimals(
                     return 0
             except (TypeError, ValueError):
                 pass
+            # Inherit the column's natural precision, but never exceed the
+            # fallback — a messy float column still displays at 2 places.
+            natural = _natural_decimals(clean)
+            if natural is not None:
+                return min(natural, fallback)
     return fallback
 
 
