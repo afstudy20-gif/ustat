@@ -1635,10 +1635,18 @@ export default function SurvivalAdvancedPanel() {
             <button
               onClick={() => {
                 const cov = (chResult.covariates ?? []) as string[];
-                setForestHandoff(chResult.forest_rows, {
+                // Strip p / event count from the figure so it matches the
+                // canonical time-horizon forest look (HR + CI only). The
+                // on-screen table above still shows p and event counts.
+                const cleanRows = (chResult.forest_rows ?? []).map((r: any) => ({
+                  ...r, p: null, extra: "",
+                }));
+                setForestHandoff(cleanRows, {
                   customTitle: "",
                   customSubtitle: cov.length ? `Adjusted for ${cov.join(" + ")}` : "(unadjusted; red = 95% CI excludes 1)",
-                  xLabel: `Hazard ratio for ${chResult.predictor} (95% CI), log scale`,
+                  xLabel: `${cov.length ? "Adjusted" : "Unadjusted"} hazard ratio for ${chResult.predictor} (95% CI), log scale`,
+                  leftHeader: "Time horizon",
+                  rightHeader: "HR (95% CI)",
                 });
                 setVisualSubTab("forest");
                 setActiveTab("visual");

@@ -18,6 +18,8 @@ interface ForestRowInput {
 type ForestLayout = {
   customTitle: string;
   customSubtitle: string;
+  leftHeader: string;   // bold column header above the row labels (e.g. "Time horizon")
+  rightHeader: string;  // bold header above the value column (default "HR (95% CI)")
   xLabel: string;
   xScale: "log" | "linear";
   nullLine: number;        // 1 for HR/OR, 0 for β/Δ
@@ -34,6 +36,8 @@ type ForestLayout = {
 const DEFAULT_LAYOUT: ForestLayout = {
   customTitle: "",
   customSubtitle: "",
+  leftHeader: "",
+  rightHeader: "",
   xLabel: "Hazard ratio (95% CI), log scale",
   xScale: "log",
   nullLine: 1,
@@ -288,29 +292,36 @@ export default function ForestBuilderPanel() {
   const yIdx = validRows.map((_, i) => n - 1 - i); // top-down order
   const colors = validRows.map((r) => rowColor(r));
 
-  const baseTrace: any = {
-    type: "scatter",
-    mode: "markers",
-    x: validRows.map((r) => r.est),
-    y: yIdx,
-    error_x: {
-      type: "data", symmetric: false,
-      array:      validRows.map((r) => (r.ci_high! - r.est!)),
-      arrayminus: validRows.map((r) => (r.est! - r.ci_low!)),
-      thickness: 2.2, width: 7,
-      color: colors,
-    },
-    marker: {
-      size: 12,
-      symbol,
-      color: colors,
-      line: { color: "#ffffff", width: 0.5 },
-    },
-    hovertemplate: validRows.map((r) =>
-      `<b>${r.label}</b><br>${fmtCI(r)}<br>${fmtP(r.p)}${r.extra ? `<br>${r.extra}` : ""}<extra></extra>`
-    ),
-    showlegend: false,
-  };
+  // One trace PER ROW. Plotly's error_x.color only accepts a single color
+  // string (an array is silently ignored → default black whiskers), so to
+  // colour each confidence interval to match its marker we emit a separate
+  // trace per point.
+  const forestTraces: any[] = validRows.map((r, i) => {
+    const c = colors[i];
+    const yi = yIdx[i];
+    return {
+      type: "scatter",
+      mode: "markers",
+      x: [r.est],
+      y: [yi],
+      error_x: {
+        type: "data", symmetric: false,
+        array: [r.ci_high! - r.est!],
+        arrayminus: [r.est! - r.ci_low!],
+        thickness: 2.2, width: 7,
+        color: c,
+      },
+      marker: {
+        size: 12,
+        symbol,
+        color: c,
+        line: { color: "#ffffff", width: 0.5 },
+      },
+      hovertemplate:
+        `<b>${r.label}</b><br>${fmtCI(r)}<br>${fmtP(r.p)}${r.extra ? `<br>${r.extra}` : ""}<extra></extra>`,
+      showlegend: false,
+    };
+  });
 
   // Value-column annotations (right side)
   const showCols = layout.showValueColumns;
@@ -319,11 +330,21 @@ export default function ForestBuilderPanel() {
   const TX2 = 0.86;   // extra
 
   const annotations: any[] = [];
+  // Left column header (e.g. "Time horizon") — sits above the row labels,
+  // left-aligned into the y-axis label margin via a pixel shift.
+  if (layout.leftHeader) {
+    annotations.push({
+      xref: "paper", yref: "paper", x: 0, y: 1.04,
+      xanchor: "left", yanchor: "bottom", xshift: -230,
+      text: `<b>${layout.leftHeader}</b>`, showarrow: false,
+      font: { size: 12, color: "#1f2937" },
+    });
+  }
   if (showCols) {
     annotations.push({
       xref: "paper", yref: "paper", x: TX1, y: 1.04,
       xanchor: "left", yanchor: "bottom",
-      text: "<b>HR (95% CI), p</b>", showarrow: false,
+      text: `<b>${layout.rightHeader || "HR (95% CI)"}</b>`, showarrow: false,
       font: { size: 11, color: "#1f2937" },
     });
     if (layout.showExtra && validRows.some((r) => r.extra)) {
@@ -485,6 +506,21 @@ export default function ForestBuilderPanel() {
           placeholder="X axis label"
           className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
         />
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            value={layout.leftHeader}
+            onChange={(e) => setLayout((l) => ({ ...l, leftHeader: e.target.value }))}
+            placeholder="Left header (e.g. Time horizon)"
+            className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
+          />
+          <input
+            value={layout.rightHeader}
+            onChange={(e) => setLayout((l) => ({ ...l, rightHeader: e.target.value }))}
+            placeholder="Right header (HR (95% CI))"
+            className="w-full text-xs border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
+          />
+        </div>
+        <p className="text-[10px] text-gray-400">Left header sits above the row labels; right header above the value column.</p>
       </div>
 
       <div className="panel space-y-2 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
@@ -706,7 +742,7 @@ export default function ForestBuilderPanel() {
           </div>
           <div ref={plotRef}>
             <Plot
-              data={[baseTrace]}
+              data={forestTraces}
               layout={{
                 paper_bgcolor: "transparent",
                 plot_bgcolor: "#ffffff",
