@@ -588,10 +588,28 @@ export default function App() {
       <header className="border-b border-gray-200 bg-white flex-shrink-0 shadow-sm">
         {/* Row 1: logo · filename · actions */}
         <div className="flex items-center gap-3 px-4 pt-2 pb-1.5">
-          <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Logo + wordmark — clickable. Returns to the landing screen
+              (drop zone + Power Analysis + Recent Sessions). The autosave
+              hook has already mirrored the current session to IndexedDB,
+              so the user can resume from the Recent list. We still
+              confirm in case they haven't seen the auto-save indicator
+              yet. */}
+          <button
+            type="button"
+            onClick={() => {
+              const ok = window.confirm(
+                "Ana ekrana dön? Mevcut oturum otomatik olarak kaydedildi — Son Çalışmalar listesinden devam edebilirsiniz."
+              );
+              if (!ok) return;
+              clearSession();
+              setActiveTab("data");
+            }}
+            title="Ana ekrana dön (drop zone, Power Analysis, Son Çalışmalar)"
+            className="flex items-center gap-2 flex-shrink-0 hover:opacity-80 transition-opacity cursor-pointer"
+          >
             <img src="/logo.png" alt="uSTAT logo" className="w-7 h-7 rounded-lg" />
             <span className="font-bold text-gray-900 text-sm tracking-tight">uSTAT</span>
-          </div>
+          </button>
 
           <div className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 min-w-0 max-w-xs">
             <span className="text-xs text-gray-600 truncate">{session.filename}</span>
