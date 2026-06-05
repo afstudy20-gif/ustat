@@ -400,7 +400,7 @@ export default function ForestBuilderPanel() {
   if (layout.leftHeader) {
     annotations.push({
       xref: "paper", yref: "paper", x: 0, y: 1.04,
-      xanchor: "left", yanchor: "bottom", xshift: -230,
+      xanchor: "left", yanchor: "bottom", xshift: -120,
       text: `<b>${layout.leftHeader}</b>`, showarrow: false,
       font: { size: 12, color: "#1f2937" },
     });
@@ -800,13 +800,35 @@ export default function ForestBuilderPanel() {
           </p>
         </div>
       ) : (
-        <div className="panel space-y-2 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
-          <div className="flex items-center justify-between">
+        <div className="panel relative space-y-2 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
+          {/* PlotExporter floats top-right (absolute); keep it a direct child
+              of the relative panel so it anchors correctly. */}
+          <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
+          <div className="flex items-center justify-between pr-16">
             <h3 className="text-sm font-semibold text-gray-700">Forest plot</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-gray-400 select-none">drag ⌟ corner to resize</span>
-              <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
-            </div>
+            <span className="text-[10px] text-gray-400 select-none">drag ⌟ bottom-right to resize</span>
+          </div>
+          {/* Quick label editor — rename axis / column headers right here
+              before exporting (also available in the left controls). */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pb-1">
+            <input
+              value={layout.xLabel}
+              onChange={(e) => setLayout((l) => ({ ...l, xLabel: e.target.value }))}
+              placeholder="X-axis label"
+              className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
+            />
+            <input
+              value={layout.leftHeader}
+              onChange={(e) => setLayout((l) => ({ ...l, leftHeader: e.target.value }))}
+              placeholder="Left header (e.g. Time horizon)"
+              className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
+            />
+            <input
+              value={layout.rightHeader}
+              onChange={(e) => setLayout((l) => ({ ...l, rightHeader: e.target.value }))}
+              placeholder="Right header (HR (95% CI))"
+              className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
+            />
           </div>
           {/* Resizable box — bottom-right corner handle (CSS resize). */}
           <div
@@ -814,8 +836,8 @@ export default function ForestBuilderPanel() {
             style={{
               height: layout.height,
               width: "100%",
-              minHeight: 200,
-              minWidth: 360,
+              minHeight: 300,
+              minWidth: 600,
               maxWidth: "100%",
               resize: "both",
               overflow: "hidden",
@@ -830,7 +852,7 @@ export default function ForestBuilderPanel() {
                 plot_bgcolor: "#ffffff",
                 font: { color: "#374151", size: 12 },
                 autosize: true,
-                margin: { t: layout.customTitle ? 60 : 30, r: 30, b: 60, l: 240 },
+                margin: { t: layout.customTitle ? 60 : 30, r: 24, b: 60, l: 130 },
                 title: layout.customTitle
                   ? { text: titleHtml, font: { size: 13, color: "#1f2937" }, x: 0.5, xanchor: "center" }
                   : undefined,
