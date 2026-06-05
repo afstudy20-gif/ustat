@@ -86,6 +86,24 @@ def test_km_pairwise_logrank_identifies_driver():
     assert find("1", "2")["p"] > 0.05
 
 
+def test_km_risk_table():
+    df = _make_three_groups(seed=5)
+    sid = _seed(df, "km_risk")
+    r = client.post("/api/models/survival/km", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "group_col": "ldl_grp", "risk_times": [0, 365, 730, 1095],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["risk_times"] == [0, 365, 730, 1095]
+    for g in d["groups"]:
+        ar = g["at_risk"]
+        assert len(ar) == 4
+        # at-risk at t=0 equals group n; monotone non-increasing over time.
+        assert ar[0] == g["n"]
+        assert ar[0] >= ar[1] >= ar[2] >= ar[3]
+
+
 def test_km_pairwise_skipped_for_two_groups():
     df = _make_three_groups(seed=3)
     df = df[df["ldl_grp"] != 2]  # leave 2 groups

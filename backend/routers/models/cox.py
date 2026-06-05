@@ -86,6 +86,7 @@ def _km_fit_groups(
     event_col: str,
     group_col: Optional[str],
     survival_times: Optional[List[float]] = None,
+    risk_times: Optional[List[float]] = None,
 ) -> list:
     groups = df[group_col].unique() if group_col else [None]
     results = []
@@ -116,6 +117,11 @@ def _km_fit_groups(
         }
         if survival_times:
             row_out["survival_at"] = [_surv_at(kmf, float(t)) for t in survival_times]
+        if risk_times:
+            # Standard number-at-risk: subjects with follow-up ≥ t (at risk
+            # at the start of the interval beginning at t).
+            dur = subset[duration_col].astype(float)
+            row_out["at_risk"] = [int((dur >= float(t)).sum()) for t in risk_times]
         results.append(row_out)
     return results
 
@@ -220,6 +226,9 @@ class KMRequest(BaseModel):
     # Pairwise log-rank comparisons (≥3 groups) + multiplicity correction.
     pairwise: bool = False
     pairwise_correction: str = "none"  # none | bonferroni | holm | bh
+    # Number-at-risk table: subjects still at risk per group at these times
+    # (typically the x-axis ticks), for the journal-style risk table.
+    risk_times: Optional[List[float]] = None
 
 
 @router.post("/survival/km")
@@ -254,7 +263,7 @@ def kaplan_meier(req: KMRequest):
             sub = df[df[req.stratify_col] == sv].copy()
             if len(sub) == 0:
                 continue
-            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col, req.survival_times)
+            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col, req.survival_times, req.risk_times)
             lr = _km_logrank(sub, req.duration_col, req.event_col, req.group_col) if req.group_col else None
             strata_out.append({"label": str(sv), "n": int(len(sub)), "groups": grp_results, "logrank": lr})
         return {
@@ -266,7 +275,7 @@ def kaplan_meier(req: KMRequest):
             "imputation": req.imputation,
         }
 
-    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col, req.survival_times)
+    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col, req.survival_times, req.risk_times)
     logrank = _km_logrank(df, req.duration_col, req.event_col, req.group_col) if req.group_col else None
     pairwise = (
         _km_pairwise(df, req.duration_col, req.event_col, req.group_col, req.pairwise_correction)
@@ -279,6 +288,7 @@ def kaplan_meier(req: KMRequest):
         "logrank": logrank,
         "pairwise": pairwise,
         "survival_times": req.survival_times or [],
+        "risk_times": req.risk_times or [],
         "n_total": n_total,
         "n_excluded": n_excluded,
         "imputation": req.imputation,

@@ -133,6 +133,22 @@ function binaryLikeColumns(
   return out.length > 0 ? out : columns;
 }
 
+// Okabe-Ito colourblind-safe palette + distinct line dashes for KM curves.
+const OKABE_ITO = ["#E69F00", "#009E73", "#0072B2", "#D55E00", "#CC79A7", "#56B4E9", "#F0E442", "#000000"];
+const KM_DASHES = ["solid", "dash", "dot", "dashdot", "longdash", "longdashdot"];
+
+/** Nice round tick set 0..xmax (~7 ticks) for the number-at-risk columns. */
+function niceRiskTimes(xmax: number): number[] {
+  if (!(xmax > 0) || !isFinite(xmax)) return [];
+  const raw = xmax / 6;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;
+  const step = (norm >= 5 ? 5 : norm >= 2 ? 2 : 1) * mag;
+  const ticks: number[] = [];
+  for (let t = 0; t <= xmax + 1e-9; t += step) ticks.push(Math.round(t));
+  return ticks;
+}
+
 /**
  * Compose a publication-style standard interpretation of a KM result
  * from the returned data: overall log-rank, landmark survival, pairwise
@@ -354,6 +370,8 @@ export default function SurvivalAdvancedPanel() {
   const [kmYTitle, setKmYTitle] = useState("Survival probability");    // editable Y-axis label
   const [kmPlotH, setKmPlotH] = useState(420);                         // plot height px
   const [kmPlotW, setKmPlotW] = useState<number | undefined>(undefined); // plot width px (undefined = fill)
+  const [kmRiskTable, setKmRiskTable] = useState(false);              // number-at-risk table
+  const [kmColorblind, setKmColorblind] = useState(false);           // Okabe-Ito + line styles
   const [kmGroupColors, setKmGroupColors] = useState<Record<string, string>>({}); // per-group color
   const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"|"plotTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
@@ -364,6 +382,37 @@ export default function SurvivalAdvancedPanel() {
     const id = window.setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
     return () => window.clearTimeout(id);
   }, [kmPlotW, kmPlotH]);
+
+  // When the risk table is enabled and the current result lacks at-risk
+  // counts, derive tick times from the curves' x-max and re-fetch with
+  // risk_times so the number-at-risk row can render aligned to the axis.
+  useEffect(() => {
+    if (!kmRiskTable || !kmResult?.groups?.length) return;
+    const hasRisk = kmResult.groups.some((g: any) => Array.isArray(g.at_risk));
+    if (hasRisk) return;
+    let xmax = 0;
+    for (const g of kmResult.groups) {
+      const c = g.curve;
+      if (c?.length) xmax = Math.max(xmax, c[c.length - 1].time);
+    }
+    const times = niceRiskTimes(xmax);
+    if (!times.length) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await runKM({
+          session_id: sid, duration_col: kmDuration, event_col: kmEvent,
+          group_col: kmGroup || undefined, stratify_col: kmStratify || undefined,
+          survival_times: kmResult.survival_times?.length ? kmResult.survival_times : undefined,
+          pairwise: !!kmResult.pairwise, pairwise_correction: kmCorrection,
+          risk_times: times,
+        });
+        if (!cancelled) setKmResult(res.data);
+      } catch { /* non-fatal — table just won't show */ }
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kmRiskTable, kmResult]);
 
   // Cox state
   const [coxDuration, setCoxDuration] = useState("");
@@ -1170,6 +1219,14 @@ export default function SurvivalAdvancedPanel() {
                 <input type="checkbox" checked={kmYAxisAsPct} onChange={(e) => setKmYAxisAsPct(e.target.checked)} className="accent-indigo-500" />
                 Y as %
               </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmRiskTable} onChange={(e) => setKmRiskTable(e.target.checked)} className="accent-indigo-500" />
+                Number at risk
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmColorblind} onChange={(e) => setKmColorblind(e.target.checked)} className="accent-indigo-500" />
+                Colour-blind + line styles
+              </label>
               {(kmCustomPlotTitle || Object.keys(kmGroupColors).length > 0 || Object.keys(kmGroupLabels).length > 0) && (
                 <button
                   onClick={() => { setKmCustomPlotTitle(""); setKmGroupColors({}); setKmGroupLabels({}); }}
@@ -1210,7 +1267,12 @@ export default function SurvivalAdvancedPanel() {
                   y: g.curve.map((p: any) => p.survival),
                   type: "scatter", mode: "lines",
                   name: legendLabel(g),
-                  line: { width: traceDefaults.lineWidth, color: kmGroupColors[String(g.group)] ?? pal[i % pal.length], shape: "hv" },
+                  line: {
+                    width: traceDefaults.lineWidth,
+                    color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]),
+                    shape: "hv",
+                    ...(kmColorblind ? { dash: KM_DASHES[i % KM_DASHES.length] } : {}),
+                  },
                 }))}
                 layout={{
                   ...baseLayout,
@@ -1235,6 +1297,34 @@ export default function SurvivalAdvancedPanel() {
               />
               <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
             </div>
+
+            {/* Number at risk — journal-style row under the curve */}
+            {kmRiskTable && Array.isArray(kmResult.risk_times) && kmResult.risk_times.length > 0 &&
+             kmResult.groups.some((g: any) => Array.isArray(g.at_risk)) && (
+              <div className="mt-1 overflow-x-auto" style={{ maxWidth: kmPlotW != null ? kmPlotW : "100%" }}>
+                <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5 px-1">Number at risk</div>
+                <table className="text-[11px] w-full">
+                  <tbody>
+                    {kmResult.groups.map((g: any, i: number) => (
+                      <tr key={g.group}>
+                        <td className="pr-3 py-0.5 whitespace-nowrap font-medium" style={{ color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]) }}>
+                          {kmGroupLabels[String(g.group)] ?? g.group}
+                        </td>
+                        {(g.at_risk ?? []).map((n: number, j: number) => (
+                          <td key={j} className="py-0.5 text-center tabular-nums text-gray-700">{n}</td>
+                        ))}
+                      </tr>
+                    ))}
+                    <tr className="border-t border-gray-100">
+                      <td className="pr-3 pt-0.5 text-[9px] text-gray-400">time</td>
+                      {kmResult.risk_times.map((t: number, j: number) => (
+                        <td key={j} className="pt-0.5 text-center text-[9px] text-gray-400 tabular-nums">{t}</td>
+                      ))}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* Compact Group summary table & Log-rank test */}
             <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm mt-2">
