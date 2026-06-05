@@ -44,6 +44,8 @@ function CoxUniMultiForest({
   onClose: () => void;
 }) {
   const rows = result.rows;
+  const [umW, setUmW] = useState<number | undefined>(undefined);   // px or auto
+  const [umH, setUmH] = useState<number>(Math.max(320, rows.length * 64 + 130));
   const vlab = (pname: string, code: string | null): string => {
     if (code == null) return "";
     const meta = columns.find((c) => c.name === pname);
@@ -97,21 +99,28 @@ function CoxUniMultiForest({
     } as any;
   };
 
-  // Right-hand numeric columns as paper-x annotations.
+  // Right-hand numeric columns: anchor at the plot-area right edge (x=1 paper)
+  // and offset by a FIXED pixel amount so the columns never scale off-screen
+  // with plot width (the previous paper-fraction x clipped the Adjusted column).
+  const COL_U_SHIFT = 14;    // px right of plot area: Unadjusted column
+  const COL_A_SHIFT = 168;   // px right of plot area: Adjusted column
+  const RIGHT_MARGIN = 340;  // must exceed COL_A_SHIFT + text width so export fits
   const ann: any[] = [
-    { xref: "paper", yref: "paper", x: 1.02, y: 1.0, xanchor: "left", yanchor: "bottom",
+    { xref: "paper", yref: "paper", x: 1, y: 1, xanchor: "left", yanchor: "bottom",
+      xshift: COL_U_SHIFT, yshift: 8,
       text: "<b>Unadjusted</b>", showarrow: false, font: { color: UM_GREY, size: 12 } },
-    { xref: "paper", yref: "paper", x: 1.30, y: 1.0, xanchor: "left", yanchor: "bottom",
+    { xref: "paper", yref: "paper", x: 1, y: 1, xanchor: "left", yanchor: "bottom",
+      xshift: COL_A_SHIFT, yshift: 8,
       text: "<b>Adjusted</b>", showarrow: false, font: { color: UM_BLUE, size: 12 } },
   ];
   rows.forEach((r, i) => {
-    ann.push({ xref: "paper", yref: "y", x: 1.02, y: ys[i], xanchor: "left", yanchor: "middle",
-      text: fmtHR(r.unadjusted), showarrow: false, font: { color: UM_GREY, size: 11 } });
-    ann.push({ xref: "paper", yref: "y", x: 1.30, y: ys[i], xanchor: "left", yanchor: "middle",
-      text: fmtHR(r.adjusted), showarrow: false, font: { color: UM_BLUE, size: 11 } });
+    ann.push({ xref: "paper", yref: "y", x: 1, y: ys[i], xanchor: "left", yanchor: "middle",
+      xshift: COL_U_SHIFT, text: fmtHR(r.unadjusted), showarrow: false,
+      font: { color: UM_GREY, size: 11 } });
+    ann.push({ xref: "paper", yref: "y", x: 1, y: ys[i], xanchor: "left", yanchor: "middle",
+      xshift: COL_A_SHIFT, text: fmtHR(r.adjusted), showarrow: false,
+      font: { color: UM_BLUE, size: 11 } });
   });
-
-  const height = Math.max(260, n * 56 + 110);
 
   return (
     <div className="rounded-lg border border-gray-200 mt-2">
@@ -119,11 +128,30 @@ function CoxUniMultiForest({
         <p className="text-xs font-semibold text-gray-600">
           Unadjusted vs Adjusted hazard ratios — paired forest
           <span className="ml-2 font-normal text-gray-400">n = {result.n}, {result.n_events} events</span>
-          <Tip wide text="Grey circle = univariable (unadjusted) HR; blue square = multivariable (adjusted) HR, both with 95% CI. Labels use the column's value labels. Export (↓ top-right) for the manuscript; the figure title is intentionally omitted so you can supply it as the figure legend." />
+          <Tip wide text="Grey circle = univariable (unadjusted) HR; blue square = multivariable (adjusted) HR, both with 95% CI. Labels use the column's value labels. Drag Width/Height to size the figure. Export (↓ top-right) for the manuscript; the figure title is intentionally omitted so you can supply it as the figure legend." />
         </p>
         <button onClick={onClose} className="text-[10px] text-gray-400 hover:text-red-500">✕ Close</button>
       </div>
-      <div className="relative p-2" ref={plotRef} style={{ width: "100%", height }}>
+
+      {/* Size controls — same pattern as the KM plot */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-3 pt-2">
+        <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+          <span className="font-medium">Width</span>
+          <input type="range" min={520} max={1400} step={20} value={umW ?? 820}
+            onChange={(e) => setUmW(Number(e.target.value))} className="accent-indigo-500" style={{ width: 110 }} />
+          <span className="tabular-nums w-8">{umW ?? "auto"}</span>
+          {umW != null && <button onClick={() => setUmW(undefined)} className="text-indigo-500 hover:text-indigo-700">auto</button>}
+        </label>
+        <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+          <span className="font-medium">Height</span>
+          <input type="range" min={260} max={900} step={20} value={umH}
+            onChange={(e) => setUmH(Number(e.target.value))} className="accent-indigo-500" style={{ width: 110 }} />
+          <span className="tabular-nums w-8">{umH}</span>
+        </label>
+      </div>
+
+      <div className="relative p-2" ref={plotRef}
+        style={{ width: umW != null ? umW : "100%", height: umH, maxWidth: "100%" }}>
         <Plot
           data={[mkTrace("unadjusted"), mkTrace("adjusted")]}
           layout={{
@@ -135,14 +163,14 @@ function CoxUniMultiForest({
             },
             yaxis: {
               tickvals: ys, ticktext: rows.map(rowLabel),
-              range: [0.3, n + 1.0], showgrid: false, zeroline: false,
+              range: [0.3, n + 0.7], showgrid: false, zeroline: false,
             },
             shapes: [{ type: "line", x0: 1, x1: 1, yref: "paper", y0: 0, y1: 1,
               line: { color: "#9aa0a6", dash: "dash", width: 1.2 } }],
             annotations: ann,
             showlegend: true,
-            legend: { orientation: "h", x: 0.0, y: -0.18 / (n || 1) - 0.08, font: { size: 11 } },
-            margin: { t: 24, r: 230, b: 52, l: 220 },
+            legend: { orientation: "h", x: 0.0, y: -0.14, font: { size: 11 } },
+            margin: { t: 40, r: RIGHT_MARGIN, b: 56, l: 230 },
             autosize: true,
           }}
           config={{ responsive: true }}
