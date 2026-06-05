@@ -76,7 +76,9 @@ export default function PlotExporter({
     }
     if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
     const scale = dpi / 72;
-    const dataUrl: string = await Plotly.toImage(el, { format: "png", width, height, scale });
+    // Force a white background so PNG/clipboard output is never transparent
+    // (transparent composites onto black in most image viewers).
+    const dataUrl: string = await Plotly.toImage(el, { format: "png", width, height, scale, setBackground: "#ffffff" });
     const res = await fetch(dataUrl);
     return await res.blob();
   };
@@ -142,6 +144,7 @@ export default function PlotExporter({
           format: fmt,
           width,
           height,
+          setBackground: "#ffffff",   // white bg for every format (no transparent → black)
           ...(scale !== 1 ? { scale } : {}),
         });
         // Data URL → Blob → anchor click. Direct anchor.href = dataUrl works
