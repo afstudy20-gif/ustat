@@ -167,6 +167,14 @@ function buildKmNarrative(
     p == null ? "n/a" : p < 0.001 ? "p<0.001" : `p=${p.toFixed(3)}`;
   const parts: string[] = [];
 
+  // 0. Median follow-up (reverse KM).
+  const mfu = km.median_follow_up;
+  if (mfu?.median != null) {
+    const iqr = (mfu.q1 != null && mfu.q3 != null)
+      ? ` (IQR ${mfu.q1.toFixed(0)}–${mfu.q3.toFixed(0)})` : "";
+    parts.push(`Median follow-up was ${mfu.median.toFixed(0)}${iqr}.`);
+  }
+
   // 1. Overall difference.
   if (groups.length >= 2 && km.logrank?.p != null) {
     const sig = km.logrank.p < 0.05;
@@ -180,14 +188,21 @@ function buildKmNarrative(
   if (Array.isArray(km.survival_times) && km.survival_times.length > 0) {
     for (const t of km.survival_times) {
       const idx = km.survival_times.indexOf(t);
+      let anyUnreliable = false;
       const frags = groups
         .map((g) => {
           const pt = (g.survival_at ?? [])[idx];
           if (!pt || pt.survival == null) return null;
+          if (pt.reliable === false) anyUnreliable = true;
           return `${(pt.survival * 100).toFixed(1)}% in the ${lab(String(g.group))} group`;
         })
         .filter(Boolean);
-      if (frags.length) parts.push(`Estimated survival at t=${t} was ${frags.join(", ")}.`);
+      if (frags.length) {
+        parts.push(
+          `Estimated survival at t=${t} was ${frags.join(", ")}.` +
+          (anyUnreliable ? " (Interpret the t=" + t + " estimate with caution — few patients remained at risk.)" : ""),
+        );
+      }
     }
   }
 
@@ -1431,6 +1446,19 @@ export default function SurvivalAdvancedPanel() {
                 </div>
               )}
 
+              {/* Median follow-up (reverse Kaplan–Meier) */}
+              {kmResult.median_follow_up?.median != null && (
+                <div className="px-3 py-1.5 text-[11px] border-t border-gray-100 bg-gray-50/60 text-gray-600 flex items-center justify-between">
+                  <span>Median follow-up (reverse KM)</span>
+                  <span className="tabular-nums">
+                    {kmResult.median_follow_up.median.toFixed(0)}
+                    {kmResult.median_follow_up.q1 != null && kmResult.median_follow_up.q3 != null &&
+                      ` [${kmResult.median_follow_up.q1.toFixed(0)}–${kmResult.median_follow_up.q3.toFixed(0)}]`}
+                    {" "}{kmCustomDurationTitle || kmDuration}
+                  </span>
+                </div>
+              )}
+
               {/* Landmark survival-at-time table */}
               {Array.isArray(kmResult.survival_times) && kmResult.survival_times.length > 0 && (
                 <div className="border-t border-gray-100">
@@ -1450,18 +1478,28 @@ export default function SurvivalAdvancedPanel() {
                       {kmResult.groups?.map((g: any) => (
                         <tr key={g.group} className="border-t border-gray-50">
                           <td className="px-3 py-1 text-[11px] text-gray-700">{kmGroupLabels[g.group] ?? g.group}</td>
-                          {(g.survival_at ?? []).map((pt: any, i: number) => (
-                            <td key={i} className="px-3 py-1 text-[11px] text-gray-600 text-right tabular-nums">
-                              {pt.survival != null ? `${(pt.survival * 100).toFixed(1)}%` : "—"}
-                              {pt.ci_low != null && pt.ci_high != null && (
-                                <span className="text-gray-400"> ({(pt.ci_low * 100).toFixed(1)}–{(pt.ci_high * 100).toFixed(1)})</span>
-                              )}
-                            </td>
-                          ))}
+                          {(g.survival_at ?? []).map((pt: any, i: number) => {
+                            const unreliable = pt.reliable === false;
+                            return (
+                              <td key={i} className={`px-3 py-1 text-[11px] text-right tabular-nums ${unreliable ? "text-gray-300" : "text-gray-600"}`}
+                                title={pt.n_at_risk != null ? `${pt.n_at_risk} at risk${unreliable ? " — too few; estimate unstable" : ""}` : undefined}>
+                                {pt.survival != null ? `${(pt.survival * 100).toFixed(1)}%` : "—"}
+                                {pt.ci_low != null && pt.ci_high != null && (
+                                  <span className={unreliable ? "text-gray-300" : "text-gray-400"}> ({(pt.ci_low * 100).toFixed(1)}–{(pt.ci_high * 100).toFixed(1)})</span>
+                                )}
+                                {unreliable && <span className="text-amber-500" title="Unstable: fewer than 10 at risk or beyond max follow-up">*</span>}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>
                   </table>
+                  {kmResult.groups?.some((g: any) => (g.survival_at ?? []).some((p: any) => p.reliable === false)) && (
+                    <div className="px-3 py-1 text-[9px] text-amber-600 italic">
+                      * Unstable estimate — fewer than 10 patients at risk or beyond maximum follow-up. Interpret with caution or omit.
+                    </div>
+                  )}
                 </div>
               )}
 

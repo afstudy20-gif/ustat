@@ -56,28 +56,75 @@ def _get_df(session_id: str) -> pd.DataFrame:
     return df
 
 
-def _surv_at(kmf: KaplanMeierFitter, t: float) -> dict:
+_MIN_AT_RISK = 10  # below this, a landmark estimate is flagged unreliable
+
+
+def _surv_at(kmf: KaplanMeierFitter, t: float,
+             durations: Optional[pd.Series] = None) -> dict:
     """Survival estimate (+ 95% CI) at an exact time point.
 
     Used for landmark statements like 'estimated 5-year survival was 77%'.
     The CI is read from lifelines' confidence_interval_survival_function_,
-    stepped to the last event time at or before t.
+    stepped to the last event time at or before t. When ``durations`` is
+    given, also reports n-at-risk and a ``reliable`` flag — False when t
+    exceeds the longest follow-up or fewer than _MIN_AT_RISK remain, which
+    is the guard against over-reading the tail (e.g. a '5-year' estimate
+    when only 3 patients are still at risk).
     """
+    out: dict = {"time": _safe_float(t), "survival": None, "ci_low": None,
+                 "ci_high": None, "n_at_risk": None, "reliable": None}
     try:
-        surv = float(kmf.survival_function_at_times(t).iloc[0])
+        out["survival"] = _safe_float(float(kmf.survival_function_at_times(t).iloc[0]))
     except Exception:
-        return {"time": _safe_float(t), "survival": None, "ci_low": None, "ci_high": None}
-    lo = hi = None
+        return out
     try:
         ci = kmf.confidence_interval_survival_function_
         sub = ci[ci.index <= t]
         row = sub.iloc[-1] if len(sub) else ci.iloc[0]
-        lo = float(row.iloc[0])
-        hi = float(row.iloc[1])
+        out["ci_low"] = _safe_float(float(row.iloc[0]))
+        out["ci_high"] = _safe_float(float(row.iloc[1]))
     except Exception:
         pass
-    return {"time": _safe_float(t), "survival": _safe_float(surv),
-            "ci_low": _safe_float(lo), "ci_high": _safe_float(hi)}
+    if durations is not None:
+        d = durations.dropna().astype(float)
+        n_risk = int((d >= float(t)).sum())
+        tmax = float(d.max()) if len(d) else 0.0
+        out["n_at_risk"] = n_risk
+        out["reliable"] = bool(t <= tmax and n_risk >= _MIN_AT_RISK)
+    return out
+
+
+def _median_follow_up(time: pd.Series, event: pd.Series) -> Optional[dict]:
+    """Median follow-up via reverse Kaplan–Meier (flip the event indicator).
+
+    The naive median of observed times underestimates potential follow-up
+    because deaths truncate it. Reverse KM treats censoring as the 'event'
+    and estimates the censoring (= follow-up) distribution. Returns
+    median + IQR in the duration unit.
+    """
+    t = pd.to_numeric(time, errors="coerce")
+    e = pd.to_numeric(event, errors="coerce")
+    m = t.notna() & e.notna()
+    t = t[m].astype(float)
+    e = e[m].astype(int)
+    if len(t) < 2 or e.nunique() < 1:
+        return None
+    try:
+        kmf = KaplanMeierFitter().fit(t, event_observed=(1 - e))
+    except Exception:
+        logger.exception("Reverse-KM median follow-up failed")
+        return None
+
+    def _pc(p: float) -> Optional[float]:
+        try:
+            v = float(kmf.percentile(p))
+            return v if np.isfinite(v) else None
+        except Exception:
+            return None
+
+    return {"median": _safe_float(_pc(0.50)),
+            "q1": _safe_float(_pc(0.75)),   # 25th pct of follow-up
+            "q3": _safe_float(_pc(0.25))}   # 75th pct of follow-up
 
 
 def _km_fit_groups(
@@ -117,7 +164,8 @@ def _km_fit_groups(
             "curve": curve,
         }
         if survival_times:
-            row_out["survival_at"] = [_surv_at(kmf, float(t)) for t in survival_times]
+            _dur = subset[duration_col].astype(float)
+            row_out["survival_at"] = [_surv_at(kmf, float(t), _dur) for t in survival_times]
         if risk_times:
             # Standard number-at-risk: subjects with follow-up ≥ t (at risk
             # at the start of the interval beginning at t).
@@ -306,6 +354,7 @@ def kaplan_meier(req: KMRequest):
         "pairwise": pairwise,
         "survival_times": req.survival_times or [],
         "risk_times": req.risk_times or [],
+        "median_follow_up": _median_follow_up(df[req.duration_col], df[req.event_col]),
         "n_total": n_total,
         "n_excluded": n_excluded,
         "imputation": req.imputation,

@@ -104,6 +104,39 @@ def test_km_risk_table():
         assert ar[0] >= ar[1] >= ar[2] >= ar[3]
 
 
+def test_km_median_follow_up():
+    df = _make_three_groups(seed=7)
+    sid = _seed(df, "km_mfu")
+    r = client.post("/api/models/survival/km", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "group_col": "ldl_grp",
+    })
+    assert r.status_code == 200, r.text
+    mfu = r.json()["median_follow_up"]
+    assert mfu is not None
+    assert mfu["median"] is not None and mfu["median"] > 0
+    # IQR ordering: q1 (25th pct) <= median <= q3 (75th pct).
+    if mfu["q1"] is not None and mfu["q3"] is not None:
+        assert mfu["q1"] <= mfu["median"] <= mfu["q3"]
+
+
+def test_km_landmark_reliability_flag():
+    # Short follow-up cohort; ask for a far-out time → unreliable flag.
+    df = _make_three_groups(seed=8)
+    sid = _seed(df, "km_reliable")
+    r = client.post("/api/models/survival/km", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "group_col": "ldl_grp", "survival_times": [365, 100000],
+    })
+    assert r.status_code == 200, r.text
+    for g in r.json()["groups"]:
+        sa = g["survival_at"]
+        early, far = sa[0], sa[1]
+        assert early["n_at_risk"] is not None
+        assert early["reliable"] is True          # plenty at risk at 1 year
+        assert far["reliable"] is False           # beyond max follow-up
+
+
 def test_km_censor_points():
     df = _make_three_groups(seed=6)
     sid = _seed(df, "km_cens")
