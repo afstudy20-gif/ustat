@@ -385,9 +385,9 @@ export default function SurvivalAdvancedPanel() {
   const [kmYTitle, setKmYTitle] = useState("Survival probability");    // editable Y-axis label
   const [kmPlotH, setKmPlotH] = useState(420);                         // plot height px
   const [kmPlotW, setKmPlotW] = useState<number | undefined>(undefined); // plot width px (undefined = fill)
-  const [kmRiskTable, setKmRiskTable] = useState(false);              // number-at-risk table
-  const [kmColorblind, setKmColorblind] = useState(false);           // Okabe-Ito + line styles
-  const [kmShowCensors, setKmShowCensors] = useState(false);         // censor tick marks
+  const [kmRiskTable, setKmRiskTable] = useState(true);              // number-at-risk table
+  const [kmColorblind, setKmColorblind] = useState(true);           // Okabe-Ito + line styles
+  const [kmShowCensors, setKmShowCensors] = useState(true);         // censor tick marks
   const [kmGroupColors, setKmGroupColors] = useState<Record<string, string>>({}); // per-group color
   const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"|"plotTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
@@ -1214,6 +1214,56 @@ export default function SurvivalAdvancedPanel() {
           const baseTitle = kmCustomPlotTitle || (kmGroup ? `Kaplan–Meier survival by ${kmCustomGroupTitle || kmGroup}` : "Kaplan–Meier survival");
           const titleText = (kmShowPInTitle && pStr) ? `${baseTitle} (log-rank p=${pStr})` : baseTitle;
 
+          // Number-at-risk rendered INSIDE the figure (Plotly annotations) so it
+          // is captured by PNG/TIFF/SVG export — a separate HTML table would not
+          // appear in the exported image. Group labels sit in the left margin
+          // (resolveGroupName: manual override > value_labels > raw); counts are
+          // placed at each risk time under the curve.
+          const riskGroups = kmResult.groups.filter((g: any) => Array.isArray(g.at_risk));
+          const riskTimes: number[] = Array.isArray(kmResult.risk_times) ? kmResult.risk_times : [];
+          const showRisk = kmRiskTable && riskTimes.length > 0 && riskGroups.length > 0;
+          const RISK_ROW_PX = 17;
+          const RISK_HEADER_Y = 54;   // px below plot area: "NUMBER AT RISK" header
+          const RISK_FIRST_ROW_Y = 72; // px below plot area: first group row
+          const riskAnnotations: any[] = [];
+          let riskLeftMargin = 68;
+          let riskBottomMargin = 56;
+          if (showRisk) {
+            const riskLabels = riskGroups.map((g: any) => resolveGroupName(String(g.group)));
+            const maxLen = riskLabels.reduce((m: number, s: string) => Math.max(m, s.length), 0);
+            riskLeftMargin = Math.min(220, Math.max(80, maxLen * 6 + 16));
+            riskBottomMargin = RISK_FIRST_ROW_Y + riskGroups.length * RISK_ROW_PX + 18;
+            // Header (left margin)
+            riskAnnotations.push({
+              xref: "paper", yref: "paper", x: 0, y: 0, xanchor: "left", yanchor: "top",
+              xshift: -riskLeftMargin + 6, yshift: -RISK_HEADER_Y,
+              text: "NUMBER AT RISK", showarrow: false,
+              font: { size: 10, color: "#6b7280" },
+            });
+            riskGroups.forEach((g: any, gi: number) => {
+              const color = kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[gi % OKABE_ITO.length] : pal[gi % pal.length]);
+              const rowShift = -(RISK_FIRST_ROW_Y + gi * RISK_ROW_PX);
+              // Group label in the left margin
+              riskAnnotations.push({
+                xref: "paper", yref: "paper", x: 0, y: 0, xanchor: "left", yanchor: "top",
+                xshift: -riskLeftMargin + 6, yshift: rowShift,
+                text: riskLabels[gi], showarrow: false,
+                font: { size: 10, color },
+              });
+              // Counts under each risk time
+              riskTimes.forEach((t: number, ti: number) => {
+                const n = g.at_risk?.[ti];
+                if (n == null) return;
+                riskAnnotations.push({
+                  xref: "x", yref: "paper", x: t, y: 0, xanchor: "center", yanchor: "top",
+                  yshift: rowShift,
+                  text: String(n), showarrow: false,
+                  font: { size: 10, color: "#374151" },
+                });
+              });
+            });
+          }
+
           return (
           <>
             {/* Publication-style customisation strip */}
@@ -1371,8 +1421,9 @@ export default function SurvivalAdvancedPanel() {
                     tickformat: kmYAxisAsPct ? ".0%" : ".2f",
                   },
                   autosize: true,
-                  margin: { t: 20, r: 20, b: 56, l: 68 }, showlegend: true,
+                  margin: { t: 20, r: 20, b: riskBottomMargin, l: riskLeftMargin }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
+                  annotations: riskAnnotations,
                 }}
                 useResizeHandler
                 config={{ responsive: true }} style={{ width: "100%", height: "100%" }}
@@ -1380,33 +1431,8 @@ export default function SurvivalAdvancedPanel() {
               <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
             </div>
 
-            {/* Number at risk — journal-style row under the curve */}
-            {kmRiskTable && Array.isArray(kmResult.risk_times) && kmResult.risk_times.length > 0 &&
-             kmResult.groups.some((g: any) => Array.isArray(g.at_risk)) && (
-              <div className="mt-1 overflow-x-auto" style={{ maxWidth: kmPlotW != null ? kmPlotW : "100%" }}>
-                <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5 px-1">Number at risk</div>
-                <table className="text-[11px] w-full">
-                  <tbody>
-                    {kmResult.groups.map((g: any, i: number) => (
-                      <tr key={g.group}>
-                        <td className="pr-3 py-0.5 whitespace-nowrap font-medium" style={{ color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]) }}>
-                          {resolveGroupName(String(g.group))}
-                        </td>
-                        {(g.at_risk ?? []).map((n: number, j: number) => (
-                          <td key={j} className="py-0.5 text-center tabular-nums text-gray-700">{n}</td>
-                        ))}
-                      </tr>
-                    ))}
-                    <tr className="border-t border-gray-100">
-                      <td className="pr-3 pt-0.5 text-[9px] text-gray-400">time</td>
-                      {kmResult.risk_times.map((t: number, j: number) => (
-                        <td key={j} className="pt-0.5 text-center text-[9px] text-gray-400 tabular-nums">{t}</td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            )}
+            {/* Number at risk is embedded in the figure above (Plotly
+                annotations) so it renders on-screen and in every export. */}
 
             {/* Compact Group summary table & Log-rank test */}
             <div className="overflow-hidden rounded-lg border border-gray-200 shadow-sm mt-2">
