@@ -243,6 +243,9 @@ export default function SurvivalAdvancedPanel() {
   const [kmEvent, setKmEvent] = useState("");
   const [kmGroup, setKmGroup] = useState("");
   const [kmStratify, setKmStratify] = useState("");
+  const [kmSurvTimes, setKmSurvTimes] = useState("");          // e.g. "365, 1825"
+  const [kmPairwise, setKmPairwise] = useState(false);
+  const [kmCorrection, setKmCorrection] = useState("holm");    // none|bonferroni|holm|bh
   const [kmResult, setKmResult] = useState<any>(null);
   const [kmLoading, setKmLoading] = useState(false);
   const [kmError, setKmError] = useState<string | null>(null);
@@ -869,12 +872,45 @@ export default function SurvivalAdvancedPanel() {
           <VarSelect label="Group (optional)" value={kmGroup} onChange={setKmGroup} columns={columns} kinds={["categorical"]} />
           <VarSelect label="Stratify by (optional)" value={kmStratify} onChange={setKmStratify} columns={columns} kinds={["categorical"]} />
         </div>
+
+        {/* Landmark survival + pairwise log-rank options */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 font-medium">Survival at time(s) — comma-sep</span>
+            <input value={kmSurvTimes} onChange={(e) => setKmSurvTimes(e.target.value)}
+              placeholder="365, 1825"
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
+            <span className="text-[10px] text-gray-400">In the Duration unit. Days → 1825 = 5-year survival.</span>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-gray-600 pb-2">
+            <input type="checkbox" checked={kmPairwise} onChange={(e) => setKmPairwise(e.target.checked)} className="accent-indigo-500" />
+            Pairwise log-rank (≥3 groups)
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-gray-500 font-medium">Multiplicity correction</span>
+            <select value={kmCorrection} onChange={(e) => setKmCorrection(e.target.value)} disabled={!kmPairwise}
+              className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400 disabled:opacity-50">
+              <option value="none">None (raw p)</option>
+              <option value="holm">Holm</option>
+              <option value="bonferroni">Bonferroni</option>
+              <option value="bh">Benjamini-Hochberg (FDR)</option>
+            </select>
+          </label>
+        </div>
+
         <div className="flex items-center gap-3 flex-wrap">
           <RunButton onClick={async () => {
             if (!kmDuration || !kmEvent) { setKmError("Select duration and event columns"); return; }
             setKmResult(null); setKmError(null); setKmLoading(true);
             try {
-              const res = await runKM({ session_id: sid, duration_col: kmDuration, event_col: kmEvent, group_col: kmGroup || undefined, stratify_col: kmStratify || undefined });
+              const survTimes = kmSurvTimes.split(",").map((s) => parseFloat(s.trim())).filter((x) => !Number.isNaN(x) && x > 0);
+              const res = await runKM({
+                session_id: sid, duration_col: kmDuration, event_col: kmEvent,
+                group_col: kmGroup || undefined, stratify_col: kmStratify || undefined,
+                survival_times: survTimes.length ? survTimes : undefined,
+                pairwise: kmPairwise && !!kmGroup,
+                pairwise_correction: kmCorrection,
+              });
               setKmResult(res.data);
             } catch (e: any) { setKmError(e?.response?.data?.detail ?? "KM failed"); }
             finally { setKmLoading(false); }
@@ -1116,11 +1152,85 @@ export default function SurvivalAdvancedPanel() {
               {/* Log-rank test embedded as a cohesive footer inside the same block */}
               {kmResult.logrank && (
                 <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
-                  <span>Log-rank test</span>
+                  <span>Log-rank test (overall)</span>
                   <span>
                     p = {kmResult.logrank.p < 0.001 ? "<0.001" : kmResult.logrank.p?.toFixed(4)}
                     {kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
                   </span>
+                </div>
+              )}
+
+              {/* Landmark survival-at-time table */}
+              {Array.isArray(kmResult.survival_times) && kmResult.survival_times.length > 0 && (
+                <div className="border-t border-gray-100">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide bg-gray-50">
+                    Survival probability at time point(s)
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-[10px] text-gray-400">
+                        <th className="px-3 py-1 text-left font-medium">Group</th>
+                        {kmResult.survival_times.map((t: number) => (
+                          <th key={t} className="px-3 py-1 text-right font-medium">t = {t}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kmResult.groups?.map((g: any) => (
+                        <tr key={g.group} className="border-t border-gray-50">
+                          <td className="px-3 py-1 text-[11px] text-gray-700">{kmGroupLabels[g.group] ?? g.group}</td>
+                          {(g.survival_at ?? []).map((pt: any, i: number) => (
+                            <td key={i} className="px-3 py-1 text-[11px] text-gray-600 text-right tabular-nums">
+                              {pt.survival != null ? `${(pt.survival * 100).toFixed(1)}%` : "—"}
+                              {pt.ci_low != null && pt.ci_high != null && (
+                                <span className="text-gray-400"> ({(pt.ci_low * 100).toFixed(1)}–{(pt.ci_high * 100).toFixed(1)})</span>
+                              )}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Pairwise log-rank comparisons */}
+              {kmResult.pairwise?.comparisons?.length > 0 && (
+                <div className="border-t border-gray-100">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 flex items-center justify-between">
+                    <span>Pairwise log-rank</span>
+                    {kmResult.pairwise.correction && kmResult.pairwise.correction !== "none" && (
+                      <span className="normal-case font-normal text-gray-400">{kmResult.pairwise.correction} adjusted</span>
+                    )}
+                  </div>
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-[10px] text-gray-400">
+                        <th className="px-3 py-1 text-left font-medium">Comparison</th>
+                        <th className="px-3 py-1 text-right font-medium">p (raw)</th>
+                        {kmResult.pairwise.comparisons.some((c: any) => c.p_adj != null) && (
+                          <th className="px-3 py-1 text-right font-medium">p (adj)</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kmResult.pairwise.comparisons.map((c: any, i: number) => {
+                        const pShow = (p: number | null) => p == null ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
+                        const sig = (c.p_adj ?? c.p) != null && (c.p_adj ?? c.p) < 0.05;
+                        const la = kmGroupLabels[c.group_a] ?? c.group_a;
+                        const lb = kmGroupLabels[c.group_b] ?? c.group_b;
+                        return (
+                          <tr key={i} className={`border-t border-gray-50 ${sig ? "bg-indigo-50/40" : ""}`}>
+                            <td className="px-3 py-1 text-[11px] text-gray-700">{la} vs {lb}</td>
+                            <td className="px-3 py-1 text-[11px] text-gray-600 text-right tabular-nums">{pShow(c.p)}</td>
+                            {kmResult.pairwise.comparisons.some((x: any) => x.p_adj != null) && (
+                              <td className={`px-3 py-1 text-[11px] text-right tabular-nums ${sig ? "font-semibold text-indigo-700" : "text-gray-600"}`}>{pShow(c.p_adj)}</td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
 
