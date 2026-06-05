@@ -133,6 +133,78 @@ function binaryLikeColumns(
   return out.length > 0 ? out : columns;
 }
 
+/**
+ * Compose a publication-style standard interpretation of a KM result
+ * from the returned data: overall log-rank, landmark survival, pairwise
+ * comparisons, and median survival. Returns "" when not enough is present.
+ */
+function buildKmNarrative(
+  km: any,
+  labels: Record<string, string>,
+  groupName: string,
+): string {
+  if (!km || !Array.isArray(km.groups) || km.groups.length === 0) return "";
+  const lab = (g: string) => labels[g] ?? g;
+  const groups = km.groups as any[];
+  const gv = groupName || "group";
+  const pStr = (p: number | null | undefined) =>
+    p == null ? "n/a" : p < 0.001 ? "p<0.001" : `p=${p.toFixed(3)}`;
+  const parts: string[] = [];
+
+  // 1. Overall difference.
+  if (groups.length >= 2 && km.logrank?.p != null) {
+    const sig = km.logrank.p < 0.05;
+    parts.push(
+      `Kaplan–Meier survival ${sig ? "differed significantly" : "did not differ significantly"} ` +
+      `across the ${groups.length} ${gv} groups (log-rank ${pStr(km.logrank.p)}).`,
+    );
+  }
+
+  // 2. Landmark survival at the requested time point(s).
+  if (Array.isArray(km.survival_times) && km.survival_times.length > 0) {
+    for (const t of km.survival_times) {
+      const idx = km.survival_times.indexOf(t);
+      const frags = groups
+        .map((g) => {
+          const pt = (g.survival_at ?? [])[idx];
+          if (!pt || pt.survival == null) return null;
+          return `${(pt.survival * 100).toFixed(1)}% in the ${lab(String(g.group))} group`;
+        })
+        .filter(Boolean);
+      if (frags.length) parts.push(`Estimated survival at t=${t} was ${frags.join(", ")}.`);
+    }
+  }
+
+  // 3. Pairwise comparisons.
+  const pw = km.pairwise?.comparisons as any[] | undefined;
+  if (pw && pw.length) {
+    const useAdj = pw.some((c) => c.p_adj != null);
+    const val = (c: any) => (useAdj ? c.p_adj : c.p);
+    const sig = pw.filter((c) => val(c) != null && val(c) < 0.05);
+    const ns = pw.filter((c) => val(c) != null && val(c) >= 0.05);
+    const fmtPair = (c: any) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${pStr(val(c))}`;
+    const bits: string[] = [];
+    if (sig.length) bits.push(`significant differences were found for ${sig.map(fmtPair).join("; ")}`);
+    if (ns.length) bits.push(`no significant difference between ${ns.map(fmtPair).join("; ")}`);
+    if (bits.length) {
+      parts.push(
+        `Pairwise comparisons (${km.pairwise.correction && km.pairwise.correction !== "none" ? km.pairwise.correction + "-adjusted" : "unadjusted"}) showed ${bits.join(", whereas ")}.`,
+      );
+    }
+  }
+
+  // 4. Median survival.
+  const meds = groups.map((g) => ({ g: lab(String(g.group)), m: g.median_survival }));
+  const reached = meds.filter((x) => x.m != null);
+  if (reached.length === 0 && groups.length > 0) {
+    parts.push("Median survival was not reached in any group.");
+  } else if (reached.length) {
+    parts.push(`Median survival: ${reached.map((x) => `${x.m} (${x.g})`).join(", ")}.`);
+  }
+
+  return parts.join(" ");
+}
+
 function RunButton({ onClick, loading, label }: { onClick: () => void; loading: boolean; label: string }) {
   return (
     <button onClick={onClick} disabled={loading}
@@ -1306,6 +1378,19 @@ export default function SurvivalAdvancedPanel() {
                   </table>
                 </div>
               )}
+
+              {/* Auto-generated standard interpretation */}
+              {(() => {
+                const narrative = buildKmNarrative(kmResult, kmGroupLabels, kmCustomGroupTitle || kmGroup);
+                if (!narrative) return null;
+                return (
+                  <div className="border-t border-gray-100 bg-amber-50/60 px-4 py-3">
+                    <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wide mb-1">Interpretation (auto-generated)</div>
+                    <p className="text-[12px] text-amber-900 leading-relaxed">{narrative}</p>
+                    <p className="text-[9px] text-amber-600/80 mt-1.5 italic">Draft wording — verify against your data and reporting guidelines before publication.</p>
+                  </div>
+                );
+              })()}
 
               {/* Right-click context menu (absolute body mount replacement) */}
               {kmContextMenu && (
