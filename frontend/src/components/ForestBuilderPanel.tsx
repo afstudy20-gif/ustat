@@ -31,6 +31,7 @@ type ForestLayout = {
   sigColor: string;
   nonSigColor: string;
   height: number;
+  width?: number;   // explicit px width; undefined → fill the column
 };
 
 const DEFAULT_LAYOUT: ForestLayout = {
@@ -806,7 +807,31 @@ export default function ForestBuilderPanel() {
           <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
           <div className="flex items-center justify-between pr-16">
             <h3 className="text-sm font-semibold text-gray-700">Forest plot</h3>
-            <span className="text-[10px] text-gray-400 select-none">drag ⌟ bottom-right to resize</span>
+          </div>
+          {/* Size controls — explicit sliders. CSS corner-drag is unreliable
+              over a Plotly plot (its drag layer eats the pointer), so these
+              are the dependable way to resize width + height. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pb-1">
+            <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+              <span className="font-medium">Width</span>
+              <input type="range" min={520} max={1400} step={20}
+                value={layout.width ?? 900}
+                onChange={(e) => setLayout((l) => ({ ...l, width: Number(e.target.value) }))}
+                className="accent-indigo-500" style={{ width: 120 }} />
+              <span className="tabular-nums w-9">{layout.width ?? "auto"}</span>
+              {layout.width != null && (
+                <button onClick={() => setLayout((l) => ({ ...l, width: undefined }))}
+                  className="text-indigo-500 hover:text-indigo-700">auto</button>
+              )}
+            </label>
+            <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+              <span className="font-medium">Height</span>
+              <input type="range" min={220} max={900} step={20}
+                value={layout.height}
+                onChange={(e) => { manualResizeRef.current = true; setLayout((l) => ({ ...l, height: Number(e.target.value) })); }}
+                className="accent-indigo-500" style={{ width: 120 }} />
+              <span className="tabular-nums w-9">{layout.height}</span>
+            </label>
           </div>
           {/* Quick label editor — rename axis / column headers right here
               before exporting (also available in the left controls). */}
@@ -835,14 +860,11 @@ export default function ForestBuilderPanel() {
             ref={boxRef}
             style={{
               height: layout.height,
-              width: "100%",
-              minHeight: 300,
-              minWidth: 600,
+              width: layout.width != null ? layout.width : "100%",
+              minHeight: 220,
               maxWidth: "100%",
-              resize: "both",
               overflow: "hidden",
             }}
-            className="border border-dashed border-gray-200 rounded-lg"
           >
           <div ref={plotRef} style={{ width: "100%", height: "100%" }}>
             <Plot
