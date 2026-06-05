@@ -1390,7 +1390,7 @@ export default function SurvivalAdvancedPanel() {
                     {kmResult.groups.map((g: any, i: number) => (
                       <tr key={g.group}>
                         <td className="pr-3 py-0.5 whitespace-nowrap font-medium" style={{ color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]) }}>
-                          {kmGroupLabels[String(g.group)] ?? g.group}
+                          {resolveGroupName(String(g.group))}
                         </td>
                         {(g.at_risk ?? []).map((n: number, j: number) => (
                           <td key={j} className="py-0.5 text-center tabular-nums text-gray-700">{n}</td>
