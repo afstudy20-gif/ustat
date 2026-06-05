@@ -14,6 +14,7 @@ from scipy import stats as sp
 from scipy.integrate import quad
 
 from services import store
+from services.stat_utils import sorted_groups
 from services.impute import apply_imputation
 
 router = APIRouter()
@@ -224,7 +225,7 @@ def run_bayesian_ttest_ind(df: pd.DataFrame, req: BayesianRequest):
     if not req.predictor:
         raise HTTPException(400, "Grouping predictor variable required.")
     df_clean = df[[req.outcome, req.predictor]].dropna()
-    groups = list(df_clean[req.predictor].unique())
+    groups = sorted_groups(df_clean[req.predictor])
     if len(groups) != 2:
         raise HTTPException(400, f"Grouping variable must have exactly 2 groups. Found: {groups}")
         

@@ -15,6 +15,22 @@ from typing import Any, Optional
 from dataclasses import dataclass, field, asdict
 
 
+def sorted_groups(series: "pd.Series") -> list:
+    """Stable, value-code order for grouped output (Table 1 columns, ANOVA /
+    t-test / Kruskal group rows, crosstab levels, KM curves, etc.).
+
+    Sort by the underlying value code numerically when every distinct value is
+    numeric-coercible, else lexicographically by string. Without this, groups
+    follow their order of appearance in the data, so results come out scrambled
+    relative to the value labels (e.g. 3, 1, 2 instead of 1, 2, 3).
+    """
+    vals = list(pd.Series(series).dropna().unique())
+    try:
+        return sorted(vals, key=lambda v: float(v))
+    except (TypeError, ValueError):
+        return sorted(vals, key=str)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 1. SHARED RESULT CONTRACT
 # ═══════════════════════════════════════════════════════════════════════════════

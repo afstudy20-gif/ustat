@@ -17,7 +17,7 @@ from services.text_generators import (
     r_mannwhitney, r_kruskal,
 )
 from services.stat_utils import (
-    rank_biserial_r, group_summary, epsilon_squared, dunn_test,
+    rank_biserial_r, group_summary, epsilon_squared, dunn_test, sorted_groups,
 )
 
 router = APIRouter()
@@ -52,7 +52,7 @@ class MannWhitneyRequest(BaseModel):
 @router.post("/mannwhitney")
 def mannwhitney(req: MannWhitneyRequest):
     df = _get_df(req.session_id)
-    groups = df[req.group_column].dropna().unique()
+    groups = sorted_groups(df[req.group_column])
     if len(groups) != 2:
         raise HTTPException(status_code=400, detail="Group column must have exactly 2 groups")
     g1 = df[df[req.group_column] == groups[0]][req.column].dropna().astype(float).values
@@ -401,7 +401,7 @@ def _run_roc(req: ROCRequest, df_full: pd.DataFrame):
             raise HTTPException(400, f"Stratification column '{req.stratify_by}' not found.")
 
         strata_results = {}
-        strata_values = req.stratify_values or df[req.stratify_by].dropna().unique().tolist()
+        strata_values = req.stratify_values or sorted_groups(df[req.stratify_by])
 
         for val in strata_values:
             mask = df[req.stratify_by] == val

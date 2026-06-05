@@ -14,6 +14,7 @@ from services.impute import apply_imputation
 from services.stat_utils import (
     partial_eta_squared, check_normality, check_equal_variances,
     group_summary, tukey_hsd, games_howell, adjust_pvalues, cohen_d,
+    sorted_groups,
 )
 
 router = APIRouter()
@@ -65,7 +66,7 @@ def ancova(req: AncovaRequest):
     if len(df) < 10:
         raise HTTPException(400, "Need at least 10 complete rows.")
 
-    groups = df[req.group_col].unique()
+    groups = sorted_groups(df[req.group_col])
     if len(groups) < 2:
         raise HTTPException(400, "Group column must have at least 2 levels.")
 
@@ -397,7 +398,7 @@ def mancova(req: MancovaRequest):
     if len(df) < min_n:
         raise HTTPException(400, f"Need at least {min_n} complete rows for this MANCOVA.")
 
-    groups = sorted(df[req.group_col].unique(), key=str)
+    groups = sorted_groups(df[req.group_col])
     if len(groups) < 2:
         raise HTTPException(400, "Group column must have at least 2 levels.")
 

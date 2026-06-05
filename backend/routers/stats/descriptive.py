@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 from services import store
+from services.stat_utils import sorted_groups
 from services.impute import apply_imputation, missing_info
 
 router = APIRouter()
@@ -637,7 +638,7 @@ def table1(req: Table1Request):
     group_labels = []
     group_ns: dict = {}
     if req.group_column and req.group_column in df.columns:
-        groups = sorted(df[req.group_column].dropna().unique().tolist(), key=str)
+        groups = sorted_groups(df[req.group_column])
         group_labels = [str(g) for g in groups]
         group_ns = {str(g): int((df[req.group_column] == g).sum()) for g in groups}
 
@@ -926,7 +927,7 @@ def weighted_descriptive(req: WeightedDescriptiveRequest):
 
     comparison = None
     if req.group_col:
-        groups = [g for g in df[req.group_col].dropna().unique()]
+        groups = sorted_groups(df[req.group_col])
         if len(groups) == 2:
             col = req.value_cols[0]
             x = pd.to_numeric(df[col], errors="coerce")

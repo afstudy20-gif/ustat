@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from services import store
-from services.stat_utils import cohens_h, adjust_pvalues, group_summary, kendalls_w
+from services.stat_utils import cohens_h, adjust_pvalues, group_summary, kendalls_w, sorted_groups
 
 router = APIRouter()
 
@@ -214,7 +214,7 @@ def two_proportions_ztest(req: TwoProportionsRequest):
             raise HTTPException(400, f"Column '{c}' not found.")
 
     sub = df[[req.column, req.group_column]].dropna()
-    groups = sub[req.group_column].unique()
+    groups = sorted_groups(sub[req.group_column])
     if len(groups) != 2:
         raise HTTPException(400, f"Group column must have exactly 2 groups, found {len(groups)}.")
 

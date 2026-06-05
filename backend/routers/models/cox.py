@@ -257,7 +257,7 @@ def _km_pairwise(df: pd.DataFrame, duration_col: str, event_col: str,
 
 
 def _km_logrank(df: pd.DataFrame, duration_col: str, event_col: str, group_col: str) -> Optional[dict]:
-    groups = df[group_col].unique()
+    groups = _sorted_groups(df[group_col])
     if len(groups) < 2:
         return None
     try:

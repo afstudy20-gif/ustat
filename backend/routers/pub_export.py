@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services import store
+from services.stat_utils import sorted_groups
 
 try:
     from docx import Document
@@ -71,7 +72,7 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
     group_labels = []
     group_ns: dict = {}
     if req.group_column and req.group_column in df.columns:
-        groups = sorted(df[req.group_column].dropna().unique().tolist(), key=str)
+        groups = sorted_groups(df[req.group_column])
         group_labels = [str(g) for g in groups]
         group_ns = {str(g): int((df[req.group_column] == g).sum()) for g in groups}
 

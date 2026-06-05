@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from services import store
+from services.stat_utils import sorted_groups
 
 router = APIRouter()
 
@@ -352,10 +353,11 @@ def subgroup_bar(req: SubgroupBarRequest):
     if len(sub) == 0:
         raise HTTPException(status_code=400, detail="No valid data points found after dropping missing values in grouping variables.")
 
-    # Get unique groups, sorted deterministically (mixed types → string sort).
-    subgroups = sorted(sub[req.subgroup_col].dropna().unique(), key=str)
-    x_vals = sorted(sub[req.xaxis_col].dropna().unique(), key=str)
-    color_groups = sorted(sub[req.color_col].dropna().unique(), key=str) if req.color_col else ["All"]
+    # Get unique groups, ordered by value code (numeric when coercible, else
+    # string) so multi-digit codes (1, 2, 10) don't sort as 1, 10, 2.
+    subgroups = sorted_groups(sub[req.subgroup_col])
+    x_vals = sorted_groups(sub[req.xaxis_col])
+    color_groups = sorted_groups(sub[req.color_col]) if req.color_col else ["All"]
 
     # ── Percentage "success" level — resolved ONCE over the whole subset, not
     # per cell. Picking it per cell (the old behaviour) let different bars

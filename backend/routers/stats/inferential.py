@@ -27,7 +27,7 @@ from services.stat_utils import (
     cohen_d, cohen_d_one_sample, eta_squared, omega_squared,
     cramers_v, odds_ratio_effect,
     check_normality, check_equal_variances, group_summary,
-    tukey_hsd, games_howell,
+    tukey_hsd, games_howell, sorted_groups,
 )
 
 router = APIRouter()
@@ -67,7 +67,7 @@ def ttest(req: TTestRequest):
     col = df[req.column].dropna()
 
     if req.group_column:
-        groups = df[req.group_column].dropna().unique()
+        groups = sorted_groups(df[req.group_column])
         if len(groups) != 2:
             raise HTTPException(status_code=400, detail="Group column must have exactly 2 groups")
         g1 = df[df[req.group_column] == groups[0]][req.column].dropna().astype(float).values
@@ -299,7 +299,7 @@ def tost(req: TOSTRequest):
         if not req.group_column:
             raise HTTPException(status_code=422, detail="independent TOST requires group_column.")
         sub = df[[req.column, req.group_column]].dropna()
-        groups = sub[req.group_column].unique()
+        groups = sorted_groups(sub[req.group_column])
         if len(groups) != 2:
             raise HTTPException(status_code=422, detail=f"group_column must have exactly 2 levels, found {len(groups)}.")
         a = sub.loc[sub[req.group_column] == groups[0], req.column].astype(float)
