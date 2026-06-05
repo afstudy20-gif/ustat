@@ -99,7 +99,12 @@ def _median_follow_up(time: pd.Series, event: pd.Series) -> Optional[dict]:
 
     The naive median of observed times underestimates potential follow-up
     because deaths truncate it. Reverse KM treats censoring as the 'event'
-    and estimates the censoring (= follow-up) distribution. Returns
+    and estimates the censoring (= follow-up) distribution.
+
+    The quantile is read off by **linear interpolation** of the curve
+    crossing — matching R's ``quantile.survfit`` (the convention used in
+    most clinical papers) rather than lifelines' step ``.percentile``
+    (smallest t with S(t) ≤ p), which runs a few days higher. Returns
     median + IQR in the duration unit.
     """
     t = pd.to_numeric(time, errors="coerce")
@@ -115,16 +120,22 @@ def _median_follow_up(time: pd.Series, event: pd.Series) -> Optional[dict]:
         logger.exception("Reverse-KM median follow-up failed")
         return None
 
-    def _pc(p: float) -> Optional[float]:
-        try:
-            v = float(kmf.percentile(p))
-            return v if np.isfinite(v) else None
-        except Exception:
-            return None
+    try:
+        S = kmf.survival_function_.values.ravel().astype(float)
+        T = kmf.survival_function_.index.values.astype(float)
+        order = np.argsort(S)            # ascending S for np.interp
+        Ss, Ts = S[order], T[order]
 
-    return {"median": _safe_float(_pc(0.50)),
-            "q1": _safe_float(_pc(0.75)),   # 25th pct of follow-up
-            "q3": _safe_float(_pc(0.25))}   # 75th pct of follow-up
+        def _pc(p: float) -> Optional[float]:
+            v = float(np.interp(p, Ss, Ts))
+            return v if np.isfinite(v) else None
+
+        return {"median": _safe_float(_pc(0.50)),
+                "q1": _safe_float(_pc(0.75)),   # 25th pct of follow-up
+                "q3": _safe_float(_pc(0.25))}   # 75th pct of follow-up
+    except Exception:
+        logger.exception("Reverse-KM quantile interpolation failed")
+        return None
 
 
 def _km_fit_groups(
