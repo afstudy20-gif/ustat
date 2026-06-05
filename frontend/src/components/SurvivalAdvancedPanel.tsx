@@ -189,6 +189,7 @@ function CoxUniMultiForest({
             yaxis: {
               tickvals: ys, ticktext: rows.map(rowLabel),
               range: [0.3, n + 0.7], showgrid: false, zeroline: false,
+              automargin: true,   // grow left margin to fit long row labels
             },
             shapes: [{ type: "line", x0: 1, x1: 1, yref: "paper", y0: 0, y1: 1,
               line: { color: "#9aa0a6", dash: "dash", width: 1.2 } }],
