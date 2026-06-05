@@ -104,6 +104,24 @@ def test_km_risk_table():
         assert ar[0] >= ar[1] >= ar[2] >= ar[3]
 
 
+def test_km_censor_points():
+    df = _make_three_groups(seed=6)
+    sid = _seed(df, "km_cens")
+    r = client.post("/api/models/survival/km", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "group_col": "ldl_grp", "include_censors": True,
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    # At least one group should carry censor points (data has censoring).
+    total = sum(len(g.get("censors", [])) for g in d["groups"])
+    assert total > 0
+    for g in d["groups"]:
+        for pt in g.get("censors", []):
+            assert pt["time"] >= 0
+            assert 0.0 <= pt["survival"] <= 1.0
+
+
 def test_km_pairwise_skipped_for_two_groups():
     df = _make_three_groups(seed=3)
     df = df[df["ldl_grp"] != 2]  # leave 2 groups

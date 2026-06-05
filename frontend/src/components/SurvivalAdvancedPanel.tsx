@@ -372,6 +372,7 @@ export default function SurvivalAdvancedPanel() {
   const [kmPlotW, setKmPlotW] = useState<number | undefined>(undefined); // plot width px (undefined = fill)
   const [kmRiskTable, setKmRiskTable] = useState(false);              // number-at-risk table
   const [kmColorblind, setKmColorblind] = useState(false);           // Okabe-Ito + line styles
+  const [kmShowCensors, setKmShowCensors] = useState(false);         // censor tick marks
   const [kmGroupColors, setKmGroupColors] = useState<Record<string, string>>({}); // per-group color
   const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"|"plotTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
@@ -383,20 +384,21 @@ export default function SurvivalAdvancedPanel() {
     return () => window.clearTimeout(id);
   }, [kmPlotW, kmPlotH]);
 
-  // When the risk table is enabled and the current result lacks at-risk
-  // counts, derive tick times from the curves' x-max and re-fetch with
-  // risk_times so the number-at-risk row can render aligned to the axis.
+  // Lazily augment the current KM result when the risk-table or censor-mark
+  // toggles are switched on after the run: derive tick times from the
+  // curves' x-max and re-fetch with risk_times / include_censors so the
+  // extras render without forcing the user to re-run.
   useEffect(() => {
-    if (!kmRiskTable || !kmResult?.groups?.length) return;
-    const hasRisk = kmResult.groups.some((g: any) => Array.isArray(g.at_risk));
-    if (hasRisk) return;
+    if (!kmResult?.groups?.length) return;
+    const needRisk = kmRiskTable && !kmResult.groups.some((g: any) => Array.isArray(g.at_risk));
+    const needCens = kmShowCensors && !kmResult.groups.some((g: any) => Array.isArray(g.censors));
+    if (!needRisk && !needCens) return;
     let xmax = 0;
     for (const g of kmResult.groups) {
       const c = g.curve;
       if (c?.length) xmax = Math.max(xmax, c[c.length - 1].time);
     }
     const times = niceRiskTimes(xmax);
-    if (!times.length) return;
     let cancelled = false;
     (async () => {
       try {
@@ -405,14 +407,15 @@ export default function SurvivalAdvancedPanel() {
           group_col: kmGroup || undefined, stratify_col: kmStratify || undefined,
           survival_times: kmResult.survival_times?.length ? kmResult.survival_times : undefined,
           pairwise: !!kmResult.pairwise, pairwise_correction: kmCorrection,
-          risk_times: times,
+          risk_times: kmRiskTable && times.length ? times : undefined,
+          include_censors: kmShowCensors,
         });
         if (!cancelled) setKmResult(res.data);
-      } catch { /* non-fatal — table just won't show */ }
+      } catch { /* non-fatal — extras just won't show */ }
     })();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kmRiskTable, kmResult]);
+  }, [kmRiskTable, kmShowCensors, kmResult]);
 
   // Cox state
   const [coxDuration, setCoxDuration] = useState("");
@@ -1077,6 +1080,7 @@ export default function SurvivalAdvancedPanel() {
                 survival_times: survTimes.length ? survTimes : undefined,
                 pairwise: kmPairwise && !!kmGroup,
                 pairwise_correction: kmCorrection,
+                include_censors: kmShowCensors,
               });
               setKmResult(res.data);
             } catch (e: any) { setKmError(e?.response?.data?.detail ?? "KM failed"); }
@@ -1227,6 +1231,10 @@ export default function SurvivalAdvancedPanel() {
                 <input type="checkbox" checked={kmColorblind} onChange={(e) => setKmColorblind(e.target.checked)} className="accent-indigo-500" />
                 Colour-blind + line styles
               </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={kmShowCensors} onChange={(e) => setKmShowCensors(e.target.checked)} className="accent-indigo-500" />
+                Censor marks
+              </label>
               {(kmCustomPlotTitle || Object.keys(kmGroupColors).length > 0 || Object.keys(kmGroupLabels).length > 0) && (
                 <button
                   onClick={() => { setKmCustomPlotTitle(""); setKmGroupColors({}); setKmGroupLabels({}); }}
@@ -1262,18 +1270,35 @@ export default function SurvivalAdvancedPanel() {
 
             <div className="relative" ref={kmPlotRef} style={{ width: kmPlotW != null ? kmPlotW : "100%", height: kmPlotH, maxWidth: "100%" }}>
               <Plot
-                data={kmResult.groups.map((g: any, i: number) => ({
-                  x: g.curve.map((p: any) => p.time),
-                  y: g.curve.map((p: any) => p.survival),
-                  type: "scatter", mode: "lines",
-                  name: legendLabel(g),
-                  line: {
-                    width: traceDefaults.lineWidth,
-                    color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]),
-                    shape: "hv",
-                    ...(kmColorblind ? { dash: KM_DASHES[i % KM_DASHES.length] } : {}),
-                  },
-                }))}
+                data={[
+                  ...kmResult.groups.map((g: any, i: number) => ({
+                    x: g.curve.map((p: any) => p.time),
+                    y: g.curve.map((p: any) => p.survival),
+                    type: "scatter", mode: "lines",
+                    name: legendLabel(g),
+                    line: {
+                      width: traceDefaults.lineWidth,
+                      color: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]),
+                      shape: "hv",
+                      ...(kmColorblind ? { dash: KM_DASHES[i % KM_DASHES.length] } : {}),
+                    },
+                  })),
+                  // Censor tick marks ('+') overlaid on each curve.
+                  ...(kmShowCensors
+                    ? kmResult.groups.flatMap((g: any, i: number) => {
+                        if (!Array.isArray(g.censors) || g.censors.length === 0) return [];
+                        const c = kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]);
+                        return [{
+                          x: g.censors.map((p: any) => p.time),
+                          y: g.censors.map((p: any) => p.survival),
+                          type: "scatter", mode: "markers",
+                          name: `${legendLabel(g)} (censored)`,
+                          marker: { symbol: "cross-thin-open", size: 7, color: c, line: { width: 1.4, color: c } },
+                          hoverinfo: "x", showlegend: false,
+                        }];
+                      })
+                    : []),
+                ]}
                 layout={{
                   ...baseLayout,
                   title: { text: titleText, font: { color: "#374151", size: 14 } },
