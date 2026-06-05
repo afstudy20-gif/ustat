@@ -53,6 +53,19 @@ def test_cox_uni_multi_shape():
         assert row["adjusted"] is not None
 
 
+def test_cox_uni_multi_reference_override():
+    sid = _seed()
+    r = client.post("/api/models/survival/cox_uni_multi", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "predictors": ["ldl_grp"], "references": {"ldl_grp": "3"},
+    })
+    assert r.status_code == 200, r.text
+    cat = [row for row in r.json()["rows"] if row["kind"] == "category"]
+    # Reference is now 3; contrasts are 1 and 2.
+    assert all(row["reference"] == "3" for row in cat)
+    assert {row["category"] for row in cat} == {"1", "2"}
+
+
 def test_cox_uni_multi_rejects_non_binary_event():
     sid = _seed()
     r = client.post("/api/models/survival/cox_uni_multi", json={

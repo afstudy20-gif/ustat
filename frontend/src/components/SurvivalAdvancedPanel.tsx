@@ -36,11 +36,14 @@ interface UMRow {
 }
 
 function CoxUniMultiForest({
-  result, columns, plotRef, onClose,
+  result, columns, plotRef, refs, loading, onChangeRef, onClose,
 }: {
   result: { rows: UMRow[]; n: number; n_events: number };
   columns: { name: string; value_labels?: Record<string, string> }[];
   plotRef: React.RefObject<any>;
+  refs: Record<string, string>;
+  loading: boolean;
+  onChangeRef: (predictor: string, level: string) => void;
   onClose: () => void;
 }) {
   const rows = result.rows;
@@ -60,6 +63,22 @@ function CoxUniMultiForest({
     umLabels[r.term]?.trim() ? umLabels[r.term] : autoLabel(r);
   const fmtHR = (e: UMRow["unadjusted"]): string =>
     e ? `${e.hr.toFixed(2)} (${e.hr_ci_low.toFixed(2)}–${e.hr_ci_high.toFixed(2)})` : "—";
+
+  // Categorical predictors and their selectable levels (for reference choice).
+  const catPreds = Array.from(new Set(rows.filter((r) => r.kind === "category").map((r) => r.predictor)));
+  const levelsOf = (p: string): string[] => {
+    const set = new Set<string>();
+    rows.filter((r) => r.predictor === p && r.kind === "category").forEach((r) => {
+      if (r.reference) set.add(r.reference);
+      if (r.category) set.add(r.category);
+    });
+    return Array.from(set).sort((a, b) => {
+      const x = Number(a), y = Number(b);
+      return !isNaN(x) && !isNaN(y) ? x - y : a.localeCompare(b);
+    });
+  };
+  const currentRef = (p: string): string =>
+    refs[p] ?? (rows.find((r) => r.predictor === p && r.kind === "category")?.reference ?? "");
 
   // y descending so the first row sits at the top.
   const n = rows.length;
@@ -174,6 +193,31 @@ function CoxUniMultiForest({
           ))}
         </div>
       </div>
+
+      {/* Reference level per categorical predictor — align figure with Methods/text */}
+      {catPreds.length > 0 && (
+        <div className="px-3 pt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          <span className="text-[10px] text-gray-400 inline-flex items-center">Reference group
+            <Tip wide text="Choose the comparison (reference) level for each categorical predictor. All HRs are reported versus this level — set it to match your manuscript's Methods (e.g. LDL-C >130 mg/dL as reference so the headline '<100 vs >130' contrast appears). Refits both models on change." />
+          </span>
+          {catPreds.map((p) => (
+            <label key={p} className="flex items-center gap-1 text-[10px] text-gray-500">
+              <span className="font-medium">{p}</span>
+              <select
+                value={currentRef(p)}
+                disabled={loading}
+                onChange={(e) => onChangeRef(p, e.target.value)}
+                className="select text-[11px] py-0.5 disabled:opacity-50"
+              >
+                {levelsOf(p).map((lvl) => (
+                  <option key={lvl} value={lvl}>{vlab(p, lvl)}</option>
+                ))}
+              </select>
+            </label>
+          ))}
+          {loading && <span className="text-[10px] text-indigo-500">refitting…</span>}
+        </div>
+      )}
 
       <div className="relative p-2" ref={plotRef}
         style={{ width: umW != null ? umW : "100%", height: umH, maxWidth: "100%" }}>
@@ -633,7 +677,20 @@ export default function SurvivalAdvancedPanel() {
   // Unadjusted-vs-adjusted paired forest (publication "Figure 4")
   const [coxUMResult, setCoxUMResult] = useState<any>(null);
   const [coxUMLoading, setCoxUMLoading] = useState(false);
+  const [coxUMRefs, setCoxUMRefs] = useState<Record<string, string>>({});  // per-predictor reference level
   const coxUMRef = useRef<any>(null);
+
+  const runCoxUMForest = async (refs: Record<string, string>) => {
+    setCoxUMLoading(true);
+    try {
+      const res = await runCoxUniMulti({
+        session_id: sid, duration_col: coxDuration, event_col: coxEvent,
+        predictors: coxPreds, references: Object.keys(refs).length ? refs : undefined,
+      });
+      setCoxUMResult(res.data);
+    } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Forest failed"); }
+    finally { setCoxUMLoading(false); }
+  };
 
 
   // Time-horizon sensitivity (Cox at multiple administrative-censoring windows)
@@ -2146,16 +2203,7 @@ export default function SurvivalAdvancedPanel() {
           {coxDuration && coxEvent && coxPreds.length > 0 && (
             <button
               disabled={coxUMLoading}
-              onClick={async () => {
-                setCoxUMLoading(true);
-                try {
-                  const res = await runCoxUniMulti({
-                    session_id: sid, duration_col: coxDuration, event_col: coxEvent, predictors: coxPreds,
-                  });
-                  setCoxUMResult(res.data);
-                } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Forest failed"); }
-                finally { setCoxUMLoading(false); }
-              }}
+              onClick={() => runCoxUMForest(coxUMRefs)}
               className="px-3 py-1.5 text-xs font-medium border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors"
             >
               {coxUMLoading ? "Fitting…" : "📊 Unadjusted vs Adjusted forest"}
@@ -2170,6 +2218,14 @@ export default function SurvivalAdvancedPanel() {
             result={coxUMResult}
             columns={columns}
             plotRef={coxUMRef}
+            refs={coxUMRefs}
+            loading={coxUMLoading}
+            onChangeRef={(predictor, level) => {
+              const next = { ...coxUMRefs };
+              if (level) next[predictor] = level; else delete next[predictor];
+              setCoxUMRefs(next);
+              runCoxUMForest(next);
+            }}
             onClose={() => setCoxUMResult(null)}
           />
         )}

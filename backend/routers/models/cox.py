@@ -1662,9 +1662,13 @@ class CoxUniMultiRequest(BaseModel):
     duration_col: str
     event_col: str
     predictors: List[str]
+    # Optional per-predictor reference level (value code as string) for
+    # categorical predictors. Default = lowest value code.
+    references: Optional[dict] = None
 
 
-def _encode_cox_predictor(series: pd.Series, name: str, force_categorical: bool = False) -> Tuple[pd.DataFrame, list]:
+def _encode_cox_predictor(series: pd.Series, name: str, force_categorical: bool = False,
+                          reference: Optional[str] = None) -> Tuple[pd.DataFrame, list]:
     """Encode one predictor for Cox: numeric → single column; categorical →
     indicator columns vs the first (reference) level. Returns (design, terms)
     where each term carries display metadata for the forest row.
@@ -1704,11 +1708,12 @@ def _encode_cox_predictor(series: pd.Series, name: str, force_categorical: bool 
     levels = [_lvl(v) for v in sorted_groups(series)]
     if len(levels) < 2:
         return pd.DataFrame(index=series.index), []
-    ref = levels[0]
+    ref = _lvl(reference) if reference is not None and _lvl(reference) in levels else levels[0]
+    contrasts = [lvl for lvl in levels if lvl != ref]
     s = series.map(_lvl)
     design = pd.DataFrame(index=series.index)
     terms = []
-    for lvl in levels[1:]:
+    for lvl in contrasts:
         term = f"{name}={lvl}"
         design[term] = (s == lvl).astype(float)
         terms.append({
@@ -1758,7 +1763,8 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
         if p not in df_full.columns:
             raise HTTPException(status_code=422, detail=f"Predictor '{p}' not in dataset.")
         force_cat = bool((meta.get(p, {}) or {}).get("value_labels")) or kinds.get(p) == "categorical"
-        design, terms = _encode_cox_predictor(df_full[p], p, force_categorical=force_cat)
+        ref = (req.references or {}).get(p)
+        design, terms = _encode_cox_predictor(df_full[p], p, force_categorical=force_cat, reference=ref)
         if not terms:
             continue
         encoded[p] = design
