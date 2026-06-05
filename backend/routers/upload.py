@@ -24,6 +24,41 @@ _DATE_PATTERNS = [
     re.compile(r"^\d{4}[/\-.]\d{1,2}[/\-.]\d{1,2}[T ]\d{1,2}:\d{2}"),   # 2024-01-02T13:45
 ]
 
+_LEADING_ZERO_RE = re.compile(r"^0\d")  # 0123 — keep as text (likely an ID code)
+
+
+def coerce_numeric_objects(df: pd.DataFrame) -> pd.DataFrame:
+    """Restore numeric dtype for object columns whose every non-empty value is
+    numeric-coercible.
+
+    JSON session round-trips serialise with ``default_handler=str`` and some
+    imports (Excel/SPSS with stray cells) leave genuinely-numeric columns as
+    strings. Those then misclassify as 'text' in the Data Dictionary even
+    though the data is numeric. We only convert when it is lossless — every
+    non-empty value parses as a number — and we skip values with a leading
+    zero (e.g. '0123') that are almost certainly identifier codes, not numbers.
+
+    Mutates a copy and returns it; the input is left untouched.
+    """
+    out = df.copy()
+    for col in out.columns:
+        s = out[col]
+        if s.dtype != object:
+            continue
+        as_str = s.astype(str).str.strip()
+        meaningful = s.notna() & (as_str != "") & (as_str.str.lower() != "nan")
+        n = int(meaningful.sum())
+        if n == 0:
+            continue
+        # Preserve identifier-like codes with leading zeros.
+        if as_str[meaningful].str.match(_LEADING_ZERO_RE).any():
+            continue
+        coerced = pd.to_numeric(s, errors="coerce")
+        if int(coerced[meaningful].notna().sum()) == n:
+            out[col] = coerced
+    return out
+
+
 def _detect_kind(series: pd.Series) -> str:
     """Detect column kind with date/time and binary auto-detection."""
     import datetime as _dt

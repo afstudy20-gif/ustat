@@ -389,6 +389,11 @@ async def load_session(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Missing 'data' key in session file")
 
     df = pd.DataFrame(payload["data"])
+    # JSON round-trips serialise numbers with default_handler=str, so genuinely
+    # numeric columns can come back as strings (object dtype) and then show as
+    # 'text'. Losslessly restore numeric dtype where every value parses.
+    from routers.upload import coerce_numeric_objects
+    df = coerce_numeric_objects(df)
     new_session_id = str(uuid.uuid4())
     store.save(new_session_id, df)
 
@@ -405,9 +410,25 @@ async def load_session(file: UploadFile = File(...)):
     # Restore user-driven kind overrides (v1.1+ session files). For older v1.0
     # files we fall back to the "columns" array on the payload, which already
     # carries the kind the user saw at save time.
+    # Only fall back to the columns array for genuine v1.0 files that LACK a
+    # kind_overrides block. v1.1+ files always carry the key (possibly an empty
+    # dict when the user set no overrides) — using an empty dict as the trigger
+    # would wrongly pin every auto-detected kind, including stale 'text'/
+    # 'categorical' on numeric columns, defeating the lossless coercion above.
     kind_overrides = payload.get("kind_overrides")
-    if not kind_overrides and isinstance(payload.get("columns"), list):
+    if kind_overrides is None and isinstance(payload.get("columns"), list):
         kind_overrides = {c["name"]: c["kind"] for c in payload["columns"] if c.get("name") and c.get("kind")}
+        # Drop stale auto-detected kinds that conflict with a now-numeric column
+        # (object-typed numbers were classified text/categorical at save time).
+        kind_overrides = {
+            k: v for k, v in kind_overrides.items()
+            if not (
+                v in ("text", "categorical")
+                and k in df.columns
+                and pd.api.types.is_numeric_dtype(df[k])
+                and df[k].dropna().nunique() > 2
+            )
+        }
     if kind_overrides:
         store.set_kind_overrides(new_session_id, kind_overrides)
 
