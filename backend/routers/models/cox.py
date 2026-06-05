@@ -138,6 +138,21 @@ def _median_follow_up(time: pd.Series, event: pd.Series) -> Optional[dict]:
         return None
 
 
+def _sorted_groups(series: pd.Series) -> list:
+    """Stable group order for KM curves / at-risk rows / legend.
+
+    Sort by the underlying value code (1, 2, 3 …) numerically when every group
+    is numeric-coercible, else lexicographically. Without this, groups follow
+    their order of appearance in the data, so the curves/legend/at-risk rows
+    come out scrambled relative to the value labels (1=<100, 2=100–130, 3=>130).
+    """
+    vals = list(pd.Series(series).dropna().unique())
+    try:
+        return sorted(vals, key=lambda v: float(v))
+    except (TypeError, ValueError):
+        return sorted(vals, key=str)
+
+
 def _km_fit_groups(
     df: pd.DataFrame,
     duration_col: str,
@@ -147,7 +162,7 @@ def _km_fit_groups(
     risk_times: Optional[List[float]] = None,
     include_censors: bool = False,
 ) -> list:
-    groups = df[group_col].unique() if group_col else [None]
+    groups = _sorted_groups(df[group_col]) if group_col else [None]
     results = []
     for grp in groups:
         subset = df[df[group_col] == grp] if group_col else df
@@ -208,7 +223,7 @@ def _km_pairwise(df: pd.DataFrame, duration_col: str, event_col: str,
     difference (e.g. '<100 vs 100–130, p=0.003').
     """
     from itertools import combinations
-    groups = sorted(df[group_col].dropna().unique(), key=str)
+    groups = _sorted_groups(df[group_col])
     if len(groups) < 3:
         return None  # pairwise only meaningful with ≥3 groups
     comparisons = []

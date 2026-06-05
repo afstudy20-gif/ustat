@@ -38,6 +38,24 @@ def _make_three_groups(seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def test_km_groups_sorted_by_value_code():
+    # Data deliberately ordered 3,1,2 so 'order of appearance' would scramble.
+    rng = np.random.default_rng(7)
+    rows = []
+    for g in (3, 1, 2):  # scrambled on purpose
+        for _ in range(40):
+            rows.append({"time": float(rng.uniform(50, 900)), "event": 1, "ldl_grp": g})
+    df = pd.DataFrame(rows)
+    sid = _seed(df, "km_order")
+    r = client.post("/api/models/survival/km", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "group_col": "ldl_grp", "risk_times": [0, 365],
+    })
+    assert r.status_code == 200, r.text
+    order = [g["group"] for g in r.json()["groups"]]
+    assert order == ["1", "2", "3"], order
+
+
 def test_km_survival_at_time():
     df = _make_three_groups(seed=1)
     sid = _seed(df, "km_survat")
