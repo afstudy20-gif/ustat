@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -20,6 +20,137 @@ function Section({ title, description, children }: { title: string; description:
         <p className="text-[11px] text-gray-400 mt-0.5">{description}</p>
       </div>
       <div className="px-5 py-4 space-y-4">{children}</div>
+    </div>
+  );
+}
+
+// ── Unadjusted-vs-adjusted paired Cox forest (publication "Figure 4") ─────────
+const UM_GREY = "#9aa0a6";
+const UM_BLUE = "#1f4e79";
+
+interface UMRow {
+  term: string; predictor: string; kind: string;
+  category: string | null; reference: string | null;
+  unadjusted: { hr: number; hr_ci_low: number; hr_ci_high: number; p: number } | null;
+  adjusted: { hr: number; hr_ci_low: number; hr_ci_high: number; p: number } | null;
+}
+
+function CoxUniMultiForest({
+  result, columns, plotRef, onClose,
+}: {
+  result: { rows: UMRow[]; n: number; n_events: number };
+  columns: { name: string; value_labels?: Record<string, string> }[];
+  plotRef: React.RefObject<any>;
+  onClose: () => void;
+}) {
+  const rows = result.rows;
+  const vlab = (pname: string, code: string | null): string => {
+    if (code == null) return "";
+    const meta = columns.find((c) => c.name === pname);
+    return meta?.value_labels?.[String(code)] ?? String(code);
+  };
+  const rowLabel = (r: UMRow): string =>
+    r.kind === "category"
+      ? `${vlab(r.predictor, r.category)} (vs ${vlab(r.predictor, r.reference)})`
+      : r.predictor;
+  const fmtHR = (e: UMRow["unadjusted"]): string =>
+    e ? `${e.hr.toFixed(2)} (${e.hr_ci_low.toFixed(2)}–${e.hr_ci_high.toFixed(2)})` : "—";
+
+  // y descending so the first row sits at the top.
+  const n = rows.length;
+  const ys = rows.map((_, i) => n - i);
+  const OFF = 0.18;
+
+  // x-range from all finite estimates.
+  const xs: number[] = [];
+  for (const r of rows) {
+    for (const e of [r.unadjusted, r.adjusted]) {
+      if (e) { xs.push(e.hr_ci_low, e.hr_ci_high, e.hr); }
+    }
+  }
+  const xmin = xs.length ? Math.min(...xs) : 0.5;
+  const xmax = xs.length ? Math.max(...xs) : 2;
+  const TICKS = [0.1, 0.25, 0.5, 1, 2, 4, 8, 16].filter((t) => t >= xmin * 0.6 && t <= xmax * 1.6);
+
+  const mkTrace = (which: "unadjusted" | "adjusted") => {
+    const xs2: number[] = [], ys2: number[] = [], plus: number[] = [], minus: number[] = [];
+    rows.forEach((r, i) => {
+      const e = r[which];
+      if (!e) return;
+      xs2.push(e.hr);
+      ys2.push(ys[i] + (which === "unadjusted" ? OFF : -OFF));
+      plus.push(e.hr_ci_high - e.hr);
+      minus.push(e.hr - e.hr_ci_low);
+    });
+    return {
+      x: xs2, y: ys2, type: "scatter", mode: "markers",
+      name: which === "unadjusted" ? "Unadjusted" : "Adjusted",
+      marker: {
+        symbol: which === "unadjusted" ? "circle" : "square",
+        size: which === "unadjusted" ? 11 : 10,
+        color: which === "unadjusted" ? UM_GREY : UM_BLUE,
+      },
+      error_x: {
+        type: "data", symmetric: false, array: plus, arrayminus: minus,
+        color: which === "unadjusted" ? UM_GREY : UM_BLUE, thickness: 2, width: 4,
+      },
+    } as any;
+  };
+
+  // Right-hand numeric columns as paper-x annotations.
+  const ann: any[] = [
+    { xref: "paper", yref: "paper", x: 1.02, y: 1.0, xanchor: "left", yanchor: "bottom",
+      text: "<b>Unadjusted</b>", showarrow: false, font: { color: UM_GREY, size: 12 } },
+    { xref: "paper", yref: "paper", x: 1.30, y: 1.0, xanchor: "left", yanchor: "bottom",
+      text: "<b>Adjusted</b>", showarrow: false, font: { color: UM_BLUE, size: 12 } },
+  ];
+  rows.forEach((r, i) => {
+    ann.push({ xref: "paper", yref: "y", x: 1.02, y: ys[i], xanchor: "left", yanchor: "middle",
+      text: fmtHR(r.unadjusted), showarrow: false, font: { color: UM_GREY, size: 11 } });
+    ann.push({ xref: "paper", yref: "y", x: 1.30, y: ys[i], xanchor: "left", yanchor: "middle",
+      text: fmtHR(r.adjusted), showarrow: false, font: { color: UM_BLUE, size: 11 } });
+  });
+
+  const height = Math.max(260, n * 56 + 110);
+
+  return (
+    <div className="rounded-lg border border-gray-200 mt-2">
+      <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
+        <p className="text-xs font-semibold text-gray-600">
+          Unadjusted vs Adjusted hazard ratios — paired forest
+          <span className="ml-2 font-normal text-gray-400">n = {result.n}, {result.n_events} events</span>
+          <Tip wide text="Grey circle = univariable (unadjusted) HR; blue square = multivariable (adjusted) HR, both with 95% CI. Labels use the column's value labels. Export (↓ top-right) for the manuscript; the figure title is intentionally omitted so you can supply it as the figure legend." />
+        </p>
+        <button onClick={onClose} className="text-[10px] text-gray-400 hover:text-red-500">✕ Close</button>
+      </div>
+      <div className="relative p-2" ref={plotRef} style={{ width: "100%", height }}>
+        <Plot
+          data={[mkTrace("unadjusted"), mkTrace("adjusted")]}
+          layout={{
+            paper_bgcolor: "#ffffff", plot_bgcolor: "#ffffff",
+            xaxis: {
+              type: "log", title: { text: "Hazard ratio (log scale)" },
+              tickvals: TICKS, ticktext: TICKS.map(String),
+              zeroline: false,
+            },
+            yaxis: {
+              tickvals: ys, ticktext: rows.map(rowLabel),
+              range: [0.3, n + 1.0], showgrid: false, zeroline: false,
+            },
+            shapes: [{ type: "line", x0: 1, x1: 1, yref: "paper", y0: 0, y1: 1,
+              line: { color: "#9aa0a6", dash: "dash", width: 1.2 } }],
+            annotations: ann,
+            showlegend: true,
+            legend: { orientation: "h", x: 0.0, y: -0.18 / (n || 1) - 0.08, font: { size: 11 } },
+            margin: { t: 24, r: 230, b: 52, l: 220 },
+            autosize: true,
+          }}
+          config={{ responsive: true }}
+          style={{ width: "100%", height: "100%" }}
+          useResizeHandler
+        />
+        <PlotExporter plotRef={plotRef} title="Figure_unadjusted_vs_adjusted_HR" />
+      </div>
     </div>
   );
 }
@@ -445,6 +576,10 @@ export default function SurvivalAdvancedPanel() {
   // Cox univariable screening state
   const [coxScanResult, setCoxScanResult] = useState<any[]>([]);
   const [coxScanLoading, setCoxScanLoading] = useState(false);
+  // Unadjusted-vs-adjusted paired forest (publication "Figure 4")
+  const [coxUMResult, setCoxUMResult] = useState<any>(null);
+  const [coxUMLoading, setCoxUMLoading] = useState(false);
+  const coxUMRef = useRef<any>(null);
 
 
   // Time-horizon sensitivity (Cox at multiple administrative-censoring windows)
@@ -1952,8 +2087,38 @@ export default function SurvivalAdvancedPanel() {
               <Tip wide text="Fits a separate Cox PH model for each predictor on its own (Surv(time,event) ~ X), then ranks them by p-value. Use it to triage which candidates are worth carrying into the multivariable model. Common rule: take everything with univariable p < 0.10 forward and let the multivariable fit decide what stays — variables can lose or gain significance once you adjust for confounders (e.g. SMOKER univariable p ≈ 1.0 but p < 0.001 once AGE is controlled for)." />
             </button>
           )}
+
+          {/* Paired unadjusted-vs-adjusted forest (publication Figure 4) */}
+          {coxDuration && coxEvent && coxPreds.length > 0 && (
+            <button
+              disabled={coxUMLoading}
+              onClick={async () => {
+                setCoxUMLoading(true);
+                try {
+                  const res = await runCoxUniMulti({
+                    session_id: sid, duration_col: coxDuration, event_col: coxEvent, predictors: coxPreds,
+                  });
+                  setCoxUMResult(res.data);
+                } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Forest failed"); }
+                finally { setCoxUMLoading(false); }
+              }}
+              className="px-3 py-1.5 text-xs font-medium border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+            >
+              {coxUMLoading ? "Fitting…" : "📊 Unadjusted vs Adjusted forest"}
+              <Tip wide text="Builds the publication-standard paired forest: each row shows the predictor's HR alone (unadjusted, univariable Cox — grey circle) next to its HR adjusted for every other predictor (multivariable Cox — blue square), with 95% CIs. Multi-level categorical predictors (those with value labels, e.g. LDL groups) expand to one contrast row per non-reference level; binary predictors (sex, diabetes) stay a single HR; continuous predictors report a per-unit HR. Large unadjusted→adjusted shifts flag confounding." />
+            </button>
+          )}
           {coxError && <p className="text-xs text-red-500">{coxError}</p>}
         </div>
+
+        {coxUMResult?.rows?.length > 0 && (
+          <CoxUniMultiForest
+            result={coxUMResult}
+            columns={columns}
+            plotRef={coxUMRef}
+            onClose={() => setCoxUMResult(null)}
+          />
+        )}
 
         {/* Cox univariable scan results */}
         {coxScanResult.length > 0 && (
