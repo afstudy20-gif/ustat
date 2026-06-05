@@ -13,6 +13,7 @@ from lifelines import KaplanMeierFitter, CoxPHFitter
 from lifelines.statistics import logrank_test, multivariate_logrank_test
 
 from services import store
+from services.stat_utils import sorted_groups
 from services.impute import apply_imputation
 from services.assumptions import (
     check_cox_assumptions_from_ph_test,
@@ -1651,4 +1652,171 @@ async def cox_rcs(req: CoxRCSRequest):
         "interaction": interaction_result,
         "curves_1d": curves_1d,
         "surface_2d": surface_2d,
+    }
+
+
+# ── Unadjusted vs Adjusted Cox forest (paired univariable + multivariable) ─────
+
+class CoxUniMultiRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    predictors: List[str]
+
+
+def _encode_cox_predictor(series: pd.Series, name: str, force_categorical: bool = False) -> Tuple[pd.DataFrame, list]:
+    """Encode one predictor for Cox: numeric → single column; categorical →
+    indicator columns vs the first (reference) level. Returns (design, terms)
+    where each term carries display metadata for the forest row.
+
+    force_categorical: treat as multi-level categorical even if the dtype is
+    numeric (set when the column has value labels or a categorical kind
+    override, e.g. LDL groups coded 1/2/3). Binary numeric columns (≤2 levels,
+    e.g. sex/diabetes) stay a single HR term regardless.
+    """
+    numeric = pd.api.types.is_numeric_dtype(series)
+    if not numeric:
+        coerced = pd.to_numeric(series, errors="coerce")
+        if not force_categorical and coerced.notna().mean() >= 0.8 and coerced.dropna().nunique() > 2:
+            series = coerced
+            numeric = True
+
+    treat_cat = (not numeric) or (force_categorical and series.dropna().nunique() > 2)
+
+    if numeric and not treat_cat:
+        col = pd.to_numeric(series, errors="coerce").astype(float)
+        design = pd.DataFrame({name: col})
+        return design, [{
+            "term": name, "predictor": name, "kind": "numeric",
+            "category": None, "reference": None,
+        }]
+
+    def _lvl(v) -> str:
+        # Normalise integer-valued codes so "1.0" matches value-label key "1".
+        try:
+            f = float(v)
+            if f.is_integer():
+                return str(int(f))
+        except (TypeError, ValueError):
+            pass
+        return str(v)
+
+    levels = [_lvl(v) for v in sorted_groups(series)]
+    if len(levels) < 2:
+        return pd.DataFrame(index=series.index), []
+    ref = levels[0]
+    s = series.map(_lvl)
+    design = pd.DataFrame(index=series.index)
+    terms = []
+    for lvl in levels[1:]:
+        term = f"{name}={lvl}"
+        design[term] = (s == lvl).astype(float)
+        terms.append({
+            "term": term, "predictor": name, "kind": "category",
+            "category": lvl, "reference": ref,
+        })
+    return design, terms
+
+
+def _cox_term_stats(cph: "CoxPHFitter", term: str) -> Optional[dict]:
+    try:
+        row = cph.summary.loc[term]
+    except (KeyError, Exception):
+        return None
+    return {
+        "hr": _safe_float(row["exp(coef)"]),
+        "hr_ci_low": _safe_float(row["exp(coef) lower 95%"]),
+        "hr_ci_high": _safe_float(row["exp(coef) upper 95%"]),
+        "p": _safe_float(row["p"]),
+    }
+
+
+@router.post("/survival/cox_uni_multi")
+async def cox_uni_multi(req: CoxUniMultiRequest):
+    """Paired unadjusted (univariable) vs adjusted (multivariable) Cox HRs —
+    one row per model term, for the publication 'Figure 4' forest plot."""
+    df_full = _get_df(req.session_id).copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
+
+    ev = sorted(df_full[req.event_col].dropna().unique())
+    if set(ev) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {ev[:10]}")
+    if (df_full[req.duration_col].dropna() < 0).any():
+        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
+
+    # Columns with value labels or a categorical kind override are treated as
+    # multi-level categoricals (e.g. LDL groups 1/2/3 → contrast rows), even
+    # when stored as integer codes. Binary columns stay a single HR term.
+    meta = store.get_metadata(req.session_id) or {}
+    kinds = store.get_kind_overrides(req.session_id) or {}
+
+    # Encode every predictor once; reuse the design for both passes.
+    encoded: dict[str, pd.DataFrame] = {}
+    all_terms: list[dict] = []
+    for p in req.predictors:
+        if p not in df_full.columns:
+            raise HTTPException(status_code=422, detail=f"Predictor '{p}' not in dataset.")
+        force_cat = bool((meta.get(p, {}) or {}).get("value_labels")) or kinds.get(p) == "categorical"
+        design, terms = _encode_cox_predictor(df_full[p], p, force_categorical=force_cat)
+        if not terms:
+            continue
+        encoded[p] = design
+        all_terms.extend(terms)
+
+    if not all_terms:
+        raise HTTPException(status_code=400, detail="No usable predictors after encoding.")
+
+    base = df_full[[req.duration_col, req.event_col]]
+
+    # ── Univariable pass: one Cox per predictor ──
+    uni_stats: dict[str, dict] = {}
+    for p, design in encoded.items():
+        fit_df = pd.concat([base, design], axis=1).dropna()
+        if len(fit_df) < 10:
+            continue
+        cph = CoxPHFitter()
+        try:
+            await asyncio.to_thread(cph.fit, fit_df, duration_col=req.duration_col, event_col=req.event_col)
+        except Exception:
+            logger.exception("Univariable Cox failed for %s", p)
+            continue
+        for t in [t for t in all_terms if t["predictor"] == p]:
+            st = _cox_term_stats(cph, t["term"])
+            if st:
+                uni_stats[t["term"]] = st
+
+    # ── Multivariable pass: all predictors together ──
+    full_design = pd.concat([encoded[p] for p in encoded], axis=1)
+    fit_full = pd.concat([base, full_design], axis=1).dropna()
+    adj_stats: dict[str, dict] = {}
+    n_used = 0
+    n_events = 0
+    if len(fit_full) >= 10:
+        cph_full = CoxPHFitter()
+        try:
+            await asyncio.to_thread(cph_full.fit, fit_full, duration_col=req.duration_col, event_col=req.event_col)
+            n_used = len(fit_full)
+            n_events = int(fit_full[req.event_col].sum())
+            for t in all_terms:
+                st = _cox_term_stats(cph_full, t["term"])
+                if st:
+                    adj_stats[t["term"]] = st
+        except Exception:
+            logger.exception("Multivariable Cox failed")
+
+    rows = []
+    for t in all_terms:
+        rows.append({
+            **t,
+            "unadjusted": uni_stats.get(t["term"]),
+            "adjusted": adj_stats.get(t["term"]),
+        })
+
+    return {
+        "duration_col": req.duration_col,
+        "event_col": req.event_col,
+        "n": n_used,
+        "n_events": n_events,
+        "rows": rows,
     }
