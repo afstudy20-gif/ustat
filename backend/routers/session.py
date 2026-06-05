@@ -109,7 +109,7 @@ async def delete_row(session_id: str, row_index: int):
     if not success:
         raise HTTPException(status_code=400, detail="Row could not be deleted")
         
-    return _session_preview(store.get(session_id))
+    return _session_preview(store.get(session_id), session_id)
 
 
 class ReorderColumnsRequest(BaseModel):
@@ -416,6 +416,12 @@ async def load_session(file: UploadFile = File(...)):
     if decimals_overrides:
         store.save_decimals(new_session_id, decimals_overrides)
 
+    # Restore column metadata (labels, units, value_labels set at recode
+    # time) so the Data Dictionary + legends repopulate after reload.
+    col_metadata = payload.get("col_metadata") or {}
+    if col_metadata:
+        store.save_metadata(new_session_id, col_metadata)
+
     # Restore user-chosen display name so subsequent save_session calls
     # keep round-tripping the rename.
     restored_filename = payload.get("filename")
@@ -429,6 +435,7 @@ async def load_session(file: UploadFile = File(...)):
     for col in df.columns:
         kind = overrides.get(col) or _detect_kind(df[col])
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+    _attach_value_labels(columns, new_session_id)
 
     preview = json.loads(
         df.head(2000).replace([np.inf, -np.inf], np.nan).to_json(
@@ -458,7 +465,21 @@ async def get_audit(session_id: str):
 
 # ── Undo / Redo ──────────────────────────────────────────────────────────────
 
-def _session_preview(df: pd.DataFrame) -> dict:
+def _attach_value_labels(columns: list, session_id: str) -> list:
+    """Merge persisted per-column value labels (set at recode time via the
+    metadata endpoint) into the column objects, so the frontend Data
+    Dictionary and legends see them after a refresh / reload. Without this
+    the labels live only in the separate _metadata map and column.value_labels
+    arrives empty."""
+    meta = store.get_metadata(session_id) or {}
+    for c in columns:
+        vl = (meta.get(c.get("name"), {}) or {}).get("value_labels")
+        if vl:
+            c["value_labels"] = vl
+    return columns
+
+
+def _session_preview(df: pd.DataFrame, session_id: str | None = None) -> dict:
     """Build a session-like response from a DataFrame for frontend state update."""
     import json as _json
     columns = []
@@ -474,6 +495,8 @@ def _session_preview(df: pd.DataFrame) -> dict:
         else:
             kind = "categorical" if df[col].nunique() <= 50 else "text"
         columns.append({"name": col, "dtype": dtype, "kind": kind})
+    if session_id:
+        _attach_value_labels(columns, session_id)
     preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
     preview = _json.loads(preview_df.to_json(orient="records", default_handler=str, date_format="iso", date_unit="s"))
     return {"rows": len(df), "columns": columns, "preview": preview}
@@ -486,7 +509,7 @@ async def undo_action(session_id: str):
     if restored is None:
         raise HTTPException(status_code=400, detail="Nothing to undo")
     store.log_action(session_id, "undo")
-    result = _session_preview(restored)
+    result = _session_preview(restored, session_id)
     result["undo_depth"] = store.undo_depth(session_id)
     result["redo_depth"] = store.redo_depth(session_id)
     return result
@@ -499,7 +522,7 @@ async def redo_action(session_id: str):
     if restored is None:
         raise HTTPException(status_code=400, detail="Nothing to redo")
     store.log_action(session_id, "redo")
-    result = _session_preview(restored)
+    result = _session_preview(restored, session_id)
     result["undo_depth"] = store.undo_depth(session_id)
     result["redo_depth"] = store.redo_depth(session_id)
     return result
@@ -615,6 +638,7 @@ async def get_session_info(session_id: str):
     for col in df.columns:
         kind = kind_overrides.get(col) or _detect_kind(df[col])
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+    _attach_value_labels(columns, session_id)
 
     import numpy as np, json as _json
     preview = _json.loads(
