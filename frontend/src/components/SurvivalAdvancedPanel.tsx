@@ -10,22 +10,35 @@ import ThreeCol from "./ThreeCol";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// In the 2-grid layout only the selected method renders, so the Section is
+// always expanded — the header is a static card title, no collapse toggle.
 function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
-      <button onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-3.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
-          <p className="text-[11px] text-gray-400 mt-0.5">{description}</p>
-        </div>
-        <span className="text-gray-400 text-lg">{open ? "−" : "+"}</span>
-      </button>
-      {open && <div className="px-5 py-4 space-y-4 border-t border-gray-100">{children}</div>}
+      <div className="px-5 py-3.5 bg-gray-50 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-800">{title}</h3>
+        <p className="text-[11px] text-gray-400 mt-0.5">{description}</p>
+      </div>
+      <div className="px-5 py-4 space-y-4">{children}</div>
     </div>
   );
 }
+
+// Method registry — drives the left nav + which Section renders on the right.
+type SurvMethod =
+  | "km" | "cox" | "timehorizon" | "landmark" | "rmst"
+  | "finegray" | "lwyy" | "evalue";
+
+const SURV_METHODS: { id: SurvMethod; title: string; desc: string }[] = [
+  { id: "km",          title: "Kaplan-Meier",        desc: "Survival curves + log-rank" },
+  { id: "cox",         title: "Cox PH",              desc: "Hazard ratios" },
+  { id: "timehorizon", title: "Time-horizon HR",     desc: "HR by follow-up window → forest" },
+  { id: "landmark",    title: "Landmark",            desc: "Conditional on surviving to t" },
+  { id: "rmst",        title: "RMST",                desc: "Restricted mean survival time" },
+  { id: "finegray",    title: "Fine-Gray",           desc: "Competing risks (CIF)" },
+  { id: "lwyy",        title: "Recurrent (LWYY)",    desc: "Repeated events" },
+  { id: "evalue",      title: "E-value",             desc: "Unmeasured confounding" },
+];
 
 function VarSelect({ label, value, onChange, columns, kinds }: {
   label: string; value: string; onChange: (v: string) => void;
@@ -199,6 +212,8 @@ export default function SurvivalAdvancedPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
+  // 2-grid layout: left method nav, right active method panel.
+  const [activeMethod, setActiveMethod] = useState<SurvMethod>("km");
   // Binary 0/1-like columns for Cox event selectors (the `kind` enum has
   // no "binary", so a numeric filter would leak continuous columns).
   const binaryCols = useMemo(
@@ -421,8 +436,19 @@ export default function SurvivalAdvancedPanel() {
   useEffect(() => { setCoxResult(null); setCoxError(null); }, [coxDuration, coxEvent, coxPreds, coxInteractions]);
 
   return (
-    <div className="space-y-3 max-w-[1400px] mx-auto">
+    <div className="flex gap-4 max-w-[1400px] mx-auto">
+      <nav className="w-52 shrink-0 space-y-1">
+        {SURV_METHODS.map((m) => (
+          <button key={m.id} onClick={() => setActiveMethod(m.id)}
+            className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${activeMethod === m.id ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"}`}>
+            <div className="text-xs font-semibold">{m.title}</div>
+            <div className={`text-[10px] mt-0.5 ${activeMethod === m.id ? "text-indigo-100" : "text-gray-400"}`}>{m.desc}</div>
+          </button>
+        ))}
+      </nav>
+      <div className="flex-1 min-w-0 space-y-3">
       {/* ── Fine-Gray ── */}
+      {activeMethod === "finegray" && (
       <Section title="Fine-Gray Competing Risks" description="Cumulative incidence function with competing events (Aalen-Johansen)">
         <ThreeCol
           storageKey="SurvivalAdvanced.FineGray"
@@ -553,8 +579,10 @@ export default function SurvivalAdvancedPanel() {
           }
         />
       </Section>
+      )}
 
       {/* ── RMST ── */}
+      {activeMethod === "rmst" && (
       <Section title="Restricted Mean Survival Time (RMST)"
         description="Average event-free time over a fixed horizon τ — PH-free alternative to the hazard ratio. Robust when curves cross or the proportional-hazards assumption fails.">
         <ThreeCol
@@ -652,8 +680,10 @@ export default function SurvivalAdvancedPanel() {
           }
         />
       </Section>
+      )}
 
       {/* ── Recurrent events — LWYY ── */}
+      {activeMethod === "lwyy" && (
       <Section title="Recurrent Events (LWYY)"
         description="Modified Andersen-Gill model with Lin-Wei-Yang-Ying cluster-robust SE for recurrent events (e.g. repeat hospitalisations). Counting-process (start, stop, event] intervals; exp(β) = rate ratio.">
         <ThreeCol
@@ -737,8 +767,10 @@ export default function SurvivalAdvancedPanel() {
           }
         />
       </Section>
+      )}
 
       {/* ── E-value ── */}
+      {activeMethod === "evalue" && (
       <Section title="E-value (Unmeasured Confounding)" description="Quantify the minimum confounding strength to explain away an observed effect">
         <div className="grid grid-cols-5 gap-3">
           <label className="flex flex-col gap-1">
@@ -794,8 +826,10 @@ export default function SurvivalAdvancedPanel() {
         )}
         <ResultBlock result={evResult} />
       </Section>
+      )}
 
       {/* ── Landmark ── */}
+      {activeMethod === "landmark" && (
       <Section title="Landmark Survival Analysis" description="Survival analysis conditional on surviving beyond a landmark time point">
         <ThreeCol
           storageKey="SurvivalAdvanced.Landmark"
@@ -863,8 +897,10 @@ export default function SurvivalAdvancedPanel() {
           }
         />
       </Section>
+      )}
 
       {/* ── Kaplan-Meier ── */}
+      {activeMethod === "km" && (
       <Section title="Kaplan-Meier Survival" description="Visualise time-to-event data with survival curves and log-rank test">
         <div className="grid grid-cols-4 gap-3">
           <VarSelect label="Duration (time)" value={kmDuration} onChange={setKmDuration} columns={columns} kinds={["numeric"]} />
@@ -1408,8 +1444,10 @@ export default function SurvivalAdvancedPanel() {
           );
         })()}
       </Section>
+      )}
 
       {/* ── Cox PH ── */}
+      {activeMethod === "cox" && (
       <Section title="Cox Proportional Hazards" description="Regression for time-to-event data — outputs Hazard Ratios (HR)">
         <div className="grid grid-cols-2 gap-3">
           <VarSelect label="Duration (time)" value={coxDuration} onChange={setCoxDuration} columns={columns} kinds={["numeric"]} />
@@ -1654,10 +1692,12 @@ export default function SurvivalAdvancedPanel() {
           </div>
         )}
       </Section>
+      )}
 
       {/* ───────────────────────────────────────────────────────────────────── */}
       {/* Time-horizon sensitivity → Forest plot                               */}
       {/* ───────────────────────────────────────────────────────────────────── */}
+      {activeMethod === "timehorizon" && (
       <Section
         title="Time-horizon HR (forest)"
         description="Run the same Cox model at several follow-up windows (1-year, 2-year, full) and send the hazard ratios straight to the Forest Builder. Answers 'does the effect hold early vs. late?'."
@@ -1802,6 +1842,8 @@ export default function SurvivalAdvancedPanel() {
           </div>
         )}
       </Section>
+      )}
+      </div>
     </div>
   );
 }
