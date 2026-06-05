@@ -56,7 +56,37 @@ def _get_df(session_id: str) -> pd.DataFrame:
     return df
 
 
-def _km_fit_groups(df: pd.DataFrame, duration_col: str, event_col: str, group_col: Optional[str]) -> list:
+def _surv_at(kmf: KaplanMeierFitter, t: float) -> dict:
+    """Survival estimate (+ 95% CI) at an exact time point.
+
+    Used for landmark statements like 'estimated 5-year survival was 77%'.
+    The CI is read from lifelines' confidence_interval_survival_function_,
+    stepped to the last event time at or before t.
+    """
+    try:
+        surv = float(kmf.survival_function_at_times(t).iloc[0])
+    except Exception:
+        return {"time": _safe_float(t), "survival": None, "ci_low": None, "ci_high": None}
+    lo = hi = None
+    try:
+        ci = kmf.confidence_interval_survival_function_
+        sub = ci[ci.index <= t]
+        row = sub.iloc[-1] if len(sub) else ci.iloc[0]
+        lo = float(row.iloc[0])
+        hi = float(row.iloc[1])
+    except Exception:
+        pass
+    return {"time": _safe_float(t), "survival": _safe_float(surv),
+            "ci_low": _safe_float(lo), "ci_high": _safe_float(hi)}
+
+
+def _km_fit_groups(
+    df: pd.DataFrame,
+    duration_col: str,
+    event_col: str,
+    group_col: Optional[str],
+    survival_times: Optional[List[float]] = None,
+) -> list:
     groups = df[group_col].unique() if group_col else [None]
     results = []
     for grp in groups:
@@ -77,14 +107,58 @@ def _km_fit_groups(df: pd.DataFrame, duration_col: str, event_col: str, group_co
             {"time": _safe_float(row["time"]), "survival": _safe_float(row["survival"])}
             for _, row in sf.iterrows()
         ]
-        results.append({
+        row_out = {
             "group": str(grp) if grp is not None else "All",
             "n": int(len(subset)),
             "events": int(subset[event_col].sum()),
             "median_survival": _safe_float(kmf.median_survival_time_),
             "curve": curve,
-        })
+        }
+        if survival_times:
+            row_out["survival_at"] = [_surv_at(kmf, float(t)) for t in survival_times]
+        results.append(row_out)
     return results
+
+
+def _km_pairwise(df: pd.DataFrame, duration_col: str, event_col: str,
+                 group_col: str, correction: str = "none") -> Optional[dict]:
+    """All pairwise log-rank comparisons, optionally multiplicity-adjusted.
+
+    Lets the user state which specific group pair drives an overall
+    difference (e.g. '<100 vs 100–130, p=0.003').
+    """
+    from itertools import combinations
+    groups = sorted(df[group_col].dropna().unique(), key=str)
+    if len(groups) < 3:
+        return None  # pairwise only meaningful with ≥3 groups
+    comparisons = []
+    pvals: list[float] = []
+    for a, b in combinations(groups, 2):
+        ga = df[df[group_col] == a]
+        gb = df[df[group_col] == b]
+        try:
+            lr = logrank_test(
+                ga[duration_col], gb[duration_col],
+                event_observed_A=ga[event_col].astype(int),
+                event_observed_B=gb[event_col].astype(int),
+            )
+            p = float(lr.p_value)
+        except Exception:
+            logger.exception("Pairwise log-rank failed for %s vs %s", a, b)
+            p = float("nan")
+        comparisons.append({"group_a": str(a), "group_b": str(b), "p": _safe_float(p)})
+        pvals.append(p)
+    if correction and correction != "none" and any(np.isfinite(pvals)):
+        try:
+            from statsmodels.stats.multitest import multipletests
+            method = {"bonferroni": "bonferroni", "holm": "holm", "bh": "fdr_bh"}.get(correction, "bonferroni")
+            finite_idx = [i for i, p in enumerate(pvals) if np.isfinite(p)]
+            _, padj, _, _ = multipletests([pvals[i] for i in finite_idx], method=method)
+            for j, i in enumerate(finite_idx):
+                comparisons[i]["p_adj"] = _safe_float(padj[j])
+        except Exception:
+            logger.exception("Pairwise multiplicity correction failed")
+    return {"correction": correction, "comparisons": comparisons}
 
 
 def _km_logrank(df: pd.DataFrame, duration_col: str, event_col: str, group_col: str) -> Optional[dict]:
@@ -140,6 +214,12 @@ class KMRequest(BaseModel):
     group_col: Optional[str] = None
     stratify_col: Optional[str] = None
     imputation: Optional[str] = "listwise"
+    # Landmark survival probabilities at these time points (Duration unit),
+    # e.g. [1825] for 5-year survival on a days-coded column.
+    survival_times: Optional[List[float]] = None
+    # Pairwise log-rank comparisons (≥3 groups) + multiplicity correction.
+    pairwise: bool = False
+    pairwise_correction: str = "none"  # none | bonferroni | holm | bh
 
 
 @router.post("/survival/km")
@@ -174,7 +254,7 @@ def kaplan_meier(req: KMRequest):
             sub = df[df[req.stratify_col] == sv].copy()
             if len(sub) == 0:
                 continue
-            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col)
+            grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col, req.survival_times)
             lr = _km_logrank(sub, req.duration_col, req.event_col, req.group_col) if req.group_col else None
             strata_out.append({"label": str(sv), "n": int(len(sub)), "groups": grp_results, "logrank": lr})
         return {
@@ -186,13 +266,19 @@ def kaplan_meier(req: KMRequest):
             "imputation": req.imputation,
         }
 
-    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col)
+    results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col, req.survival_times)
     logrank = _km_logrank(df, req.duration_col, req.event_col, req.group_col) if req.group_col else None
+    pairwise = (
+        _km_pairwise(df, req.duration_col, req.event_col, req.group_col, req.pairwise_correction)
+        if (req.pairwise and req.group_col) else None
+    )
 
     return {
         "model": "Kaplan-Meier",
         "groups": results,
         "logrank": logrank,
+        "pairwise": pairwise,
+        "survival_times": req.survival_times or [],
         "n_total": n_total,
         "n_excluded": n_excluded,
         "imputation": req.imputation,
