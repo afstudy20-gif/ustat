@@ -41,6 +41,17 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
   const nCols     = useStore((s) => s.session?.columns.length ?? null);
   const activeTab = useStore((s) => s.activeTab);
   const caseFilter = useStore((s) => s.caseFilter);
+  // Value-labels / decimals changes don't alter row or column counts, so they
+  // wouldn't retrigger the debounce on their own — a quick reload before the
+  // 60 s periodic snapshot would resume from a stale blob and lose the labels.
+  // Fold a compact signature of per-column value_labels into the deps so any
+  // label edit schedules a fresh snapshot within the debounce window.
+  const valueLabelSig = useStore((s) =>
+    (s.session?.columns ?? [])
+      .map((c) => (c.value_labels ? `${c.name}:${Object.entries(c.value_labels).map(([k, v]) => `${k}=${v}`).join(",")}` : ""))
+      .filter(Boolean)
+      .join(";")
+  );
 
   const lastSavedHashRef = useRef<string | null>(null);
   const inFlightRef = useRef<boolean>(false);
@@ -114,5 +125,5 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
       clearInterval(interval);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [sessionId, filename, nRows, nCols, activeTab, caseFilter]);
+  }, [sessionId, filename, nRows, nCols, activeTab, caseFilter, valueLabelSig]);
 }
