@@ -279,9 +279,19 @@ export default function SurvivalAdvancedPanel() {
   const [kmHidePrefix, setKmHidePrefix] = useState(true);              // drop "groupCol = " prefix
   const [kmAutoZoomY, setKmAutoZoomY] = useState(true);                // zoom Y to data range
   const [kmYAxisAsPct, setKmYAxisAsPct] = useState(false);             // % vs decimal Y
+  const [kmYTitle, setKmYTitle] = useState("Survival probability");    // editable Y-axis label
+  const [kmPlotH, setKmPlotH] = useState(420);                         // plot height px
+  const [kmPlotW, setKmPlotW] = useState<number | undefined>(undefined); // plot width px (undefined = fill)
   const [kmGroupColors, setKmGroupColors] = useState<Record<string, string>>({}); // per-group color
   const [kmContextMenu, setKmContextMenu] = useState<{ type: "item"|"groupTitle"|"durationTitle"|"plotTitle"; group?: string; x: number; y: number } | null>(null);
   const [kmRenameValue, setKmRenameValue] = useState("");
+
+  // Nudge Plotly to refit when the KM plot box is resized via sliders
+  // (useResizeHandler only listens to window resize, not element resize).
+  useEffect(() => {
+    const id = window.setTimeout(() => window.dispatchEvent(new Event("resize")), 50);
+    return () => window.clearTimeout(id);
+  }, [kmPlotW, kmPlotH]);
 
   // Cox state
   const [coxDuration, setCoxDuration] = useState("");
@@ -1096,7 +1106,32 @@ export default function SurvivalAdvancedPanel() {
               )}
             </div>
 
-            <div className="relative" ref={kmPlotRef}>
+            {/* Axis labels + size — like the Forest builder */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-2 px-1">
+              <input value={kmCustomDurationTitle} onChange={(e) => setKmCustomDurationTitle(e.target.value)}
+                placeholder={`X-axis (Time (${kmDuration || "time"}))`}
+                className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400" style={{ width: 200 }} />
+              <input value={kmYTitle} onChange={(e) => setKmYTitle(e.target.value)}
+                placeholder="Y-axis label"
+                className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400" style={{ width: 160 }} />
+              <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                <span className="font-medium">Width</span>
+                <input type="range" min={420} max={1300} step={20} value={kmPlotW ?? 800}
+                  onChange={(e) => setKmPlotW(Number(e.target.value))} className="accent-indigo-500" style={{ width: 100 }} />
+                <span className="tabular-nums w-8">{kmPlotW ?? "auto"}</span>
+                {kmPlotW != null && (
+                  <button onClick={() => setKmPlotW(undefined)} className="text-indigo-500 hover:text-indigo-700">auto</button>
+                )}
+              </label>
+              <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                <span className="font-medium">Height</span>
+                <input type="range" min={260} max={760} step={20} value={kmPlotH}
+                  onChange={(e) => setKmPlotH(Number(e.target.value))} className="accent-indigo-500" style={{ width: 100 }} />
+                <span className="tabular-nums w-8">{kmPlotH}</span>
+              </label>
+            </div>
+
+            <div className="relative" ref={kmPlotRef} style={{ width: kmPlotW != null ? kmPlotW : "100%", height: kmPlotH, maxWidth: "100%" }}>
               <Plot
                 data={kmResult.groups.map((g: any, i: number) => ({
                   x: g.curve.map((p: any) => p.time),
@@ -1115,14 +1150,16 @@ export default function SurvivalAdvancedPanel() {
                   },
                   yaxis: {
                     ...(baseLayout.yaxis as any),
-                    title: { text: "Survival probability" },
+                    title: { text: kmYTitle || "Survival probability" },
                     range: yRange,
                     tickformat: kmYAxisAsPct ? ".0%" : ".2f",
                   },
+                  autosize: true,
                   margin: { t: 50, r: 20, b: 56, l: 68 }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                 }}
-                config={{ responsive: true }} style={{ width: "100%", height: 420 }}
+                useResizeHandler
+                config={{ responsive: true }} style={{ width: "100%", height: "100%" }}
               />
               <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
             </div>
