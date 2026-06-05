@@ -1046,7 +1046,10 @@ export default function SurvivalAdvancedPanel() {
         {/* Landmark survival + pairwise log-rank options */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500 font-medium">Survival at time(s) — comma-sep</span>
+            <span className="text-xs text-gray-500 font-medium">
+              Survival at time(s) — comma-sep
+              <Tip wide text="Landmark survival probabilities: the KM survival estimate (+ 95% CI) read off each curve at the time points you list, in the Duration column's unit. Days → '1825' gives 5-year survival; months → '60'; years → '5'. Multiple values allowed (e.g. '365, 1825'). Reported as e.g. '77.0% (95% CI 70–84)'." />
+            </span>
             <input value={kmSurvTimes} onChange={(e) => setKmSurvTimes(e.target.value)}
               placeholder="365, 1825"
               className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400" />
@@ -1055,9 +1058,13 @@ export default function SurvivalAdvancedPanel() {
           <label className="flex items-center gap-2 text-xs text-gray-600 pb-2">
             <input type="checkbox" checked={kmPairwise} onChange={(e) => setKmPairwise(e.target.checked)} className="accent-indigo-500" />
             Pairwise log-rank (≥3 groups)
+            <Tip wide text="With 3+ groups the overall log-rank only says 'some difference exists'. Pairwise runs a log-rank for every group pair so you can state which pair drives it (e.g. '<100 vs 100–130, p=0.003; 100–130 vs >130, p=0.46'). Always apply a multiplicity correction → for ≥3 comparisons." />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-gray-500 font-medium">Multiplicity correction</span>
+            <span className="text-xs text-gray-500 font-medium">
+              Multiplicity correction
+              <Tip wide text="Adjusts pairwise p-values for testing several pairs at once (controls false positives). Holm = uniformly more powerful than Bonferroni, recommended default for confirmatory pairwise comparisons. Bonferroni = most conservative. Benjamini-Hochberg = controls false-discovery rate, for exploratory work. None = raw p (report only if pre-specified)." />
+            </span>
             <select value={kmCorrection} onChange={(e) => setKmCorrection(e.target.value)} disabled={!kmPairwise}
               className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400 disabled:opacity-50">
               <option value="none">None (raw p)</option>
@@ -1226,14 +1233,17 @@ export default function SurvivalAdvancedPanel() {
               <label className="flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={kmRiskTable} onChange={(e) => setKmRiskTable(e.target.checked)} className="accent-indigo-500" />
                 Number at risk
+                <Tip wide text="Journal-standard 'number at risk' row under the curve: subjects still in follow-up (event-free and uncensored) in each group at evenly-spaced time points. Required by most journals (CONSORT/STROBE) so readers can judge how much data supports the tail of the curve." />
               </label>
               <label className="flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={kmColorblind} onChange={(e) => setKmColorblind(e.target.checked)} className="accent-indigo-500" />
                 Colour-blind + line styles
+                <Tip wide text="Switches to the Okabe-Ito colour-blind-safe palette and gives each group a distinct line style (solid / dashed / dotted), so curves stay distinguishable in greyscale print and for colour-blind readers. Recommended for publication figures." />
               </label>
               <label className="flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={kmShowCensors} onChange={(e) => setKmShowCensors(e.target.checked)} className="accent-indigo-500" />
                 Censor marks
+                <Tip wide text="Overlays a small '+' on each curve wherever a subject was censored (lost to follow-up / still event-free at last contact). Shows where information thins out; common in publication KM plots." />
               </label>
               {(kmCustomPlotTitle || Object.keys(kmGroupColors).length > 0 || Object.keys(kmGroupLabels).length > 0) && (
                 <button
@@ -1245,6 +1255,7 @@ export default function SurvivalAdvancedPanel() {
 
             {/* Axis labels + size — like the Forest builder */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-2 px-1">
+              <span className="text-[10px] text-gray-400 inline-flex items-center">Axis &amp; size<Tip wide text="Rename the X/Y axis titles for publication (e.g. 'Time since primary PCI (days)', 'Overall survival'). Drag Width/Height to size the figure; Width 'auto' fills the column. Export (↓ top-right of the plot) keeps these labels — SVG/PDF are vector, journal-ready." /></span>
               <input value={kmCustomDurationTitle} onChange={(e) => setKmCustomDurationTitle(e.target.value)}
                 placeholder={`X-axis (Time (${kmDuration || "time"}))`}
                 className="text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400" style={{ width: 200 }} />
