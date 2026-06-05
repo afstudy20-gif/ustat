@@ -1421,6 +1421,10 @@ export default function SurvivalAdvancedPanel() {
                     tickformat: kmYAxisAsPct ? ".0%" : ".2f",
                   },
                   autosize: true,
+                  // Solid white backgrounds so PNG/JPEG export isn't transparent
+                  // (transparent renders as black in most image viewers).
+                  paper_bgcolor: "#ffffff",
+                  plot_bgcolor: "#ffffff",
                   margin: { t: 20, r: 20, b: riskBottomMargin, l: riskLeftMargin }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                   annotations: riskAnnotations,
