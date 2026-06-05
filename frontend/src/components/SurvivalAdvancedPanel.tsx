@@ -1294,6 +1294,34 @@ export default function SurvivalAdvancedPanel() {
               </label>
             </div>
 
+            {/* Editable group (legend) labels */}
+            {kmGroup && kmResult.groups?.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
+                <span className="text-[10px] text-gray-400 inline-flex items-center">Legend labels<Tip wide text="Rename each group as it appears in the legend, number-at-risk row, tables, and the auto-narrative — e.g. code '1' → '<100 mg/dL'. Leave blank to keep the original. Also editable by right-clicking a row in the summary table." /></span>
+                {kmResult.groups.map((g: any, i: number) => (
+                  <span key={g.group} className="inline-flex items-center gap-1">
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]) }} />
+                    <input
+                      value={kmGroupLabels[String(g.group)] ?? ""}
+                      onChange={(e) => {
+                        const next = { ...kmGroupLabels };
+                        const v = e.target.value;
+                        if (v.trim()) next[String(g.group)] = v; else delete next[String(g.group)];
+                        setKmGroupLabels(next);
+                      }}
+                      placeholder={String(g.group)}
+                      className="text-[11px] border border-gray-200 rounded px-2 py-0.5 focus:outline-none focus:border-indigo-400" style={{ width: 130 }} />
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Title — rendered as HTML here (UI only); NOT embedded in the
+                exported figure, so it can be supplied as the figure legend. */}
+            {titleText && (
+              <div className="text-center text-sm font-medium text-gray-700 mb-1">{titleText}</div>
+            )}
+
             <div className="relative" ref={kmPlotRef} style={{ width: kmPlotW != null ? kmPlotW : "100%", height: kmPlotH, maxWidth: "100%" }}>
               <Plot
                 data={[
@@ -1327,7 +1355,10 @@ export default function SurvivalAdvancedPanel() {
                 ]}
                 layout={{
                   ...baseLayout,
-                  title: { text: titleText, font: { color: "#374151", size: 14 } },
+                  // Title is rendered as HTML above the plot (UI only) so it
+                  // is NOT baked into the exported figure — the user supplies
+                  // it as the figure legend in the manuscript.
+                  title: undefined,
                   xaxis: {
                     ...(baseLayout.xaxis as any),
                      // Using custom duration title if available
@@ -1340,7 +1371,7 @@ export default function SurvivalAdvancedPanel() {
                     tickformat: kmYAxisAsPct ? ".0%" : ".2f",
                   },
                   autosize: true,
-                  margin: { t: 50, r: 20, b: 56, l: 68 }, showlegend: true,
+                  margin: { t: 20, r: 20, b: 56, l: 68 }, showlegend: true,
                   legend: { title: { text: kmCustomGroupTitle || kmGroup || "Group" } },
                 }}
                 useResizeHandler
