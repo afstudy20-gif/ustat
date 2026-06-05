@@ -46,15 +46,18 @@ function CoxUniMultiForest({
   const rows = result.rows;
   const [umW, setUmW] = useState<number | undefined>(undefined);   // px or auto
   const [umH, setUmH] = useState<number>(Math.max(320, rows.length * 64 + 130));
+  const [umLabels, setUmLabels] = useState<Record<string, string>>({});  // per-row label overrides
   const vlab = (pname: string, code: string | null): string => {
     if (code == null) return "";
     const meta = columns.find((c) => c.name === pname);
     return meta?.value_labels?.[String(code)] ?? String(code);
   };
-  const rowLabel = (r: UMRow): string =>
+  const autoLabel = (r: UMRow): string =>
     r.kind === "category"
       ? `${vlab(r.predictor, r.category)} (vs ${vlab(r.predictor, r.reference)})`
       : r.predictor;
+  const rowLabel = (r: UMRow): string =>
+    umLabels[r.term]?.trim() ? umLabels[r.term] : autoLabel(r);
   const fmtHR = (e: UMRow["unadjusted"]): string =>
     e ? `${e.hr.toFixed(2)} (${e.hr_ci_low.toFixed(2)}–${e.hr_ci_high.toFixed(2)})` : "—";
 
@@ -148,6 +151,28 @@ function CoxUniMultiForest({
             onChange={(e) => setUmH(Number(e.target.value))} className="accent-indigo-500" style={{ width: 110 }} />
           <span className="tabular-nums w-8">{umH}</span>
         </label>
+      </div>
+
+      {/* Editable row labels — override the axis text for publication */}
+      <div className="px-3 pt-2 space-y-1">
+        <span className="text-[10px] text-gray-400 inline-flex items-center">Row labels
+          <Tip wide text="Rename each row as it appears on the plot's left axis — e.g. 'AGE' → 'Age, per year', or a reference contrast → 'LDL-C <100 mg/dL (vs >130)'. Leave blank to keep the auto label. Reference level for categoricals is the lowest value code; rename here if you want a different wording." />
+        </span>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          {rows.map((r) => (
+            <span key={r.term} className="inline-flex items-center gap-1">
+              <input
+                value={umLabels[r.term] ?? ""}
+                onChange={(e) => {
+                  const next = { ...umLabels };
+                  if (e.target.value.trim()) next[r.term] = e.target.value; else delete next[r.term];
+                  setUmLabels(next);
+                }}
+                placeholder={autoLabel(r)}
+                className="flex-1 text-[11px] border border-gray-200 rounded px-2 py-0.5 focus:outline-none focus:border-indigo-400" />
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="relative p-2" ref={plotRef}
