@@ -97,6 +97,7 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
     width: 1200,
     height: 700,
     scale: 3.125,
+    setBackground: "#ffffff",   // never transparent (→ black in viewers)
   });
   const res = await fetch(dataUrl);
   const blob = await res.blob();
@@ -155,6 +156,7 @@ async function renderPlotPngBlob(plotRef: React.RefObject<any>): Promise<Blob> {
     width: 1200,
     height: 700,
     scale: 3.125,
+    setBackground: "#ffffff",   // white bg for clipboard copy too
   });
   const res = await fetch(dataUrl);
   return await res.blob();
