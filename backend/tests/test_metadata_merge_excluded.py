@@ -51,6 +51,29 @@ def test_analysis_excluded_roundtrips_save_load():
     assert name.get("analysis_excluded") is True
 
 
+def test_rename_migrates_metadata_and_refresh_keeps_it():
+    sid = _seed("meta_rename")
+    client.post(f"/api/sessions/{sid}/metadata", json={
+        "columns": {
+            "NAME": {"analysis_excluded": True},
+            "LDL": {"value_labels": {"0": "low", "1": "high"}},
+        },
+    })
+    # Rename both columns.
+    client.post(f"/api/compute/{sid}/rename", json={"old_name": "NAME", "new_name": "Patient"})
+    client.post(f"/api/compute/{sid}/rename", json={"old_name": "LDL", "new_name": "Ldl_cat"})
+    # GET session: flags must follow the new names.
+    g = client.get(f"/api/sessions/{sid}").json()
+    pat = next(c for c in g["columns"] if c["name"] == "Patient")
+    ldl = next(c for c in g["columns"] if c["name"] == "Ldl_cat")
+    assert pat.get("analysis_excluded") is True
+    assert ldl.get("value_labels") == {"0": "low", "1": "high"}
+    # refresh endpoint must also surface them (used after rename in the UI).
+    rf = client.get(f"/api/stats/{sid}/refresh").json()
+    pat_r = next(c for c in rf["columns"] if c["name"] == "Patient")
+    assert pat_r.get("analysis_excluded") is True
+
+
 def test_name_suggestions_endpoint():
     sid = _seed("meta_suggest")
     r = client.get(f"/api/sessions/{sid}/name_suggestions")

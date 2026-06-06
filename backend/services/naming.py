@@ -23,7 +23,7 @@ _ACRONYMS = {
     "BUN", "GFR", "EGFR", "CRP", "ESR", "AST", "ALT", "ALP", "GGT",
     "TSH", "HBA1C", "INR", "PT", "APTT", "WBC", "RBC", "MCV", "RDW",
     "ACEI", "ARB", "BB", "CCB", "MRA", "PCI", "CABG", "MI", "HF",
-    "ID", "NO", "TCHOL", "TG", "UA", "NA", "K", "CL", "CA",
+    "ID", "TCHOL", "TG", "UA", "NA", "K", "CL", "CA",
 }
 
 # Tokens that should not be capitalised mid-sentence (sentence case).

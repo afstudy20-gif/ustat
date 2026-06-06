@@ -343,6 +343,22 @@ def rename_decimal_key(session_id: str, old: str, new: str) -> None:
         _decimals[session_id][new] = _decimals[session_id].pop(old)
 
 
+def rename_column_key(session_id: str, old: str, new: str) -> None:
+    """Move ALL per-column state to a new column name on rename so flags such
+    as value_labels, analysis_excluded, display_name and the kind override are
+    not orphaned under the old name."""
+    if old == new:
+        return
+    meta = _metadata.get(session_id)
+    if meta and old in meta:
+        meta[new] = meta.pop(old)
+    kinds = _kinds.get(session_id)
+    if kinds and old in kinds:
+        kinds[new] = kinds.pop(old)
+    if session_id in _decimals and old in _decimals[session_id]:
+        _decimals[session_id][new] = _decimals[session_id].pop(old)
+
+
 # ── Session display name (user-facing rename) ────────────────────────────────
 
 def set_filename(session_id: str, name: str) -> None:

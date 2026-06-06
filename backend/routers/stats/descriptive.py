@@ -186,13 +186,28 @@ def get_sparklines(session_id: str):
 
 @router.get("/{session_id}/refresh")
 def refresh_session(session_id: str):
-    """Return updated session metadata after in-place operations."""
+    """Return updated session metadata after in-place operations.
+
+    Honours user kind overrides and re-attaches per-column metadata
+    (value_labels, analysis_excluded, display_name) so flows that refresh after
+    a mutation (rename, fill, duplicate…) don't silently drop them.
+    """
     df = _get_df(session_id)
     from routers.upload import _detect_kind
+    overrides = store.get_kind_overrides(session_id) or {}
+    meta = store.get_metadata(session_id) or {}
     columns = []
     for col in df.columns:
-        kind = _detect_kind(df[col])
-        columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+        kind = overrides.get(col) or _detect_kind(df[col])
+        c = {"name": col, "dtype": str(df[col].dtype), "kind": kind}
+        m = meta.get(col, {}) or {}
+        if m.get("value_labels"):
+            c["value_labels"] = m["value_labels"]
+        if m.get("analysis_excluded") is not None:
+            c["analysis_excluded"] = bool(m["analysis_excluded"])
+        if m.get("display_name"):
+            c["display_name"] = m["display_name"]
+        columns.append(c)
     preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
     preview = _json.loads(preview_df.to_json(orient="records", default_handler=str, date_format="iso", date_unit="s"))
     return {"rows": len(df), "columns": columns, "preview": preview}

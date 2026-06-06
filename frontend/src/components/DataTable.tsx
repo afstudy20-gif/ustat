@@ -88,7 +88,7 @@ export default function DataTable() {
   const setColumnAnalysisExcluded = useStore((s) => s.setColumnAnalysisExcluded);
   const [moveCol, setMoveCol] = useState<string | null>(null);
   const [suggestOpen, setSuggestOpen] = useState(false);
-  const [suggestions, setSuggestions] = useState<Record<string, string>>({});
+  const [suggestDraft, setSuggestDraft] = useState<Record<string, string>>({});  // col → target name (editable)
   const [suggestAccept, setSuggestAccept] = useState<Record<string, boolean>>({});
   const [suggestBusy, setSuggestBusy] = useState(false);
 
@@ -444,7 +444,9 @@ export default function DataTable() {
     setMoveCol(null);
   };
 
-  // Fetch Sentence-case name suggestions and open the bulk review modal.
+  // Open the bulk rename modal seeded with Sentence-case suggestions for EVERY
+  // column (editable, so the user can also rename acronyms the auto-suggester
+  // intentionally leaves untouched). Columns with a suggestion are pre-ticked.
   const openSuggestNames = async () => {
     if (!session) return;
     setCtxMenu(null);
@@ -453,16 +455,25 @@ export default function DataTable() {
       const { getNameSuggestions } = await import("../api");
       const res = await getNameSuggestions(session.session_id);
       const s: Record<string, string> = res.data?.suggestions ?? {};
-      setSuggestions(s);
-      setSuggestAccept(Object.keys(s).reduce((a, k) => ({ ...a, [k]: true }), {}));
+      const draft: Record<string, string> = {};
+      const acc: Record<string, boolean> = {};
+      for (const c of session.columns) {
+        draft[c.name] = s[c.name] ?? c.name;
+        acc[c.name] = c.name in s;  // pre-tick only the ones we actually changed
+      }
+      setSuggestDraft(draft);
+      setSuggestAccept(acc);
       setSuggestOpen(true);
     } catch { /* ignore */ } finally { setSuggestBusy(false); }
   };
 
-  // Apply accepted suggestions as real renames, then refresh the session.
+  // Apply ticked rows whose target differs from the current name, then refresh.
   const applySuggestions = async () => {
     if (!session) return;
-    const pairs = Object.entries(suggestions).filter(([k]) => suggestAccept[k]);
+    const pairs = session.columns
+      .map((c) => c.name)
+      .filter((n) => suggestAccept[n] && suggestDraft[n]?.trim() && suggestDraft[n].trim() !== n)
+      .map((n) => [n, suggestDraft[n].trim()] as [string, string]);
     if (pairs.length === 0) { setSuggestOpen(false); return; }
     setSuggestBusy(true);
     try {
@@ -1318,33 +1329,38 @@ export default function DataTable() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setSuggestOpen(false)}>
           <div className="bg-white rounded-xl shadow-2xl w-[28rem] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
             <div className="px-5 py-3.5 border-b border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-800">Suggested column names</h3>
-              <p className="text-[11px] text-gray-400 mt-0.5">Sentence-case suggestions. Tick the ones to apply — applying renames the column.</p>
+              <h3 className="text-sm font-semibold text-gray-800">Rename columns</h3>
+              <p className="text-[11px] text-gray-400 mt-0.5">Edit any target name. Sentence-case suggestions are pre-filled and ticked; medical acronyms (LDL, DM…) keep their case — tick &amp; edit to change them too. Applying renames the ticked rows.</p>
             </div>
-            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
-              {Object.keys(suggestions).length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-4">All column names already look clean.</p>
-              ) : (
-                Object.entries(suggestions).map(([oldName, newName]) => (
-                  <label key={oldName} className="flex items-center gap-2 text-xs">
-                    <input type="checkbox" checked={suggestAccept[oldName] ?? false}
-                      onChange={(e) => setSuggestAccept((p) => ({ ...p, [oldName]: e.target.checked }))}
-                      className="accent-indigo-500" />
-                    <span className="font-mono text-gray-400 truncate flex-1" title={oldName}>{oldName}</span>
-                    <span className="text-gray-300">→</span>
-                    <span className="font-medium text-gray-800 truncate flex-1" title={newName}>{newName}</span>
-                  </label>
-                ))
-              )}
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1">
+              {(session?.columns ?? []).map((c) => {
+                const changed = (suggestDraft[c.name] ?? c.name).trim() !== c.name;
+                return (
+                  <div key={c.name} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={suggestAccept[c.name] ?? false}
+                      onChange={(e) => setSuggestAccept((p) => ({ ...p, [c.name]: e.target.checked }))}
+                      className="accent-indigo-500 flex-shrink-0" />
+                    <span className="font-mono text-gray-400 truncate w-32 flex-shrink-0" title={c.name}>{c.name}</span>
+                    <span className="text-gray-300 flex-shrink-0">→</span>
+                    <input
+                      value={suggestDraft[c.name] ?? c.name}
+                      onChange={(e) => {
+                        setSuggestDraft((p) => ({ ...p, [c.name]: e.target.value }));
+                        setSuggestAccept((p) => ({ ...p, [c.name]: e.target.value.trim() !== c.name }));
+                      }}
+                      className={`flex-1 text-xs border rounded px-2 py-0.5 focus:outline-none focus:border-indigo-400 ${changed ? "border-indigo-300 text-gray-900" : "border-gray-200 text-gray-500"}`} />
+                  </div>
+                );
+              })}
             </div>
             <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
-              <button onClick={() => setSuggestAccept(Object.keys(suggestions).reduce((a, k) => ({ ...a, [k]: false }), {}))}
-                className="text-xs text-gray-400 hover:text-gray-700">Clear all</button>
+              <button onClick={() => setSuggestAccept((session?.columns ?? []).reduce((a, c) => ({ ...a, [c.name]: false }), {}))}
+                className="text-xs text-gray-400 hover:text-gray-700">Untick all</button>
               <div className="flex gap-2">
                 <button onClick={() => setSuggestOpen(false)} className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
-                <button onClick={applySuggestions} disabled={suggestBusy || Object.keys(suggestions).length === 0}
+                <button onClick={applySuggestions} disabled={suggestBusy}
                   className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {suggestBusy ? "Applying…" : "Apply selected"}
+                  {suggestBusy ? "Applying…" : "Apply ticked"}
                 </button>
               </div>
             </div>

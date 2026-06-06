@@ -1135,7 +1135,7 @@ def rename_column(session_id: str, req: RenameRequest):
     store.save(session_id, df)
     # Keep server-side decimal-places override in sync with the rename so the
     # save_session export carries the formatting choice over to the new name.
-    store.rename_decimal_key(session_id, req.old_name, new)
+    store.rename_column_key(session_id, req.old_name, new)
     store.log_action(session_id, "rename_column", {"old": req.old_name, "new": new})
     return {"old_name": req.old_name, "new_name": new}
 
