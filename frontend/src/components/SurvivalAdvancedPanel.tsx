@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import { useStore, analysisCols } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
-import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti } from "../api";
+import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti, runCoxModelSpecs } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
@@ -696,6 +696,60 @@ export default function SurvivalAdvancedPanel() {
       setCoxUMResult(res.data);
     } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Forest failed"); }
     finally { setCoxUMLoading(false); }
+  };
+
+  // Model-specification (sensitivity) forest: one exposure across adjustment sets.
+  type SpecRow = { label: string; covariates: string[] };
+  const [specOpen, setSpecOpen] = usePersistedPanelState("survival", "specOpen", false);
+  const [specExposure, setSpecExposure] = usePersistedPanelState("survival", "specExposure", "");
+  const [specExposureRef, setSpecExposureRef] = usePersistedPanelState("survival", "specExposureRef", "");
+  const [specRows, setSpecRows] = usePersistedPanelState<SpecRow[]>("survival", "specRows", [
+    { label: "Parsimonious", covariates: [] },
+    { label: "Fully adjusted", covariates: [] },
+  ]);
+  const [specLoading, setSpecLoading] = useState(false);
+
+  const runSpecForest = async () => {
+    if (!coxDuration || !coxEvent || !specExposure) { setCoxError("Select duration, event, and an exposure."); return; }
+    setSpecLoading(true); setCoxError(null);
+    try {
+      const meta = columns.find((c) => c.name === specExposure);
+      const vlab = (code: string | null) => (code == null ? "" : (meta?.value_labels?.[String(code)] ?? String(code)));
+      const res = await runCoxModelSpecs({
+        session_id: sid, duration_col: coxDuration, event_col: coxEvent,
+        exposure: specExposure,
+        exposure_reference: specExposureRef || undefined,
+        specs: specRows.filter((s) => s.label.trim()).map((s) => ({ label: s.label, covariates: s.covariates })),
+        include_unadjusted: true,
+      });
+      const data = res.data;
+      const multiTerm = (data.exposure_terms?.length ?? 0) > 1;
+      const rows: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> = [];
+      for (const s of data.specs) {
+        for (const t of s.terms) {
+          const contrast = multiTerm && t.kind === "category" ? ` · ${vlab(t.category)} vs ${vlab(t.reference)}` : "";
+          rows.push({
+            label: `${s.label}${contrast}`,
+            est: t.hr ?? null, ci_low: t.hr_ci_low ?? null, ci_high: t.hr_ci_high ?? null,
+            p: t.p ?? null,
+            extra: s.n ? `(${s.n_events}/${s.n} events)` : "",
+          });
+        }
+      }
+      if (!rows.length) { setCoxError("No model fit — check exposure / covariates."); return; }
+      const expLabel = meta?.value_labels && data.exposure_terms?.[0]?.kind === "category"
+        ? `${specExposure}` : specExposure;
+      setForestHandoff(rows, {
+        customTitle: "",
+        customSubtitle: `Exposure: ${expLabel} · adjusted HR across model specifications`,
+        xLabel: "Hazard ratio for all-cause mortality (95% CI, log scale)",
+        leftHeader: "Model specification",
+        rightHeader: "HR (95% CI)",
+      });
+      setVisualSubTab("forest");
+      setActiveTab("visual");
+    } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Model-spec forest failed"); }
+    finally { setSpecLoading(false); }
   };
 
 
@@ -2261,6 +2315,69 @@ export default function SurvivalAdvancedPanel() {
             }}
             onClose={() => setCoxUMResult(null)}
           />
+        )}
+
+        {/* Model-specification (sensitivity) forest builder */}
+        {coxDuration && coxEvent && (
+          <div className="rounded-lg border border-gray-200">
+            <button onClick={() => setSpecOpen(!specOpen)}
+              className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50">
+              <span className="inline-flex items-center gap-1">📋 Model-specification forest (sensitivity)
+                <Tip wide text="One exposure's adjusted HR across several adjustment sets — the Figure 6 sensitivity forest. Pick the exposure (e.g. an LDL<100 indicator), define named model specs with different covariates (parsimonious / alternative / full), and run: each model's HR for the exposure becomes a forest row (an Unadjusted row is added automatically). Results are sent to the Forest Builder with full label/size/export controls." /></span>
+              <span>{specOpen ? "▴" : "▾"}</span>
+            </button>
+            {specOpen && (
+              <div className="px-3 pb-3 space-y-2 border-t border-gray-100 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <VarSelect label="Exposure (HR tracked)" value={specExposure} onChange={(v) => { setSpecExposure(v); setSpecExposureRef(""); }} columns={pickCols} />
+                  {(() => {
+                    const em = columns.find((c) => c.name === specExposure);
+                    const vl = em?.value_labels ?? {};
+                    const levels = Object.keys(vl);
+                    if (levels.length < 2) return <div />;
+                    return (
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-gray-500 font-medium">Reference level</span>
+                        <select value={specExposureRef} onChange={(e) => setSpecExposureRef(e.target.value)} className="select text-xs py-1">
+                          <option value="">(lowest code)</option>
+                          {levels.sort((a, b) => Number(a) - Number(b)).map((k) => (
+                            <option key={k} value={k}>{vl[k]}</option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })()}
+                </div>
+
+                {specRows.map((s, i) => (
+                  <div key={i} className="rounded border border-gray-200 p-2 space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input value={s.label}
+                        onChange={(e) => setSpecRows(specRows.map((r, j) => j === i ? { ...r, label: e.target.value } : r))}
+                        placeholder={`Model ${i + 1} label`}
+                        className="flex-1 text-[11px] border border-gray-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400" />
+                      <button onClick={() => setSpecRows(specRows.filter((_, j) => j !== i))}
+                        className="text-[11px] text-gray-400 hover:text-red-500">remove</button>
+                    </div>
+                    <MultiSelect label="Covariates" columns={pickCols}
+                      selected={s.covariates}
+                      onChange={(next) => setSpecRows(specRows.map((r, j) => j === i ? { ...r, covariates: next } : r))}
+                      excludeNames={[coxDuration, coxEvent, specExposure].filter(Boolean)} />
+                  </div>
+                ))}
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button onClick={() => setSpecRows([...specRows, { label: `Model ${specRows.length + 1}`, covariates: [] }])}
+                    className="text-[11px] px-2 py-1 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50">+ Add model</button>
+                  <button disabled={specLoading || !specExposure} onClick={runSpecForest}
+                    className="px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
+                    {specLoading ? "Fitting…" : "→ Build forest"}
+                  </button>
+                  <span className="text-[10px] text-gray-400">An “Unadjusted” row is added automatically.</span>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
         {/* Cox univariable scan results */}
