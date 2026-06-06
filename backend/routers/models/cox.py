@@ -1826,3 +1826,98 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
         "n_events": n_events,
         "rows": rows,
     }
+
+
+# ── Multiple model-specification forest (one exposure across adjustment sets) ───
+
+class _ModelSpec(BaseModel):
+    label: str
+    covariates: List[str] = []
+
+
+class CoxModelSpecsRequest(BaseModel):
+    session_id: str
+    duration_col: str
+    event_col: str
+    exposure: str                          # the predictor of interest (HR tracked)
+    exposure_reference: Optional[str] = None
+    specs: List[_ModelSpec]                # named adjustment sets
+    include_unadjusted: bool = True
+
+
+@router.post("/survival/cox_model_specs")
+async def cox_model_specs(req: CoxModelSpecsRequest):
+    """One exposure's adjusted HR across several model specifications.
+
+    Backs the 'sensitivity analyses' forest: the same exposure (e.g. LDL<100)
+    fitted under different adjustment sets (parsimonious / alternative / full),
+    each row = the exposure's HR (95% CI, p) in that model.
+    """
+    df_full = _get_df(req.session_id).copy()
+    df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
+    df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
+
+    ev = sorted(df_full[req.event_col].dropna().unique())
+    if set(ev) - {0, 1, 0.0, 1.0}:
+        raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {ev[:10]}")
+    if req.exposure not in df_full.columns:
+        raise HTTPException(status_code=422, detail=f"Exposure '{req.exposure}' not in dataset.")
+
+    meta = store.get_metadata(req.session_id) or {}
+    kinds = store.get_kind_overrides(req.session_id) or {}
+
+    def _force_cat(col: str) -> bool:
+        return bool((meta.get(col, {}) or {}).get("value_labels")) or kinds.get(col) == "categorical"
+
+    exp_design, exp_terms = _encode_cox_predictor(
+        df_full[req.exposure], req.exposure,
+        force_categorical=_force_cat(req.exposure), reference=req.exposure_reference)
+    if not exp_terms:
+        raise HTTPException(status_code=400, detail=f"Exposure '{req.exposure}' could not be encoded (needs ≥2 levels).")
+
+    base = df_full[[req.duration_col, req.event_col]]
+
+    specs = list(req.specs)
+    if req.include_unadjusted:
+        specs = [_ModelSpec(label="Unadjusted", covariates=[])] + specs
+
+    out_specs = []
+    for spec in specs:
+        cov_designs = []
+        for c in spec.covariates:
+            if c == req.exposure or c not in df_full.columns:
+                continue
+            d, _ = _encode_cox_predictor(df_full[c], c, force_categorical=_force_cat(c))
+            if d.shape[1]:
+                cov_designs.append(d)
+        design = pd.concat([exp_design, *cov_designs], axis=1)
+        fit_df = pd.concat([base, design], axis=1).dropna()
+        spec_terms = []
+        n_used = 0
+        n_events = 0
+        if len(fit_df) >= 10:
+            cph = CoxPHFitter()
+            try:
+                await asyncio.to_thread(cph.fit, fit_df, duration_col=req.duration_col, event_col=req.event_col)
+                n_used = len(fit_df)
+                n_events = int(fit_df[req.event_col].sum())
+                for t in exp_terms:
+                    st = _cox_term_stats(cph, t["term"])
+                    spec_terms.append({**t, **(st or {"hr": None, "hr_ci_low": None, "hr_ci_high": None, "p": None})})
+            except Exception:
+                logger.exception("Cox model-spec fit failed for %s", spec.label)
+        out_specs.append({
+            "label": spec.label,
+            "covariates": list(spec.covariates),
+            "n": n_used,
+            "n_events": n_events,
+            "terms": spec_terms,
+        })
+
+    return {
+        "duration_col": req.duration_col,
+        "event_col": req.event_col,
+        "exposure": req.exposure,
+        "exposure_terms": exp_terms,
+        "specs": out_specs,
+    }
