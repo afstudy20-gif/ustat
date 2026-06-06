@@ -260,8 +260,22 @@ def get_audit(session_id: str) -> list:
 # ── Column metadata ──────────────────────────────────────────────────────────
 
 def save_metadata(session_id: str, meta: dict) -> None:
-    """Store column-level metadata for a session."""
-    _metadata[session_id] = meta
+    """Merge column-level metadata for a session.
+
+    Merges per-column so a partial update (e.g. just ``analysis_excluded`` for
+    one column) never wipes other columns' metadata or other fields of the same
+    column (e.g. a previously-saved ``value_labels`` map). A full map still
+    works — every supplied key overwrites its prior value.
+    """
+    cur = dict(_metadata.get(session_id, {}))
+    for col, m in (meta or {}).items():
+        if isinstance(m, dict):
+            prev = dict(cur.get(col, {}) or {})
+            prev.update(m)
+            cur[col] = prev
+        else:
+            cur[col] = m
+    _metadata[session_id] = cur
 
 
 def get_metadata(session_id: str) -> dict:

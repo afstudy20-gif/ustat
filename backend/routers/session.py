@@ -494,9 +494,15 @@ def _attach_value_labels(columns: list, session_id: str) -> list:
     arrives empty."""
     meta = store.get_metadata(session_id) or {}
     for c in columns:
-        vl = (meta.get(c.get("name"), {}) or {}).get("value_labels")
+        m = meta.get(c.get("name"), {}) or {}
+        vl = m.get("value_labels")
         if vl:
             c["value_labels"] = vl
+        # Per-column flags that drive the data tab + analysis pickers.
+        if m.get("analysis_excluded") is not None:
+            c["analysis_excluded"] = bool(m.get("analysis_excluded"))
+        if m.get("display_name"):
+            c["display_name"] = m.get("display_name")
     return columns
 
 
@@ -566,6 +572,21 @@ async def save_metadata(session_id: str, body: ColumnMetadataRequest):
     store.log_action(session_id, "metadata_updated", {"columns": list(body.columns.keys())})
 
     return {"status": "ok", "columns_updated": list(body.columns.keys())}
+
+
+@router.get("/{session_id}/name_suggestions")
+async def name_suggestions(session_id: str):
+    """Suggest readable Sentence-case names for the session's columns.
+
+    Advisory only — the frontend shows old → new and renames on confirmation.
+    Returns {column: suggested_name} omitting columns where the suggestion
+    equals the current name.
+    """
+    df = store.get(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from services.naming import suggest_names
+    return {"suggestions": suggest_names(list(df.columns))}
 
 
 # ── Column kind override ─────────────────────────────────────────────────────
