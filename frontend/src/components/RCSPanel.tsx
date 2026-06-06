@@ -240,8 +240,10 @@ export default function RCSPanel() {
   const session = useStore((s) => s.session!);
   const showGrid = useStore((s) => s.showGrid);
 
+  // Columns flagged "exclude from analysis" (e.g. NAME, row-id) never appear
+  // in any picker, including covariates.
   const numCols = useMemo(
-    () => session.columns.filter((c) => c.kind === "numeric").map((c) => c.name),
+    () => session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name),
     [session.columns],
   );
   const binaryCols = useMemo(
@@ -249,6 +251,7 @@ export default function RCSPanel() {
       if (!session.preview?.length) return [] as string[];
       return session.columns
         .filter((c) => {
+          if (c.analysis_excluded) return false;
           const vals = session.preview!.map((r: any) => r[c.name]).filter((v: any) => v != null);
           const uniq = new Set(vals.map(Number));
           return uniq.size <= 2 && [...uniq].every((v) => v === 0 || v === 1);
@@ -257,7 +260,7 @@ export default function RCSPanel() {
     },
     [session.columns, session.preview],
   );
-  const allCols = useMemo(() => session.columns.map((c) => c.name), [session.columns]);
+  const allCols = useMemo(() => session.columns.filter((c) => !c.analysis_excluded).map((c) => c.name), [session.columns]);
 
   // ── Mode: "rcs" (univariate) or "cox_rcs" (multivariable) ─────────────────
   const [mode, setMode] = useState<"rcs" | "cox_rcs">("rcs");
