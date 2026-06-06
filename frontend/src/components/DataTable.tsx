@@ -84,6 +84,14 @@ export default function DataTable() {
   const [valueLabelCol, setValueLabelCol] = useState<string | null>(null);
   const [valueLabelDraft, setValueLabelDraft] = useState<Record<string, string>>({});
 
+  // Analysis-exclude flag + move-to-position + name-suggestion modals
+  const setColumnAnalysisExcluded = useStore((s) => s.setColumnAnalysisExcluded);
+  const [moveCol, setMoveCol] = useState<string | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<Record<string, string>>({});
+  const [suggestAccept, setSuggestAccept] = useState<Record<string, boolean>>({});
+  const [suggestBusy, setSuggestBusy] = useState(false);
+
   // Multi-cell selection
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [selAnchor, setSelAnchor] = useState<{ row: number; col: string } | null>(null);
@@ -424,6 +432,48 @@ export default function DataTable() {
     const idx = session.columns.findIndex((c) => c.name === colName);
     if (idx < 0 || idx === session.columns.length - 1) return;
     reorderColumns(idx, session.columns.length - 1);
+  };
+
+  // Move a column to an explicit 1-based position (shifts the rest along).
+  const moveToPosition = (colName: string, oneBased: number) => {
+    if (!session) return;
+    const idx = session.columns.findIndex((c) => c.name === colName);
+    if (idx < 0) return;
+    const target = Math.max(0, Math.min(oneBased - 1, session.columns.length - 1));
+    if (target !== idx) reorderColumns(idx, target);
+    setMoveCol(null);
+  };
+
+  // Fetch Sentence-case name suggestions and open the bulk review modal.
+  const openSuggestNames = async () => {
+    if (!session) return;
+    setCtxMenu(null);
+    setSuggestBusy(true);
+    try {
+      const { getNameSuggestions } = await import("../api");
+      const res = await getNameSuggestions(session.session_id);
+      const s: Record<string, string> = res.data?.suggestions ?? {};
+      setSuggestions(s);
+      setSuggestAccept(Object.keys(s).reduce((a, k) => ({ ...a, [k]: true }), {}));
+      setSuggestOpen(true);
+    } catch { /* ignore */ } finally { setSuggestBusy(false); }
+  };
+
+  // Apply accepted suggestions as real renames, then refresh the session.
+  const applySuggestions = async () => {
+    if (!session) return;
+    const pairs = Object.entries(suggestions).filter(([k]) => suggestAccept[k]);
+    if (pairs.length === 0) { setSuggestOpen(false); return; }
+    setSuggestBusy(true);
+    try {
+      const { renameColumn } = await import("../api");
+      for (const [oldName, newName] of pairs) {
+        try { await renameColumn(session.session_id, oldName, newName); } catch { /* skip dup/invalid */ }
+      }
+      const res = await api.get(`/api/stats/${session.session_id}/refresh`);
+      const cur = useStore.getState().session;
+      if (cur) { useStore.getState().setSession({ ...cur, ...res.data }); bumpUndo(); }
+    } catch { /* ignore */ } finally { setSuggestBusy(false); setSuggestOpen(false); }
   };
 
   const fillBlanks = async (colName: string, fillValue: string) => {
@@ -805,11 +855,15 @@ export default function DataTable() {
                             onBlur={commitRename}
                           />
                         ) : (
-                          <span className="text-left text-gray-700 text-xs font-medium truncate cursor-text"
+                          <span className={`text-left text-xs font-medium truncate cursor-text ${col.analysis_excluded ? "text-gray-400 line-through" : "text-gray-700"}`}
                             onDoubleClick={() => startRename(col.name)}
-                            title="Double-click to rename">
+                            title={col.analysis_excluded ? "Excluded from analysis · double-click to rename" : "Double-click to rename"}>
                             {col.name}
                           </span>
+                        )}
+                        {col.analysis_excluded && (
+                          <span className="flex-shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-violet-100 text-violet-600 border border-violet-300"
+                            title="Excluded from analysis (kept in the dataset)">excl</span>
                         )}
                         {nMissing > 0 && (
                           <button
@@ -1019,6 +1073,19 @@ export default function DataTable() {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             🔤 Value Labels
           </button>
+          <button onClick={() => {
+            const col = columns.find((c) => c.name === ctxMenu.col);
+            setColumnAnalysisExcluded(ctxMenu.col, !(col?.analysis_excluded ?? false));
+            setCtxMenu(null);
+          }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            {columns.find((c) => c.name === ctxMenu.col)?.analysis_excluded
+              ? "✅ Include in analysis" : "🚫 Exclude from analysis"}
+          </button>
+          <button onClick={openSuggestNames}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            💡 Suggest names…
+          </button>
           {/* Decimal places selector */}
           {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
             <div className="px-3 py-1">
@@ -1058,6 +1125,10 @@ export default function DataTable() {
           <button onClick={() => sendToEnd(ctxMenu.col)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ➡️ Send to end
+          </button>
+          <button onClick={() => { setMoveCol(ctxMenu.col); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            📍 Move to position…
           </button>
           <button
             onClick={() => {
@@ -1214,6 +1285,71 @@ export default function DataTable() {
           session={session}
           onClose={() => setValueLabelCol(null)}
         />
+      )}
+
+      {/* ── Move column to position ── */}
+      {moveCol && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setMoveCol(null)}>
+          <div className="bg-white rounded-xl shadow-2xl w-72" onClick={(e) => e.stopPropagation()}>
+            <div className="px-4 py-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-800">Move column</h3>
+              <p className="text-[11px] text-gray-400 mt-0.5 truncate">{moveCol}</p>
+            </div>
+            <div className="px-4 py-3 space-y-2">
+              <label className="text-xs text-gray-500">New position (1–{columns.length})</label>
+              <input type="number" min={1} max={columns.length} autoFocus
+                defaultValue={columns.findIndex((c) => c.name === moveCol) + 1}
+                onKeyDown={(e) => { if (e.key === "Enter") moveToPosition(moveCol, parseInt((e.target as HTMLInputElement).value, 10)); if (e.key === "Escape") setMoveCol(null); }}
+                id="move-pos-input"
+                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-400" />
+              <p className="text-[10px] text-gray-400">Other columns shift to make room. The “#” and frozen columns stay pinned.</p>
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-2">
+              <button onClick={() => setMoveCol(null)} className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+              <button onClick={() => { const el = document.getElementById("move-pos-input") as HTMLInputElement | null; moveToPosition(moveCol, el ? parseInt(el.value, 10) : 1); }}
+                className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Move</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Suggest names (bulk review) ── */}
+      {suggestOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={() => setSuggestOpen(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-[28rem] max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="px-5 py-3.5 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-800">Suggested column names</h3>
+              <p className="text-[11px] text-gray-400 mt-0.5">Sentence-case suggestions. Tick the ones to apply — applying renames the column.</p>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-1.5">
+              {Object.keys(suggestions).length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">All column names already look clean.</p>
+              ) : (
+                Object.entries(suggestions).map(([oldName, newName]) => (
+                  <label key={oldName} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={suggestAccept[oldName] ?? false}
+                      onChange={(e) => setSuggestAccept((p) => ({ ...p, [oldName]: e.target.checked }))}
+                      className="accent-indigo-500" />
+                    <span className="font-mono text-gray-400 truncate flex-1" title={oldName}>{oldName}</span>
+                    <span className="text-gray-300">→</span>
+                    <span className="font-medium text-gray-800 truncate flex-1" title={newName}>{newName}</span>
+                  </label>
+                ))
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-gray-200 flex items-center justify-between">
+              <button onClick={() => setSuggestAccept(Object.keys(suggestions).reduce((a, k) => ({ ...a, [k]: false }), {}))}
+                className="text-xs text-gray-400 hover:text-gray-700">Clear all</button>
+              <div className="flex gap-2">
+                <button onClick={() => setSuggestOpen(false)} className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
+                <button onClick={applySuggestions} disabled={suggestBusy || Object.keys(suggestions).length === 0}
+                  className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                  {suggestBusy ? "Applying…" : "Apply selected"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Dictionary modal ────────────────────────────────────────────── */}
