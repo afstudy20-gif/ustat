@@ -109,8 +109,14 @@ export default function TitledPlot({
     const userAnnotations = Array.isArray(base.annotations) ? base.annotations : [];
     const captionAnnotation = sub
       ? [{
+          // Anchor at the plot-area bottom (y:0 paper) and offset by a FIXED
+          // pixel amount, so the caption always lands inside the bottom margin
+          // regardless of export height. A paper-fraction y (e.g. -0.18) scales
+          // with the figure, so tall exports pushed it past the margin and it
+          // was cropped out of the PNG.
           xref: "paper", yref: "paper",
-          x: 0.5, y: -0.18, xanchor: "center", yanchor: "top",
+          x: 0.5, y: 0, xanchor: "center", yanchor: "top",
+          yshift: -70,
           text: sub,
           showarrow: false,
           font: { size: 11, color: "#6b7280" },
