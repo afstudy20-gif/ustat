@@ -757,10 +757,6 @@ export default function RCSPanel() {
                 };
                 const nlp = result.nonlinearity_p as number | null | undefined;
                 const nlAdjStr = nlp == null ? null : (nlp < 0.001 ? "<0.001" : nlp.toFixed(2));
-                const titleBase = `Restricted cubic spline: ${result.predictor}${outcomeLabel ? ` and ${outcomeLabel}` : ""}`;
-                const titleWithP = nlAdjStr
-                  ? `${titleBase} (non-linearity ${crude ? "adjusted " : ""}p=${nlAdjStr})`
-                  : titleBase;
 
                 const traces: any[] = [
                   // Adjusted 95% CI band
@@ -820,7 +816,10 @@ export default function RCSPanel() {
                   });
                 }
 
-                const yTitle = `${eff.label} (reference = ${result.ref_value}${eff.abbr === "Δ" ? "" : `, ${eff.abbr} = ${eff.refValue.toFixed(1)}`})`;
+                // Clean axis label, no redundant "HR = 1.0": e.g.
+                // "Hazard ratio (reference: LDL-C 130)".
+                const effLabelLc = eff.label.replace(/ Ratio$/, " ratio");
+                const yTitle = `${effLabelLc} (reference: ${result.predictor} ${result.ref_value})`;
 
                 // Clamp the x-axis to the spline's evaluated range. The curve
                 // is only fit over result.x_values (typically the inner
@@ -838,8 +837,11 @@ export default function RCSPanel() {
                   <TitledPlot
                     plotRefOut={rcsPlotRef}
                     storageKey={`rcs:${result.predictor}:${outcomeLabel}`}
-                    defaultTitle={titleWithP}
-                    defaultSubtitle={`${result.n_knots} knots at ${((result.knots as number[]) ?? []).join(", ")}${result.n_events != null ? ` · n = ${result.n}, events = ${result.n_events}` : ` · n = ${result.n}`}${result.aic != null ? ` · AIC = ${(result.aic as number).toFixed(1)}` : ""}`}
+                    // No embedded title — supply the figure legend in the
+                    // manuscript. The caption avoids raw column names (uses the
+                    // predictor only) and explains the knot dots.
+                    defaultTitle=""
+                    defaultSubtitle={`Restricted cubic spline (${result.n_knots} knots) · reference ${result.predictor} = ${result.ref_value}${nlAdjStr ? ` · non-linearity ${crude ? "adjusted " : ""}p=${nlAdjStr}` : ""}${result.n_events != null ? ` · n=${result.n}, events=${result.n_events}` : ` · n=${result.n}`}${result.aic != null ? ` · AIC=${(result.aic as number).toFixed(1)}` : ""} · dots = knot locations`}
                     defaultXAxis={result.predictor}
                     defaultYAxis={yTitle}
                     data={traces}
