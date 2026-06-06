@@ -105,8 +105,15 @@ export default function TitledPlot({
   // ones the user ticked (handy when the title goes in the manuscript legend).
   const exportRelayout = useCallback(async (strip: boolean) => {
     const gd: any = (refToUse.current as any)?.el;
-    const Plotly: any = gd?._Plotly;
-    if (!gd || !Plotly?.relayout) return;
+    if (!gd) return;
+    // react-plotly.js doesn't always attach `_Plotly` to the graph div, so fall
+    // back to the dist bundle — otherwise the label-hide silently no-ops.
+    let Plotly: any = gd._Plotly;
+    if (!Plotly?.relayout) {
+      const mod: any = await import("plotly.js/dist/plotly");
+      Plotly = mod?.relayout ? mod : mod?.default;
+    }
+    if (!Plotly?.relayout) return;
     const upd: Record<string, any> = {};
     const baseTop = layout?.margin?.t ?? 30;
     const baseBottom = layout?.margin?.b ?? 50;
