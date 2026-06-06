@@ -836,7 +836,7 @@ export default function RCSPanel() {
                 return (
                   <TitledPlot
                     plotRefOut={rcsPlotRef}
-                    storageKey={`rcs2:${result.predictor}:${outcomeLabel}`}
+                    storageKey={`rcs2:${result.predictor}:${outcomeLabel}:ref${result.ref_value}:k${result.n_knots}:cov${(result.covariates_used as string[] | undefined)?.length ?? 0}`}
                     // No embedded title — supply the figure legend in the
                     // manuscript. The caption avoids raw column names (uses the
                     // predictor only) and explains the knot dots.
