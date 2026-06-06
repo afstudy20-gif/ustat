@@ -159,6 +159,7 @@ export async function plotlyToTiffBlob(
     height: opts.height,
     // Runtime supports `scale` even if the published d.ts is missing it.
     scale,
+    setBackground: "opaque",
   } as Parameters<typeof Plotly.toImage>[1] & { scale: number });
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {

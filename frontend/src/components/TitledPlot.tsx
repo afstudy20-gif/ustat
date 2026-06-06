@@ -30,9 +30,10 @@
  * - The control row above the plot can be hidden with `showEditor={false}`
  *   to render a read-only TitledPlot (handy for snapshots).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
+import { registerPlotCaptureHooks } from "../lib/plotCapture";
 
 export interface TitledPlotProps {
   data: any[];
@@ -102,19 +103,35 @@ export default function TitledPlot({
   // Transiently strip labels right before a copy/download capture, then
   // restore — so the on-screen figure keeps its labels but the file omits the
   // ones the user ticked (handy when the title goes in the manuscript legend).
-  const exportRelayout = async (strip: boolean) => {
+  const exportRelayout = useCallback(async (strip: boolean) => {
     const gd: any = (refToUse.current as any)?.el;
     const Plotly: any = gd?._Plotly;
     if (!gd || !Plotly?.relayout) return;
     const upd: Record<string, any> = {};
-    if (hideExport.title) upd["title.text"] = strip ? "" : (title || "");
-    if (hideExport.caption && sub) upd[`annotations[${captionIndex}].visible`] = strip ? false : true;
+    const baseTop = layout?.margin?.t ?? 30;
+    const baseBottom = layout?.margin?.b ?? 50;
+    if (hideExport.title) {
+      upd["title.text"] = strip ? "" : (title || "");
+      upd["margin.t"] = strip ? baseTop : Math.max(baseTop, title ? 50 : baseTop);
+    }
+    if (hideExport.caption && sub) {
+      upd[`annotations[${captionIndex}].visible`] = !strip;
+      upd["margin.b"] = strip ? baseBottom : Math.max(baseBottom, 90);
+    }
     if (hideExport.axes) {
       upd["xaxis.title.text"] = strip ? "" : (xLab || (layout?.xaxis?.title?.text ?? ""));
       upd["yaxis.title.text"] = strip ? "" : (yLab || (layout?.yaxis?.title?.text ?? ""));
     }
     if (Object.keys(upd).length) { try { await Plotly.relayout(gd, upd); } catch { /* non-fatal */ } }
-  };
+  }, [captionIndex, hideExport, layout, refToUse, sub, title, xLab, yLab]);
+
+  // Result panels may expose a second, shared export toolbar outside this
+  // component. Register the same transient relayout hooks on the Plotly ref so
+  // its PNG/TIFF/copy actions honor the label visibility choices too.
+  useEffect(() => registerPlotCaptureHooks(refToUse, {
+    beforeCapture: () => exportRelayout(true),
+    afterCapture: () => exportRelayout(false),
+  }), [exportRelayout, refToUse]);
 
   useEffect(() => {
     saveStored(storageKey, { title, sub, xLab, yLab });
@@ -168,6 +185,17 @@ export default function TitledPlot({
       autosize: true,
     };
   }, [layout, title, sub, xLab, yLab]);
+
+  const exportSafeConfig = useMemo(() => ({
+    ...(config || {}),
+    // The built-in Plotly camera bypasses the label-hide capture hooks.
+    // TitledPlot already supplies the shared exporter, so keep one reliable
+    // export path for PNG/SVG/TIFF/copy.
+    modeBarButtonsToRemove: Array.from(new Set([
+      ...((config?.modeBarButtonsToRemove as string[] | undefined) ?? []),
+      "toImage",
+    ])),
+  }), [config]);
 
   return (
     <div className="space-y-2">
@@ -282,7 +310,7 @@ export default function TitledPlot({
           data={data}
           layout={mergedLayout}
           style={{ ...(style as object), width: "100%", height: "100%" }}
-          config={config}
+          config={exportSafeConfig}
           useResizeHandler
         />
         <PlotExporter plotRef={refToUse} title={title || "chart"}
