@@ -558,6 +558,12 @@ function RecodeTab({
       const res = await computeRecode(sessionId, payload);
       setSuccess(res.data);
       onResult(res.data);
+      // Guard the common mistake: a recode whose rules matched no rows produces
+      // an all-empty column. Warn so the user notices (and can delete it) rather
+      // than thinking value-labels created a stray column.
+      if ((res.data?.n_computed ?? 0) === 0) {
+        setError(`"${newCol.trim()}" tamamen boş oluştu — hiçbir kural eşleşmedi. Sağ tık → Delete column ile silebilirsin.`);
+      }
       // Save value labels to metadata if any were defined
       const filledLabels = Object.fromEntries(
         Object.entries(valueLabels).filter(([, v]) => v.trim())
