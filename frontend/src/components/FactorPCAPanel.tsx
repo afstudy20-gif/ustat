@@ -1,9 +1,8 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runFactorPCA } from "../api";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 
 type ActiveResultTab = "suitability" | "loadings" | "scree" | "biplot";
@@ -13,7 +12,8 @@ export default function FactorPCAPanel() {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const plotRef = useRef<any>(null);
+  const screeRef = useRef<any>(null);
+  const biplotRef = useRef<any>(null);
 
   if (!session) return null;
   const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
@@ -120,21 +120,23 @@ export default function FactorPCAPanel() {
     ];
 
     return (
-      <div className="relative panel w-full" ref={plotRef}>
-        <Plot
+      <div className="panel w-full">
+        <TitledPlot
+          plotRefOut={screeRef}
+          storageKey="factorpca:scree"
           data={data}
           layout={{
             ...baseLayout,
-            title: { text: "Scree Plot — Component Eigenvalues", font: { color: "#374151", size: 12 } },
             xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "Component / Factor" }, dtick: 1 },
             yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: "Eigenvalue" } },
             margin: { t: 36, r: 24, b: 44, l: 60 }
           }}
           config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 350 }}
-          useResizeHandler
+          defaultTitle="Scree Plot — Component Eigenvalues"
+          defaultSubtitle=""
+          defaultXAxis="Component / Factor"
+          defaultYAxis="Eigenvalue"
         />
-        <PlotExporter plotRef={plotRef} title="Scree_Plot" />
       </div>
     );
   };
@@ -180,22 +182,24 @@ export default function FactorPCAPanel() {
     });
 
     return (
-      <div className="relative panel w-full" ref={plotRef}>
-        <Plot
+      <div className="panel w-full">
+        <TitledPlot
+          plotRefOut={biplotRef}
+          storageKey="factorpca:biplot"
           data={[scatterData]}
           layout={{
             ...baseLayout,
-            title: { text: `Loadings Plot (${result.factors[0]} vs ${result.factors[1] ?? "PC2"})`, font: { color: "#374151", size: 12 } },
             xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: result.factors[0] }, range: [-1.1, 1.1] },
             yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: result.factors[1] ?? "PC2" }, range: [-1.1, 1.1] },
             shapes: shapes as any,
             margin: { t: 36, r: 24, b: 44, l: 60 }
           }}
           config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 380 }}
-          useResizeHandler
+          defaultTitle={`Loadings Plot (${result.factors[0]} vs ${result.factors[1] ?? "PC2"})`}
+          defaultSubtitle=""
+          defaultXAxis={result.factors[0]}
+          defaultYAxis={result.factors[1] ?? "PC2"}
         />
-        <PlotExporter plotRef={plotRef} title="Loadings_Biplot" />
       </div>
     );
   };

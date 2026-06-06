@@ -8,12 +8,11 @@
  * 4. Outcome analysis (Weighted GLM or Weighted Cox PH)
  */
 import { useState, useRef, useMemo } from "react";
-import Plot from "../PlotComponent";
 import { useStore, analysisCols } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runIPTW, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
@@ -124,19 +123,17 @@ function LovePlot({
   };
 
   return (
-    <div className="relative">
-      <Plot
-        ref={plotRef}
-        data={traces}
-        layout={layout}
-        style={{ width: "100%", height: layout.height }}
-        useResizeHandler
-        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
-        onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
-      />
-      <PlotExporter plotRef={plotRef} title="Love_Plot_IPTW" />
-    </div>
+    <TitledPlot
+      plotRefOut={plotRef}
+      storageKey="iptw:love"
+      data={traces}
+      layout={layout}
+      config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+      defaultTitle=""
+      defaultSubtitle=""
+      defaultXAxis="Standardized Mean Difference (SMD)"
+      defaultYAxis=""
+    />
   );
 }
 
@@ -149,55 +146,48 @@ function PSOverlapPlot({
 }) {
   const plotRef = useRef<any>(null);
   return (
-    <div className="relative">
-      <Plot
-        ref={plotRef}
-        data={[
-          {
-            type: "histogram",
-            name: "Treated",
-            x: psDist.treated_unmatched,
-            opacity: 0.55,
-            marker: { color: "#ef4444" },
-            nbinsx: 25,
-            hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
-          },
-          {
-            type: "histogram",
-            name: "Control",
-            x: psDist.control_unmatched,
-            opacity: 0.55,
-            marker: { color: "#3b82f6" },
-            nbinsx: 25,
-            hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
-          },
-        ]}
-        layout={{
-          ...PLOT_BASE,
-          barmode: "overlay",
-          autosize: true,
-          height: 230,
-          xaxis: {
-            title: { text: "Propensity Score" },
-            range: [0, 1],
-            gridcolor: showGrid ? "#e5e7eb" : "transparent",
-          },
-          yaxis: { title: { text: "Count" }, gridcolor: showGrid ? "#e5e7eb" : "transparent" },
-          legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
-          annotations: [{
-            x: 0.5, y: 1.08, xref: "paper", yref: "paper",
-            text: "Propensity Score Overlap",
-            showarrow: false, font: { color: "#374151", size: 12 },
-          }],
-        } as any}
-        style={{ width: "100%", height: 230 }}
-        useResizeHandler
-        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
-        onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
-      />
-      <PlotExporter plotRef={plotRef} title="IPTW_Propensity_Overlap" />
-    </div>
+    <TitledPlot
+      plotRefOut={plotRef}
+      storageKey="iptw:ps-overlap"
+      data={[
+        {
+          type: "histogram",
+          name: "Treated",
+          x: psDist.treated_unmatched,
+          opacity: 0.55,
+          marker: { color: "#ef4444" },
+          nbinsx: 25,
+          hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
+        },
+        {
+          type: "histogram",
+          name: "Control",
+          x: psDist.control_unmatched,
+          opacity: 0.55,
+          marker: { color: "#3b82f6" },
+          nbinsx: 25,
+          hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
+        },
+      ]}
+      layout={{
+        ...PLOT_BASE,
+        barmode: "overlay",
+        autosize: true,
+        height: 230,
+        xaxis: {
+          title: { text: "Propensity Score" },
+          range: [0, 1],
+          gridcolor: showGrid ? "#e5e7eb" : "transparent",
+        },
+        yaxis: { title: { text: "Count" }, gridcolor: showGrid ? "#e5e7eb" : "transparent" },
+        legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
+      } as any}
+      config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+      defaultTitle="Propensity Score Overlap"
+      defaultSubtitle=""
+      defaultXAxis="Propensity Score"
+      defaultYAxis="Count"
+    />
   );
 }
 
@@ -248,6 +238,7 @@ export default function IPTWPanel() {
   const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(0.10);
   const [showConnectors, setShowConnectors] = useState(true);
+  const weightDistRef = useRef<any>(null);
 
   const toggleCov = (c: string) =>
     setCovariates(covariates.includes(c) ? covariates.filter((x) => x !== c) : [...covariates, c]);
@@ -694,7 +685,9 @@ export default function IPTWPanel() {
                     min {result.weight_summary?.min} · median {result.weight_summary?.median} · max {result.weight_summary?.max}
                   </div>
                 </div>
-                <Plot
+                <TitledPlot
+                  plotRefOut={weightDistRef}
+                  storageKey="iptw:weight-dist"
                   data={[
                     {
                       type: "histogram", name: "Treated",
@@ -716,8 +709,11 @@ export default function IPTWPanel() {
                     yaxis: { title: { text: "Count" } },
                     legend: { font: { size: 10 } },
                   }}
-                  style={{ width: "100%", height: 220 }}
                   config={{ responsive: true, displaylogo: false }}
+                  defaultTitle="Weight Distribution"
+                  defaultSubtitle=""
+                  defaultXAxis="IPTW weight"
+                  defaultYAxis="Count"
                 />
               </div>
             )}

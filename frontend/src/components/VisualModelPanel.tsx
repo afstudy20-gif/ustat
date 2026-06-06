@@ -2,11 +2,11 @@
  * VisualModelPanel – "Visual" tab
  * Models: Polynomial, Linear Mixed, Gamma GLM, Negative Binomial
  * + Automated diagnostic plots for linear regression
- * + Per-chart export (PNG / PPTX) via PlotExporter
+ * + Per-chart editable title/subtitle/axis labels, resizable figure, and
+ *   size-matched export (PNG / TIFF / JPEG / SVG + DPI) via TitledPlot
  * + All charts respect the global plot theme (usePlotLayout / usePalette)
  */
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import {
@@ -14,7 +14,7 @@ import {
 } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 
@@ -198,38 +198,37 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
             {/* Fitted curve plot */}
             {result.curve && (
               <div className="panel relative xl:col-start-1">
-                <h4 className="font-semibold text-gray-900 mb-2">Fitted Curve (degree {result.degree})</h4>
-                <div className="relative">
-                  <Plot
-                    ref={plotRef}
-                    data={[
-                      { type: "scatter" as const, mode: "markers" as const,
-                        x: result.scatter.x, y: result.scatter.y,
-                        marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.45 },
-                        name: "Data", hovertemplate: `${result.predictor}: %{x:.2f}<br>${result.outcome}: %{y:.3f}<extra></extra>` },
-                      { type: "scatter" as const,
-                        x: [...result.curve.x, ...result.curve.x.slice().reverse()],
-                        y: [...result.curve.ci_high, ...result.curve.ci_low.slice().reverse()],
-                        fill: "toself" as const, fillcolor: `${pal[0]}22`, line: { color: "transparent" },
-                        hoverinfo: "skip" as const, showlegend: false, name: "95% CI" },
-                      { type: "scatter" as const, mode: "lines" as const,
-                        x: result.curve.x, y: result.curve.y,
-                        line: { color: pal[0], width: td.lineWidth + 0.5 },
-                        name: `Degree-${result.degree} fit`, hovertemplate: `${result.predictor}: %{x:.2f}<br>Ŷ: %{y:.3f}<extra></extra>` },
-                    ]}
-                    layout={{
-                      ...layout, height: 380, autosize: true,
-                      xaxis: { ...layout.xaxis as any, showgrid: showGrid, title: { text: result.predictor } },
-                      yaxis: { ...layout.yaxis as any, showgrid: showGrid, title: { text: result.outcome }, zeroline: false },
-                      legend: { x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const, font: { size: 10 } },
-                      margin: { t: 20, r: 20, b: 50, l: 60 },
-                    }}
-                    style={{ width: "100%", height: 380 }}
-                    useResizeHandler
-                    config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                  />
-                  <PlotExporter plotRef={plotRef} title={`Polynomial_${result.predictor}_${result.outcome}`} />
-                </div>
+                <TitledPlot
+                  plotRefOut={plotRef}
+                  storageKey={`poly:curve:${result.predictor}:${result.outcome}`}
+                  defaultTitle={`Fitted Curve (degree ${result.degree})`}
+                  defaultSubtitle=""
+                  defaultXAxis={result.predictor}
+                  defaultYAxis={result.outcome}
+                  data={[
+                    { type: "scatter" as const, mode: "markers" as const,
+                      x: result.scatter.x, y: result.scatter.y,
+                      marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.45 },
+                      name: "Data", hovertemplate: `${result.predictor}: %{x:.2f}<br>${result.outcome}: %{y:.3f}<extra></extra>` },
+                    { type: "scatter" as const,
+                      x: [...result.curve.x, ...result.curve.x.slice().reverse()],
+                      y: [...result.curve.ci_high, ...result.curve.ci_low.slice().reverse()],
+                      fill: "toself" as const, fillcolor: `${pal[0]}22`, line: { color: "transparent" },
+                      hoverinfo: "skip" as const, showlegend: false, name: "95% CI" },
+                    { type: "scatter" as const, mode: "lines" as const,
+                      x: result.curve.x, y: result.curve.y,
+                      line: { color: pal[0], width: td.lineWidth + 0.5 },
+                      name: `Degree-${result.degree} fit`, hovertemplate: `${result.predictor}: %{x:.2f}<br>Ŷ: %{y:.3f}<extra></extra>` },
+                  ]}
+                  layout={{
+                    ...layout, height: 380, autosize: true,
+                    xaxis: { ...layout.xaxis as any, showgrid: showGrid, title: { text: result.predictor } },
+                    yaxis: { ...layout.yaxis as any, showgrid: showGrid, title: { text: result.outcome }, zeroline: false },
+                    legend: { x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const, font: { size: 10 } },
+                    margin: { t: 20, r: 20, b: 50, l: 60 },
+                  }}
+                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+                />
               </div>
             )}
           </div>
@@ -668,9 +667,10 @@ function DiagnosticsSection({ sessionId, allCols, numCols }: { sessionId: string
   const [diag,       setDiag]       = useState<any>(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState("");
-  const rfRef  = useRef<any>(null);
-  const qqRef  = useRef<any>(null);
-  const slRef  = useRef<any>(null);
+  const rfRef   = useRef<any>(null);
+  const qqRef   = useRef<any>(null);
+  const slRef   = useRef<any>(null);
+  const histRef = useRef<any>(null);
 
   const run = async () => {
     if (predictors.length === 0) { setError("Select at least one predictor"); return; }
@@ -737,81 +737,90 @@ function DiagnosticsSection({ sessionId, allCols, numCols }: { sessionId: string
           <div className="flex-1 grid grid-cols-2 gap-4">
             {/* Residuals vs Fitted */}
             <div className="panel relative">
-              <div className="relative">
-                <Plot ref={rfRef}
-                  data={[
-                    { type: "scatter" as const, mode: "markers" as const,
-                      x: diag.residuals_fitted.x, y: diag.residuals_fitted.y,
-                      marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.55 },
-                      hovertemplate: "Fitted: %{x:.3f}<br>Resid: %{y:.4f}<extra></extra>" },
-                    { type: "scatter" as const, mode: "lines" as const,
-                      x: [Math.min(...diag.residuals_fitted.x), Math.max(...diag.residuals_fitted.x)],
-                      y: [0, 0], line: { color: "#ef4444", dash: "dash" as const, width: 1 } },
-                  ]}
-                  layout={sharedLayout("Residuals vs Fitted", "Fitted Values", "Residuals")}
-                  style={{ width: "100%", height: 300 }} useResizeHandler
-                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                />
-                <PlotExporter plotRef={rfRef} title="Residuals_vs_Fitted" />
-              </div>
+              <TitledPlot
+                plotRefOut={rfRef}
+                storageKey="diag:resid-fitted"
+                defaultTitle="Residuals vs Fitted"
+                defaultSubtitle=""
+                defaultXAxis="Fitted Values"
+                defaultYAxis="Residuals"
+                data={[
+                  { type: "scatter" as const, mode: "markers" as const,
+                    x: diag.residuals_fitted.x, y: diag.residuals_fitted.y,
+                    marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.55 },
+                    hovertemplate: "Fitted: %{x:.3f}<br>Resid: %{y:.4f}<extra></extra>" },
+                  { type: "scatter" as const, mode: "lines" as const,
+                    x: [Math.min(...diag.residuals_fitted.x), Math.max(...diag.residuals_fitted.x)],
+                    y: [0, 0], line: { color: "#ef4444", dash: "dash" as const, width: 1 } },
+                ]}
+                layout={sharedLayout("Residuals vs Fitted", "Fitted Values", "Residuals")}
+                config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              />
             </div>
 
             {/* Normal Q-Q */}
             <div className="panel relative">
-              <div className="relative">
-                <Plot ref={qqRef}
-                  data={[
-                    { type: "scatter" as const, mode: "markers" as const,
-                      x: diag.qq.theoretical, y: diag.qq.sample,
-                      marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.6 },
-                      name: "Quantiles",
-                      hovertemplate: "Theoretical: %{x:.3f}<br>Sample: %{y:.3f}<extra></extra>" },
-                    { type: "scatter" as const, mode: "lines" as const,
-                      x: diag.qq.line_x, y: diag.qq.line_y,
-                      line: { color: "#ef4444", dash: "dash" as const, width: 1.5 }, name: "Normal line" },
-                  ]}
-                  layout={sharedLayout("Normal Q-Q", "Theoretical Quantiles", "Sample Quantiles")}
-                  style={{ width: "100%", height: 300 }} useResizeHandler
-                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                />
-                <PlotExporter plotRef={qqRef} title="Normal_QQ" />
-              </div>
+              <TitledPlot
+                plotRefOut={qqRef}
+                storageKey="diag:qq"
+                defaultTitle="Normal Q-Q"
+                defaultSubtitle=""
+                defaultXAxis="Theoretical Quantiles"
+                defaultYAxis="Sample Quantiles"
+                data={[
+                  { type: "scatter" as const, mode: "markers" as const,
+                    x: diag.qq.theoretical, y: diag.qq.sample,
+                    marker: { color: pal[0], size: td.markerSize - 2, opacity: 0.6 },
+                    name: "Quantiles",
+                    hovertemplate: "Theoretical: %{x:.3f}<br>Sample: %{y:.3f}<extra></extra>" },
+                  { type: "scatter" as const, mode: "lines" as const,
+                    x: diag.qq.line_x, y: diag.qq.line_y,
+                    line: { color: "#ef4444", dash: "dash" as const, width: 1.5 }, name: "Normal line" },
+                ]}
+                layout={sharedLayout("Normal Q-Q", "Theoretical Quantiles", "Sample Quantiles")}
+                config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              />
             </div>
 
             {/* Scale-Location */}
             <div className="panel relative">
-              <div className="relative">
-                <Plot ref={slRef}
-                  data={[
-                    { type: "scatter" as const, mode: "markers" as const,
-                      x: diag.scale_location.x, y: diag.scale_location.y,
-                      marker: { color: pal[1], size: td.markerSize - 2, opacity: 0.55 },
-                      hovertemplate: "Fitted: %{x:.3f}<br>√|Std Resid|: %{y:.3f}<extra></extra>" },
-                  ]}
-                  layout={sharedLayout("Scale-Location", "Fitted Values", "√|Standardized Residuals|")}
-                  style={{ width: "100%", height: 300 }} useResizeHandler
-                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                />
-                <PlotExporter plotRef={slRef} title="Scale_Location" />
-              </div>
+              <TitledPlot
+                plotRefOut={slRef}
+                storageKey="diag:scale-location"
+                defaultTitle="Scale-Location"
+                defaultSubtitle=""
+                defaultXAxis="Fitted Values"
+                defaultYAxis="√|Standardized Residuals|"
+                data={[
+                  { type: "scatter" as const, mode: "markers" as const,
+                    x: diag.scale_location.x, y: diag.scale_location.y,
+                    marker: { color: pal[1], size: td.markerSize - 2, opacity: 0.55 },
+                    hovertemplate: "Fitted: %{x:.3f}<br>√|Std Resid|: %{y:.3f}<extra></extra>" },
+                ]}
+                layout={sharedLayout("Scale-Location", "Fitted Values", "√|Standardized Residuals|")}
+                config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              />
             </div>
 
             {/* Residual histogram */}
             <div className="panel relative">
-              <div className="relative">
-                <Plot
-                  data={[{
-                    type: "histogram" as const,
-                    x: diag.residuals_fitted.y,
-                    marker: { color: pal[2], opacity: 0.75 },
-                    nbinsx: 30,
-                    name: "Residuals",
-                  }]}
-                  layout={sharedLayout("Residual Distribution", "Residual", "Count")}
-                  style={{ width: "100%", height: 300 }} useResizeHandler
-                  config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                />
-              </div>
+              <TitledPlot
+                plotRefOut={histRef}
+                storageKey="diag:resid-hist"
+                defaultTitle="Residual Distribution"
+                defaultSubtitle=""
+                defaultXAxis="Residual"
+                defaultYAxis="Count"
+                data={[{
+                  type: "histogram" as const,
+                  x: diag.residuals_fitted.y,
+                  marker: { color: pal[2], opacity: 0.75 },
+                  nbinsx: 30,
+                  name: "Residuals",
+                }]}
+                layout={sharedLayout("Residual Distribution", "Residual", "Count")}
+                config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              />
             </div>
           </div>
         )}

@@ -1,9 +1,8 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 
 type AnalysisType = "ttest_one" | "ttest_ind" | "ttest_paired" | "correlation" | "regression";
@@ -122,21 +121,23 @@ export default function BayesianPanel() {
     }
 
     return (
-      <div className="relative panel w-full" ref={plotRef}>
-        <Plot
+      <div className="panel w-full">
+        <TitledPlot
+          plotRefOut={plotRef}
+          storageKey="bayesian:prior-posterior"
           data={data}
           layout={{
             ...baseLayout,
-            title: { text: "Prior and Posterior Distribution of Effect Size", font: { color: "#374151", size: 12 } },
-            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "Effect Size (δ / ρ)" } },
-            yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: "Probability Density" } },
+            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
+            yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid },
             margin: { t: 36, r: 24, b: 44, l: 60 }
           }}
           config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 350 }}
-          useResizeHandler
+          defaultTitle="Prior and Posterior Distribution of Effect Size"
+          defaultSubtitle=""
+          defaultXAxis="Effect Size (δ / ρ)"
+          defaultYAxis="Probability Density"
         />
-        <PlotExporter plotRef={plotRef} title="Bayesian_Prior_Posterior" />
       </div>
     );
   };

@@ -9,12 +9,11 @@
  * 5. Optional outcome analysis on matched cohort
  */
 import { useState, useRef, useMemo } from "react";
-import Plot from "../PlotComponent";
 import { useStore, analysisCols } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runPSM, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
@@ -125,19 +124,17 @@ function LovePlot({
   };
 
   return (
-    <div className="relative">
-      <Plot
-        ref={plotRef}
-        data={traces}
-        layout={layout}
-        style={{ width: "100%", height: layout.height }}
-        useResizeHandler
-        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
-        onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
-      />
-      <PlotExporter plotRef={plotRef} title="Love_Plot_PSM" />
-    </div>
+    <TitledPlot
+      plotRefOut={plotRef}
+      storageKey="psm:love"
+      data={traces}
+      layout={layout}
+      config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+      defaultTitle=""
+      defaultSubtitle=""
+      defaultXAxis="Standardized Mean Difference (SMD)"
+      defaultYAxis=""
+    />
   );
 }
 
@@ -150,55 +147,53 @@ function PSOverlapPlot({
 }) {
   const plotRef = useRef<any>(null);
   return (
-    <div className="relative">
-      <Plot
-        ref={plotRef}
-        data={[
-          {
-            type: "histogram",
-            name: "Treated (unmatched)",
-            x: psDist.treated_unmatched,
-            opacity: 0.55,
-            marker: { color: "#ef4444" },
-            nbinsx: 25,
-            hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
-          },
-          {
-            type: "histogram",
-            name: "Control (unmatched)",
-            x: psDist.control_unmatched,
-            opacity: 0.55,
-            marker: { color: "#3b82f6" },
-            nbinsx: 25,
-            hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
-          },
-        ]}
-        layout={{
-          ...PLOT_BASE,
-          barmode: "overlay",
-          autosize: true,
-          height: 230,
-          xaxis: {
-            title: { text: "Propensity Score" },
-            range: [0, 1],
-            gridcolor: showGrid ? "#e5e7eb" : "transparent",
-          },
-          yaxis: { title: { text: "Count" }, gridcolor: showGrid ? "#e5e7eb" : "transparent" },
-          legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
-          annotations: [{
-            x: 0.5, y: 1.08, xref: "paper", yref: "paper",
-            text: "Propensity Score Overlap (Common Support)",
-            showarrow: false, font: { color: "#374151", size: 12 },
-          }],
-        } as any}
-        style={{ width: "100%", height: 230 }}
-        useResizeHandler
-        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        onInitialized={(_: any, gd: any) => { plotRef.current = gd; }}
-        onUpdate={(_: any, gd: any) => { plotRef.current = gd; }}
-      />
-      <PlotExporter plotRef={plotRef} title="PSM_Propensity_Overlap" />
-    </div>
+    <TitledPlot
+      plotRefOut={plotRef}
+      storageKey="psm:ps-overlap"
+      data={[
+        {
+          type: "histogram",
+          name: "Treated (unmatched)",
+          x: psDist.treated_unmatched,
+          opacity: 0.55,
+          marker: { color: "#ef4444" },
+          nbinsx: 25,
+          hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
+        },
+        {
+          type: "histogram",
+          name: "Control (unmatched)",
+          x: psDist.control_unmatched,
+          opacity: 0.55,
+          marker: { color: "#3b82f6" },
+          nbinsx: 25,
+          hovertemplate: "PS: %{x:.3f}<br>Count: %{y}<extra></extra>",
+        },
+      ]}
+      layout={{
+        ...PLOT_BASE,
+        barmode: "overlay",
+        autosize: true,
+        height: 230,
+        xaxis: {
+          title: { text: "Propensity Score" },
+          range: [0, 1],
+          gridcolor: showGrid ? "#e5e7eb" : "transparent",
+        },
+        yaxis: { title: { text: "Count" }, gridcolor: showGrid ? "#e5e7eb" : "transparent" },
+        legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
+        annotations: [{
+          x: 0.5, y: 1.08, xref: "paper", yref: "paper",
+          text: "Propensity Score Overlap (Common Support)",
+          showarrow: false, font: { color: "#374151", size: 12 },
+        }],
+      } as any}
+      config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+      defaultTitle=""
+      defaultSubtitle=""
+      defaultXAxis="Propensity Score"
+      defaultYAxis="Count"
+    />
   );
 }
 

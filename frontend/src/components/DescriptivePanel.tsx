@@ -3,9 +3,8 @@ import { useStore, PALETTES } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePalette } from "../plotStyle";
 import api from "../api";
-import Plot from "../PlotComponent";
 import ResultExporter from "./ResultExporter";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -165,7 +164,10 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
   const chartTab = useStore((s) => s.descriptiveTab);
   const showGrid = useStore((s) => s.showGrid);
   const pal = usePalette();
-  const plotRef = useRef<any>(null);
+  const histRef = useRef<any>(null);
+  const boxRef = useRef<any>(null);
+  const violinRef = useRef<any>(null);
+  const qqRef = useRef<any>(null);
   const P = pal[0]; // primary color
 
   const histData = [{
@@ -292,24 +294,24 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
       {/* Histogram */}
       {chartTab === "histogram" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="Histogram" />
-        <Plot ref={plotRef}
+        <TitledPlot plotRefOut={histRef} storageKey="desc:hist"
           data={histData}
           layout={{ ...BASE_LAYOUT, autosize: true, bargap: 0.02,
             xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Value" } },
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Count" } },
           }}
-          style={{ width: "100%", height: 380 }}
-          useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        />
+          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+          defaultTitle=""
+          defaultSubtitle=""
+          defaultXAxis="Value"
+          defaultYAxis="Count" />
         </div>
       )}
 
       {/* Box Plot */}
       {chartTab === "boxplot" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="BoxPlot" />
-        <Plot ref={plotRef}
+        <TitledPlot plotRefOut={boxRef} storageKey="desc:boxplot"
           data={boxData}
           layout={{
             ...BASE_LAYOUT,
@@ -330,9 +332,11 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
               },
             ],
           }}
-          style={{ width: "100%", height: 380 }}
-          useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        />
+          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+          defaultTitle=""
+          defaultSubtitle=""
+          defaultXAxis=""
+          defaultYAxis="Value" />
         {outliers.length > 0 && (
           <div className="mt-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
             <p className="text-xs font-semibold text-red-600 mb-1">
@@ -367,8 +371,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
       {/* Violin Plot */}
       {chartTab === "violin" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="Violin" />
-        <Plot ref={plotRef}
+        <TitledPlot plotRefOut={violinRef} storageKey="desc:violin"
           data={[{
             type: "violin" as any,
             y: summary.raw_values ?? [],
@@ -405,26 +408,28 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
               },
             ],
           }}
-          style={{ width: "100%", height: 380 }}
-          useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        />
+          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+          defaultTitle=""
+          defaultSubtitle=""
+          defaultXAxis=""
+          defaultYAxis="Value" />
         </div>
       )}
 
       {/* Q-Q Plot */}
       {chartTab === "qq" && (
         <div className="relative">
-        <PlotExporter plotRef={plotRef} title="QQ_Plot" />
-        <Plot ref={plotRef}
+        <TitledPlot plotRefOut={qqRef} storageKey="desc:qq"
           data={qqData}
           layout={{ ...BASE_LAYOUT, autosize: true,
-            title: { text: "Q-Q Plot (Normality)", font: { color: "#374151", size: 12 } },
             xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Theoretical quantiles" } },
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Sample quantiles" } },
           }}
-          style={{ width: "100%", height: 380 }}
-          useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        />
+          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+          defaultTitle="Q-Q Plot (Normality)"
+          defaultSubtitle=""
+          defaultXAxis="Theoretical quantiles"
+          defaultYAxis="Sample quantiles" />
         {/* List of most deviating values (The ones responsible for Non-normal label) */}
         {!summary.normal && normalityDeviants.length > 0 && (
           <NormalityDeviants deviants={normalityDeviants} onDelete={() => loadSummary(selected)} />
@@ -439,6 +444,8 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
 function CategoricalView({ summary }: { summary: any }) {
   const showGrid = useStore((s) => s.showGrid);
+  const donutRef = useRef<any>(null);
+  const barRef = useRef<any>(null);
   const cats = summary.categories.slice(0, 20);
   const colors = ["#7c3aed", "#f59e0b", "#10b981", "#ef4444", "#06b6d4", "#ec4899"];
 
@@ -465,7 +472,7 @@ function CategoricalView({ summary }: { summary: any }) {
 
   return (
     <div className="flex flex-col gap-3 h-full">
-      <Plot
+      <TitledPlot plotRefOut={donutRef} storageKey="desc:cat:donut"
         data={donutData}
         layout={{
           paper_bgcolor: "transparent", plot_bgcolor: "transparent",
@@ -473,18 +480,24 @@ function CategoricalView({ summary }: { summary: any }) {
           autosize: true,
           legend: { font: { color: "#374151" }, bgcolor: "transparent" },
         }}
-        style={{ width: "100%", height: 220 }}
-        useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle=""
+        defaultSubtitle=""
+        defaultXAxis=""
+        defaultYAxis=""
       />
-      <Plot
+      <TitledPlot plotRefOut={barRef} storageKey="desc:cat:bar"
         data={barData}
         layout={{ ...BASE_LAYOUT, autosize: true,
           xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Count" } },
           yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, automargin: true },
           margin: { ...BASE_LAYOUT.margin, l: 90 },
         }}
-        style={{ width: "100%", height: Math.max(160, cats.length * 28 + 60) }}
-        useResizeHandler config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle=""
+        defaultSubtitle=""
+        defaultXAxis="Count"
+        defaultYAxis=""
       />
     </div>
   );
@@ -516,6 +529,7 @@ function ScatterView({
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const prevKey = useRef("");
+  const scatterRef = useRef<any>(null);
 
   useEffect(() => {
     if (!xCol || !yCol) { setData(null); return; }
@@ -698,7 +712,7 @@ function ScatterView({
           </div>
 
           <div className="flex-1" style={{ minHeight: 320 }}>
-            <Plot
+            <TitledPlot plotRefOut={scatterRef} storageKey={`desc:scatter:${xCol}:${yCol}`}
               data={traces}
               layout={{
                 ...BASE_LAYOUT,
@@ -722,9 +736,11 @@ function ScatterView({
                   yanchor: "top" as const,
                 }] : [],
               }}
-              style={{ width: "100%", height: "100%" }}
-              useResizeHandler
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              defaultTitle=""
+              defaultSubtitle=""
+              defaultXAxis={xCol}
+              defaultYAxis={yCol}
             />
           </div>
         </>

@@ -1,6 +1,5 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import { runPower, parseArticle } from "../api";
 import { useStore, PALETTES } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
@@ -670,9 +669,9 @@ export default function PowerPanel() {
                   Each point = power you'd have at that sample size. <span className="text-red-400">Red dashed</span> = 80% target. <span className="text-indigo-500">●</span> = your n.
                 </p>
               </div>
-              <div className="relative">
-              <PlotExporter plotRef={powerRef} title="Power_Curve" />
-              <Plot
+              <TitledPlot
+                plotRefOut={powerRef}
+                storageKey="power:curve"
                 data={plotTraces as any}
                 layout={{
                   ...BASE_LAYOUT,
@@ -686,13 +685,12 @@ export default function PowerPanel() {
                     line: { color: _pal()[0], width: 1.5, dash: "dot" },
                   }] : [],
                 } as any}
-                onInitialized={(_: object, gd: HTMLElement) => { powerRef.current = gd; }}
-                onUpdate={(_: object, gd: HTMLElement)      => { powerRef.current = gd; }}
-                style={{ width: "100%", height: 320 }}
-                useResizeHandler
                 config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+                defaultTitle=""
+                defaultSubtitle=""
+                defaultXAxis={xLabel}
+                defaultYAxis="Power (1−β)"
               />
-              </div>
 
               {/* Zone legend */}
               <div className="grid grid-cols-3 gap-2 pt-1 border-t border-gray-100">

@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 
 export default function ChartsPanel() {
   const session  = useStore((s) => s.session);
@@ -199,33 +198,19 @@ export default function ChartsPanel() {
       </div>
 
       {/* Plot area */}
-      <div className="flex-1 panel min-h-0 relative bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
+      <div className="flex-1 panel min-h-0 relative bg-white border border-gray-200 shadow-sm rounded-2xl p-4 overflow-y-auto">
         {traces ? (
-          <>
-          <div className="absolute right-4 top-4 z-10">
-            <PlotExporter plotRef={chartRef} title={`Chart_${chartType}_${x}`} />
-          </div>
-          <Plot
-            ref={chartRef}
+          <TitledPlot
+            plotRefOut={chartRef}
+            storageKey={`charts:${chartType}:${x}`}
             data={traces}
-            layout={{
-              ...layout,
-              title: { text: customTitle || plotData?.x || "", font: { color: "#374151", size: 13, weight: "bold" } },
-              xaxis: {
-                ...(layout.xaxis as any),
-                title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
-              },
-              yaxis: {
-                ...(layout.yaxis as any),
-                title: customYLabel ? { text: customYLabel, font: { size: 11 } } : undefined,
-              },
-              autosize: true
-            }}
-            style={{ width: "100%", height: "100%" }}
-            useResizeHandler
+            layout={{ ...layout, xaxis: { ...(layout.xaxis as any) }, yaxis: { ...(layout.yaxis as any) } }}
             config={{ responsive: true, displayModeBar: true, displaylogo: false }}
+            defaultTitle={customTitle || plotData?.x || ""}
+            defaultSubtitle=""
+            defaultXAxis={customXLabel}
+            defaultYAxis={customYLabel}
           />
-          </>
         ) : (
           <div className="h-full flex items-center justify-center text-gray-400">
             Configure and generate a chart

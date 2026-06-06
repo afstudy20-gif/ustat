@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import Plot from "../PlotComponent";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { useStore, PALETTES } from "../store";
 import { runROC, runROCCompare, runROCMultiCompare, runROCCombined } from "../api";
@@ -200,7 +199,6 @@ export default function ROCPanel() {
 
   // ── Shared ──
   const [outcomeCol, setOutcomeCol] = usePersistedPanelState<string>("roc", "outcomeCol", defaultOutcome);
-  const rocPlotRef = useRef<any>(null);
   const rocSingleRef = useRef<any>(null);
   const rocCompareRef = useRef<any>(null);
   const rocMultiRef = useRef<any>(null);
@@ -1054,8 +1052,9 @@ export default function ROCPanel() {
 
             return (
             <div className="relative" style={{ width: "100%", height: "100%" }}>
-            <PlotExporter plotRef={rocSingleRef} title="ROC_Curve" />
-            <Plot
+            <TitledPlot
+              plotRefOut={rocSingleRef}
+              storageKey={`roc:single:${scoreCol}:${outcomeCol}`}
               data={[
                 {
                   type: "scatter", mode: "lines",
@@ -1099,14 +1098,13 @@ export default function ROCPanel() {
                   range: [0, 1.05], zeroline: false,
                 },
                 autosize: true,
-                title: { text: `ROC — ${scoreCol} predicting ${outcomeCol}`, font: { color: "#374151", size: 13 } },
                 showlegend: false,
                 annotations,
               }}
-              onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; rocSingleRef.current = gd; }}
-              onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; rocSingleRef.current = gd; }}
-              style={{ width: "100%", height: "100%" }}
-              useResizeHandler
+              defaultTitle={`ROC — ${scoreCol} predicting ${outcomeCol}`}
+              defaultSubtitle=""
+              defaultXAxis="1 − Specificity (FPR)"
+              defaultYAxis="Sensitivity (TPR)"
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
             />
             </div>
@@ -1116,8 +1114,9 @@ export default function ROCPanel() {
           {/* ── DeLong comparison plot (publication quality) ── */}
           {mode === "single" && cmpResult && cmpResult.curve_1 && cmpResult.curve_2 && (
             <div className="relative" style={{ width: "100%", height: "100%" }}>
-            <PlotExporter plotRef={rocCompareRef} title="ROC_DeLong_Comparison" />
-            <Plot
+            <TitledPlot
+              plotRefOut={rocCompareRef}
+              storageKey={`roc:delong:${cmpResult.score_1}:${cmpResult.score_2}`}
               data={[
                 // Baseline model (blue dashed)
                 {
@@ -1149,10 +1148,6 @@ export default function ROCPanel() {
                 xaxis: { ...(PLOT_LAYOUT.xaxis as object), showgrid: showGrid },
                 yaxis: { ...(PLOT_LAYOUT.yaxis as object), showgrid: showGrid },
                 autosize: true,
-                title: {
-                  text: `ROC Analysis: Model Comparison — ${cmpResult.score_1} vs. ${cmpResult.score_2}`,
-                  font: { color: "#374151", size: 13 },
-                },
                 legend: {
                   font: { color: "#374151", size: 11 },
                   bgcolor: "rgba(249,250,251,0.95)",
@@ -1180,10 +1175,10 @@ export default function ROCPanel() {
                   },
                 ],
               }}
-              onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; rocCompareRef.current = gd; }}
-              onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; rocCompareRef.current = gd; }}
-              style={{ width: "100%", height: "100%" }}
-              useResizeHandler
+              defaultTitle={`ROC Analysis: Model Comparison — ${cmpResult.score_1} vs. ${cmpResult.score_2}`}
+              defaultSubtitle=""
+              defaultXAxis="1 − Specificity (FPR)"
+              defaultYAxis="Sensitivity (TPR)"
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
             />
             </div>
@@ -1192,8 +1187,9 @@ export default function ROCPanel() {
           {/* ── Multi-curve plot ── */}
           {mode === "multi" && multiResults.length > 0 && (
             <div className="relative" style={{ width: "100%", height: "100%" }}>
-            <PlotExporter plotRef={rocMultiRef} title="ROC_Multi_Curve" />
-            <Plot
+            <TitledPlot
+              plotRefOut={rocMultiRef}
+              storageKey={`roc:multi:${outcomeCol}`}
               data={multiTraces as any}
               layout={{
                 ...PLOT_LAYOUT,
@@ -1208,7 +1204,6 @@ export default function ROCPanel() {
                   range: [0, 1.05], zeroline: false,
                 },
                 autosize: true,
-                title: { text: `ROC comparison: ${outcomeCol}`, font: { color: "#374151", size: 13 } },
                 legend: {
                   font: { color: "#374151", size: 11 },
                   bgcolor: "rgba(249,250,251,0.95)",
@@ -1216,10 +1211,10 @@ export default function ROCPanel() {
                   x: 0.98, y: 0.04, xanchor: "right" as const, yanchor: "bottom" as const,
                 },
               }}
-              onInitialized={(_: object, gd: HTMLElement) => { rocPlotRef.current = gd; rocMultiRef.current = gd; }}
-              onUpdate={(_: object, gd: HTMLElement)      => { rocPlotRef.current = gd; rocMultiRef.current = gd; }}
-              style={{ width: "100%", height: "100%" }}
-              useResizeHandler
+              defaultTitle={`ROC comparison: ${outcomeCol}`}
+              defaultSubtitle=""
+              defaultXAxis="1 − Specificity (FPR)"
+              defaultYAxis="Sensitivity (TPR)"
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
             />
             </div>
@@ -1255,7 +1250,6 @@ export default function ROCPanel() {
                     title={`ROC_${scoreCol}_vs_${outcomeCol}`}
                     headers={singleExport.headers}
                     rows={singleExport.rows}
-                    plotRef={rocPlotRef}
                   />
                 )}
               </div>
@@ -1345,7 +1339,6 @@ export default function ROCPanel() {
                   title={`ROC_multi_${outcomeCol}`}
                   headers={multiExport.headers}
                   rows={multiExport.rows}
-                  plotRef={rocPlotRef}
                 />
               )}
             </div>

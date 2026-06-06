@@ -1,5 +1,5 @@
-import { useState } from "react";
-import Plot from "../../PlotComponent";
+import { useRef, useState } from "react";
+import TitledPlot from "../TitledPlot";
 import { fmtP } from "../../lib/format";
 import { adjustP } from "./shared";
 
@@ -132,7 +132,12 @@ export function PredictionPanel({ result }: { result: any }) {
                 <p className="text-xs font-medium text-gray-600 text-center">
                   Predicted <em>{outcome}</em> vs. {col}
                 </p>
-                <Plot
+                <TitledPlot
+                  storageKey={"predict:num:" + col}
+                  defaultTitle=""
+                  defaultSubtitle=""
+                  defaultXAxis={col}
+                  defaultYAxis={outcome}
                   data={[
                     { type: "scatter" as const, mode: "lines" as const, x: xs, y: ys,
                       line: { color: "#6366f1", width: 2 }, hovertemplate: `${col}: %{x:.2f}<br>Ŷ: %{y:.3f}<extra></extra>` },
@@ -152,8 +157,6 @@ export function PredictionPanel({ result }: { result: any }) {
                     xaxis: { title: { text: col, font: { size: 10 } }, gridcolor: "#f3f4f6" },
                     yaxis: { title: { text: outcome, font: { size: 10 } }, gridcolor: "#f3f4f6", zeroline: false },
                   }}
-                  style={{ width: "100%", height: 200 }}
-                  useResizeHandler
                   config={{ responsive: true, displaylogo: false, displayModeBar: false }}
                 />
                 {/* Slider */}
@@ -189,7 +192,12 @@ export function PredictionPanel({ result }: { result: any }) {
                 <p className="text-xs font-medium text-gray-600 text-center">
                   Predicted <em>{outcome}</em> by {col}
                 </p>
-                <Plot
+                <TitledPlot
+                  storageKey={"predict:cat:" + col}
+                  defaultTitle=""
+                  defaultSubtitle=""
+                  defaultXAxis={outcome}
+                  defaultYAxis=""
                   data={[{
                     type: "bar" as const,
                     orientation: "h" as const,
@@ -207,8 +215,6 @@ export function PredictionPanel({ result }: { result: any }) {
                     xaxis: { title: { text: outcome, font: { size: 10 } }, gridcolor: "#f3f4f6" },
                     yaxis: { gridcolor: "transparent", zeroline: false, autorange: "reversed" as const },
                   }}
-                  style={{ width: "100%", height: Math.max(160, cats.length * 38 + 60) }}
-                  useResizeHandler
                   config={{ responsive: true, displaylogo: false, displayModeBar: false }}
                 />
                 <div className="flex items-center gap-2 px-1">
@@ -265,6 +271,7 @@ export function CoefDetailPanel({
 }: {
   coef: any; nullHyp: string; onClose: () => void;
 }) {
+  const coefPlotRef = useRef<any>(null);
   const beta = coef.log_odds ?? coef.log_irr ?? coef.log_hr ?? coef.estimate ?? 0;
   const se   = coef.se ?? 1;
   const adjP = adjustP(coef.p, beta, nullHyp);
@@ -289,7 +296,13 @@ export function CoefDetailPanel({
         Coefficient Detail — <span className="font-mono text-indigo-700">{coef.variable}</span>
       </h5>
       <div className="flex gap-4 items-start">
-        <Plot
+        <TitledPlot
+          plotRefOut={coefPlotRef}
+          storageKey={"coefdetail:" + coef.variable}
+          defaultTitle=""
+          defaultSubtitle=""
+          defaultXAxis="β (coefficient)"
+          defaultYAxis="density"
           data={[
             { type: "scatter" as const, x: fillX, y: fillY, fill: "toself",
               fillcolor: `${col}22`, line: { color: "transparent" }, hoverinfo: "skip", showlegend: false },
@@ -312,8 +325,6 @@ export function CoefDetailPanel({
             legend: { font: { size: 10 }, x: 0.65, y: 0.95, xanchor: "left" as const, yanchor: "top" as const },
             showlegend: true,
           }}
-          style={{ width: "100%", height: 200 }}
-          useResizeHandler
           config={{ responsive: true, displaylogo: false, displayModeBar: false }}
         />
         <div className="flex-shrink-0 space-y-2 min-w-[130px] pt-2">

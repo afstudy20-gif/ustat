@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runMetaAnalyze, runMetaSubgroup, runMetaRegression, runMetaBias } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 
 type InputType = "ci" | "se" | "raw";
@@ -28,7 +27,9 @@ export default function MetaPanel() {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const plotRef = useRef<any>(null);
+  const forestRef = useRef<any>(null);
+  const bubbleRef = useRef<any>(null);
+  const funnelRef = useRef<any>(null);
 
   const [measure, setMeasure] = useState("OR");
   const [tau2Method, setTau2Method] = useState("DL");
@@ -121,45 +122,48 @@ export default function MetaPanel() {
       },
     ];
     return (
-      <div className="relative panel" ref={plotRef}>
-        <Plot
-          data={data}
-          layout={{
-            ...baseLayout,
-            title: { text: `Forest plot — pooled ${result.measure}`, font: { color: "#374151", size: 12 } },
-            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: result.measure }, type: logScale ? "log" : "linear" },
-            yaxis: { tickvals: [...yIdx, 0], ticktext: [...labels, "Pooled (RE)"], showgrid: false, automargin: true, range: [-0.8, n + 0.8] },
-            shapes: [{ type: "line", x0: result.null_line, x1: result.null_line, yref: "paper", y0: 0, y1: 1, line: { color: "#9ca3af", width: 1, dash: "dash" } }],
-            showlegend: false, margin: { t: 36, r: 24, b: 44, l: 110 },
-          }}
-          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: Math.max(280, n * 34 + 120) }} useResizeHandler />
-        <PlotExporter plotRef={plotRef} title="Meta_Forest" />
-      </div>
+      <TitledPlot
+        plotRefOut={forestRef}
+        storageKey="meta:forest"
+        data={data}
+        layout={{
+          ...baseLayout,
+          xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, type: logScale ? "log" : "linear" },
+          yaxis: { tickvals: [...yIdx, 0], ticktext: [...labels, "Pooled (RE)"], showgrid: false, automargin: true, range: [-0.8, n + 0.8] },
+          shapes: [{ type: "line", x0: result.null_line, x1: result.null_line, yref: "paper", y0: 0, y1: 1, line: { color: "#9ca3af", width: 1, dash: "dash" } }],
+          showlegend: false, margin: { t: 36, r: 24, b: 44, l: 110 },
+        }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle={`Forest plot — pooled ${result.measure}`}
+        defaultSubtitle=""
+        defaultXAxis={result.measure}
+        defaultYAxis="" />
     );
   };
 
   const bubblePlot = () => {
     if (!result?.points) return null;
     return (
-      <div className="relative panel" ref={plotRef}>
-        <Plot
-          data={[
-            { type: "scatter", mode: "markers", x: result.points.map((p: any) => p.moderator), y: result.points.map((p: any) => p.effect),
-              marker: { color: pal[0], size: result.points.map((p: any) => p.size), opacity: 0.6 },
-              text: result.points.map((p: any) => p.label), hovertemplate: "%{text}<br>x=%{x}<br>%{y:.3f}<extra></extra>", name: "Studies" },
-            { type: "scatter", mode: "lines", x: result.line_x, y: result.line_y, line: { color: "#dc2626", width: 2 }, name: "Fit" },
-          ]}
-          layout={{
-            ...baseLayout, title: { text: `Meta-regression — ${result.measure} vs moderator`, font: { color: "#374151", size: 12 } },
-            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "Moderator" } },
-            yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: result.measure }, type: result.log_scale ? "log" : "linear" },
-            showlegend: false, margin: { t: 36, r: 24, b: 44, l: 60 },
-          }}
-          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 380 }} useResizeHandler />
-        <PlotExporter plotRef={plotRef} title="Meta_Regression" />
-      </div>
+      <TitledPlot
+        plotRefOut={bubbleRef}
+        storageKey="meta:regression"
+        data={[
+          { type: "scatter", mode: "markers", x: result.points.map((p: any) => p.moderator), y: result.points.map((p: any) => p.effect),
+            marker: { color: pal[0], size: result.points.map((p: any) => p.size), opacity: 0.6 },
+            text: result.points.map((p: any) => p.label), hovertemplate: "%{text}<br>x=%{x}<br>%{y:.3f}<extra></extra>", name: "Studies" },
+          { type: "scatter", mode: "lines", x: result.line_x, y: result.line_y, line: { color: "#dc2626", width: 2 }, name: "Fit" },
+        ]}
+        layout={{
+          ...baseLayout,
+          xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
+          yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, type: result.log_scale ? "log" : "linear" },
+          showlegend: false, margin: { t: 36, r: 24, b: 44, l: 60 },
+        }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle={`Meta-regression — ${result.measure} vs moderator`}
+        defaultSubtitle=""
+        defaultXAxis="Moderator"
+        defaultYAxis={result.measure} />
     );
   };
 
@@ -168,23 +172,25 @@ export default function MetaPanel() {
     const eff = result.funnel.map((f: any) => f.effect);
     const se = result.funnel.map((f: any) => f.se);
     return (
-      <div className="relative panel" ref={plotRef}>
-        <Plot
-          data={[
-            { type: "scatter", mode: "markers", x: eff, y: se, marker: { color: pal[0], size: 8, opacity: 0.7 },
-              text: result.funnel.map((f: any) => f.label), hovertemplate: "%{text}<br>eff=%{x:.3f}<br>SE=%{y:.3f}<extra></extra>", name: "Studies" },
-          ]}
-          layout={{
-            ...baseLayout, title: { text: "Funnel plot", font: { color: "#374151", size: 12 } },
-            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: result.measure }, type: result.log_scale ? "log" : "linear" },
-            yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: "Standard error" }, autorange: "reversed" as const },
-            shapes: [{ type: "line", x0: result.pooled_effect, x1: result.pooled_effect, y0: 0, y1: result.se_max, line: { color: "#9ca3af", width: 1, dash: "dash" } }],
-            showlegend: false, margin: { t: 36, r: 24, b: 44, l: 60 },
-          }}
-          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 380 }} useResizeHandler />
-        <PlotExporter plotRef={plotRef} title="Meta_Funnel" />
-      </div>
+      <TitledPlot
+        plotRefOut={funnelRef}
+        storageKey="meta:funnel"
+        data={[
+          { type: "scatter", mode: "markers", x: eff, y: se, marker: { color: pal[0], size: 8, opacity: 0.7 },
+            text: result.funnel.map((f: any) => f.label), hovertemplate: "%{text}<br>eff=%{x:.3f}<br>SE=%{y:.3f}<extra></extra>", name: "Studies" },
+        ]}
+        layout={{
+          ...baseLayout,
+          xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, type: result.log_scale ? "log" : "linear" },
+          yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, autorange: "reversed" as const },
+          shapes: [{ type: "line", x0: result.pooled_effect, x1: result.pooled_effect, y0: 0, y1: result.se_max, line: { color: "#9ca3af", width: 1, dash: "dash" } }],
+          showlegend: false, margin: { t: 36, r: 24, b: 44, l: 60 },
+        }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle="Funnel plot"
+        defaultSubtitle=""
+        defaultXAxis={result.measure}
+        defaultYAxis="Standard error" />
     );
   };
 

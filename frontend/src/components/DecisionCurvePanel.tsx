@@ -15,12 +15,10 @@
  */
 
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { runDCA } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
-import ResultExporter from "./ResultExporter";
+import TitledPlot from "./TitledPlot";
 import ThreeCol from "./ThreeCol";
 
 interface DcaResult {
@@ -398,18 +396,16 @@ export default function DecisionCurvePanel() {
         }
         middle={
           result && plotData.length > 0 ? (
-            <div>
-              <div className="flex items-center justify-between mb-2 px-1">
-                <div>
-                  <div className="text-sm font-semibold text-gray-800">Net Benefit Curves</div>
-                  <div className="text-[11px] text-gray-500 -mt-0.5">Green = model provides clinical value over alternatives</div>
-                </div>
-                <PlotExporter plotRef={dcaPlotRef} title="decision_curve" />
-              </div>
-              <div className="relative" ref={dcaPlotRef}>
-                <Plot data={plotData} layout={buildLayout()} style={{ width: "100%", height: 440 }} />
-              </div>
-            </div>
+            <TitledPlot
+              plotRefOut={dcaPlotRef}
+              storageKey="dca:netbenefit"
+              data={plotData}
+              layout={buildLayout()}
+              defaultTitle="Net Benefit Curves"
+              defaultSubtitle="Green = model provides clinical value over alternatives"
+              defaultXAxis="Threshold Probability (pt)"
+              defaultYAxis="Net Benefit"
+            />
           ) : (
             <div className="h-[420px] flex items-center justify-center text-gray-400 border border-dashed rounded-2xl">
               Select columns and run DCA to see the net benefit curves
@@ -480,10 +476,6 @@ export default function DecisionCurvePanel() {
                   <span className="font-semibold">Note:</span> {result.warnings.join(" • ")}
                 </div>
               )}
-
-              <div className="pt-2">
-                <ResultExporter title="decision_curve_analysis" plotRef={dcaPlotRef} />
-              </div>
             </div>
           ) : (
             <div className="h-full flex items-center justify-center text-center text-gray-400 border border-dashed border-gray-200 rounded-2xl p-6 text-sm">

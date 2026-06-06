@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runArima, runDecompose, runStationarity } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 
@@ -76,26 +75,27 @@ export default function TimeSeriesPanel() {
     const fcLo = result.forecast.map((r: any) => r.ci_low);
     const fcHi = result.forecast.map((r: any) => r.ci_high);
     return (
-      <div className="relative panel" ref={mainRef}>
-        <Plot
-          data={[
-            { type: "scatter", mode: "lines", x: obsX, y: obsY, line: { color: "#374151", width: 1.5 }, name: "Observed" },
-            { type: "scatter", mode: "lines", x: obsX, y: fitY, line: { color: pal[0], width: 1.5, dash: "dot" as const }, name: "Fitted" },
-            { type: "scatter", mode: "lines", x: [...fcX, ...fcX.slice().reverse()], y: [...fcHi, ...fcLo.slice().reverse()], fill: "toself", fillcolor: `${pal[1] ?? "#6366f1"}22`, line: { color: "transparent" }, name: "95% CI", hoverinfo: "skip" as const },
-            { type: "scatter", mode: "lines+markers", x: fcX, y: fcY, line: { color: pal[1] ?? "#6366f1", width: 2 }, marker: { size: 4 }, name: "Forecast" },
-          ]}
-          layout={{
-            ...baseLayout,
-            title: { text: `ARIMA${JSON.stringify(result.order)}×${JSON.stringify(result.seasonal_order)} — ${result.value_col}`, font: { color: "#374151", size: 12 } },
-            xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: timeCol || "t" } },
-            yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: result.value_col } },
-            legend: { orientation: "h", y: -0.2, font: { size: 10 } },
-            margin: { t: 36, r: 20, b: 50, l: 60 },
-          }}
-          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 380 }} useResizeHandler />
-        <PlotExporter plotRef={mainRef} title="ARIMA_Forecast" />
-      </div>
+      <TitledPlot
+        plotRefOut={mainRef}
+        storageKey={`ts:arima:${result.value_col}`}
+        data={[
+          { type: "scatter", mode: "lines", x: obsX, y: obsY, line: { color: "#374151", width: 1.5 }, name: "Observed" },
+          { type: "scatter", mode: "lines", x: obsX, y: fitY, line: { color: pal[0], width: 1.5, dash: "dot" as const }, name: "Fitted" },
+          { type: "scatter", mode: "lines", x: [...fcX, ...fcX.slice().reverse()], y: [...fcHi, ...fcLo.slice().reverse()], fill: "toself", fillcolor: `${pal[1] ?? "#6366f1"}22`, line: { color: "transparent" }, name: "95% CI", hoverinfo: "skip" as const },
+          { type: "scatter", mode: "lines+markers", x: fcX, y: fcY, line: { color: pal[1] ?? "#6366f1", width: 2 }, marker: { size: 4 }, name: "Forecast" },
+        ]}
+        layout={{
+          ...baseLayout,
+          xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
+          yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid },
+          legend: { orientation: "h", y: -0.2, font: { size: 10 } },
+          margin: { t: 36, r: 20, b: 50, l: 60 },
+        }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle={`ARIMA${JSON.stringify(result.order)}×${JSON.stringify(result.seasonal_order)} — ${result.value_col}`}
+        defaultSubtitle=""
+        defaultXAxis={timeCol || "t"}
+        defaultYAxis={result.value_col} />
     );
   };
 
@@ -110,53 +110,56 @@ export default function TimeSeriesPanel() {
       ["Residual", result.resid, "#9ca3af"],
     ];
     return (
-      <div className="relative panel" ref={decompRef}>
-        <Plot
-          data={rows.map(([name, y, color], i) => ({
-            type: "scatter", mode: i === 3 ? "markers" : "lines",
-            x, y, name, line: { color, width: 1.4 }, marker: { color, size: 3 },
-            xaxis: i === 0 ? "x" : `x${i + 1}`, yaxis: i === 0 ? "y" : `y${i + 1}`,
-          }))}
-          layout={{
-            ...baseLayout, grid: { rows: 4, columns: 1, pattern: "independent" as const },
-            title: { text: `${result.method.toUpperCase()} decomposition (period ${result.period})`, font: { color: "#374151", size: 12 } },
-            showlegend: false,
-            height: 560, margin: { t: 36, r: 20, b: 40, l: 60 },
-            ...Object.fromEntries(rows.flatMap((r, i) => {
-              const suf = i === 0 ? "" : String(i + 1);
-              return [
-                [`xaxis${suf}`, { showgrid: showGrid, gridcolor: "#eef2f7" }],
-                [`yaxis${suf}`, { showgrid: showGrid, gridcolor: "#eef2f7", title: { text: r[0], font: { size: 9 } } }],
-              ];
-            })),
-          }}
-          config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-          style={{ width: "100%", height: 560 }} useResizeHandler />
-        <PlotExporter plotRef={decompRef} title="TS_Decomposition" />
-      </div>
+      <TitledPlot
+        plotRefOut={decompRef}
+        storageKey={`ts:decompose:${result.value_col ?? ""}`}
+        data={rows.map(([name, y, color], i) => ({
+          type: "scatter", mode: i === 3 ? "markers" : "lines",
+          x, y, name, line: { color, width: 1.4 }, marker: { color, size: 3 },
+          xaxis: i === 0 ? "x" : `x${i + 1}`, yaxis: i === 0 ? "y" : `y${i + 1}`,
+        }))}
+        layout={{
+          ...baseLayout, grid: { rows: 4, columns: 1, pattern: "independent" as const },
+          showlegend: false,
+          height: 560, margin: { t: 36, r: 20, b: 40, l: 60 },
+          ...Object.fromEntries(rows.flatMap((r, i) => {
+            const suf = i === 0 ? "" : String(i + 1);
+            return [
+              [`xaxis${suf}`, { showgrid: showGrid, gridcolor: "#eef2f7" }],
+              [`yaxis${suf}`, { showgrid: showGrid, gridcolor: "#eef2f7", title: { text: r[0], font: { size: 9 } } }],
+            ];
+          })),
+        }}
+        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+        defaultTitle={`${result.method.toUpperCase()} decomposition (period ${result.period})`}
+        defaultSubtitle=""
+        defaultXAxis=""
+        defaultYAxis="" />
     );
   };
 
   // ── Stationarity: ACF + PACF stem plots ──
   const stem = (data: any[], title: string, ref: any, exportName: string) => (
-    <div className="relative panel" ref={ref}>
-      <Plot
-        data={[
-          // CI band
-          { type: "scatter", mode: "lines", x: data.map((d) => d.lag), y: data.map((d) => d.ci_high), line: { color: "transparent" }, hoverinfo: "skip" as const, showlegend: false },
-          { type: "scatter", mode: "lines", x: data.map((d) => d.lag), y: data.map((d) => d.ci_low), fill: "tonexty", fillcolor: "rgba(148,163,184,0.18)", line: { color: "transparent" }, hoverinfo: "skip" as const, showlegend: false },
-          { type: "bar", x: data.map((d) => d.lag), y: data.map((d) => d.value), marker: { color: pal[0] }, width: 0.15, name: title, hovertemplate: "lag %{x}<br>%{y:.3f}<extra></extra>" },
-        ]}
-        layout={{
-          ...baseLayout, title: { text: title, font: { color: "#374151", size: 12 } },
-          xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "Lag" } },
-          yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, range: [-1.05, 1.05] },
-          showlegend: false, margin: { t: 36, r: 20, b: 40, l: 50 },
-        }}
-        config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        style={{ width: "100%", height: 240 }} useResizeHandler />
-      <PlotExporter plotRef={ref} title={exportName} />
-    </div>
+    <TitledPlot
+      plotRefOut={ref}
+      storageKey={`ts:stem:${exportName}`}
+      data={[
+        // CI band
+        { type: "scatter", mode: "lines", x: data.map((d) => d.lag), y: data.map((d) => d.ci_high), line: { color: "transparent" }, hoverinfo: "skip" as const, showlegend: false },
+        { type: "scatter", mode: "lines", x: data.map((d) => d.lag), y: data.map((d) => d.ci_low), fill: "tonexty", fillcolor: "rgba(148,163,184,0.18)", line: { color: "transparent" }, hoverinfo: "skip" as const, showlegend: false },
+        { type: "bar", x: data.map((d) => d.lag), y: data.map((d) => d.value), marker: { color: pal[0] }, width: 0.15, name: title, hovertemplate: "lag %{x}<br>%{y:.3f}<extra></extra>" },
+      ]}
+      layout={{
+        ...baseLayout,
+        xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
+        yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, range: [-1.05, 1.05] },
+        showlegend: false, margin: { t: 36, r: 20, b: 40, l: 50 },
+      }}
+      config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+      defaultTitle={title}
+      defaultSubtitle=""
+      defaultXAxis="Lag"
+      defaultYAxis="" />
   );
 
   return (

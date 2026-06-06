@@ -6,6 +6,7 @@ import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurre
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import { Tip } from "./Tip";
 import ThreeCol from "./ThreeCol";
 
@@ -907,10 +908,17 @@ export default function SurvivalAdvancedPanel() {
           }
           middle={
             fgResult?.plot ? (
-              <div className="relative" ref={fgPlotRef}>
-                <Plot data={fgResult.plot.data} layout={{ ...fgResult.plot.layout, ...baseLayout, title: fgResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
-                <PlotExporter plotRef={fgPlotRef} title="CIF" />
-              </div>
+              <TitledPlot
+                plotRefOut={fgPlotRef}
+                storageKey="surv:finegray"
+                data={fgResult.plot.data}
+                layout={{ ...fgResult.plot.layout, ...baseLayout, title: fgResult.plot.layout.title }}
+                config={{ responsive: true }}
+                defaultTitle={fgResult.plot.layout?.title?.text ?? ""}
+                defaultSubtitle=""
+                defaultXAxis={fgResult.plot.layout?.xaxis?.title?.text ?? ""}
+                defaultYAxis={fgResult.plot.layout?.yaxis?.title?.text ?? ""}
+              />
             ) : (
               <div className="flex items-center justify-center h-[400px] border border-dashed border-gray-200 rounded-lg text-xs text-gray-400">
                 Run Fine-Gray to render CIF
@@ -1009,12 +1017,17 @@ export default function SurvivalAdvancedPanel() {
           }
           middle={
             rmstResult?.plot ? (
-              <div className="relative" ref={rmstPlotRef}>
-                <Plot data={rmstResult.plot.data}
-                  layout={{ ...rmstResult.plot.layout, ...baseLayout, title: rmstResult.plot.layout.title }}
-                  config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
-                <PlotExporter plotRef={rmstPlotRef} title="RMST" />
-              </div>
+              <TitledPlot
+                plotRefOut={rmstPlotRef}
+                storageKey="surv:rmst"
+                data={rmstResult.plot.data}
+                layout={{ ...rmstResult.plot.layout, ...baseLayout, title: rmstResult.plot.layout.title }}
+                config={{ responsive: true }}
+                defaultTitle={rmstResult.plot.layout?.title?.text ?? ""}
+                defaultSubtitle=""
+                defaultXAxis={rmstResult.plot.layout?.xaxis?.title?.text ?? ""}
+                defaultYAxis={rmstResult.plot.layout?.yaxis?.title?.text ?? ""}
+              />
             ) : (
               <div className="flex items-center justify-center h-[400px] border border-dashed border-gray-200 rounded-lg text-xs text-gray-400">
                 Run RMST to render KM curves
@@ -1107,10 +1120,17 @@ export default function SurvivalAdvancedPanel() {
           }
           middle={
             lwResult?.plot ? (
-              <div className="relative" ref={lwPlotRef}>
-                <Plot data={lwResult.plot.data} layout={{ ...lwResult.plot.layout, ...baseLayout, title: lwResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
-                <PlotExporter plotRef={lwPlotRef} title="MCF_LWYY" />
-              </div>
+              <TitledPlot
+                plotRefOut={lwPlotRef}
+                storageKey="surv:lwyy"
+                data={lwResult.plot.data}
+                layout={{ ...lwResult.plot.layout, ...baseLayout, title: lwResult.plot.layout.title }}
+                config={{ responsive: true }}
+                defaultTitle={lwResult.plot.layout?.title?.text ?? ""}
+                defaultSubtitle=""
+                defaultXAxis={lwResult.plot.layout?.xaxis?.title?.text ?? ""}
+                defaultYAxis={lwResult.plot.layout?.yaxis?.title?.text ?? ""}
+              />
             ) : (
               <div className="flex items-center justify-center h-[400px] border border-dashed border-gray-200 rounded-lg text-xs text-gray-400">
                 Run LWYY to render the mean cumulative function
@@ -1254,10 +1274,17 @@ export default function SurvivalAdvancedPanel() {
           }
           middle={
             lmResult?.plot ? (
-              <div className="relative" ref={lmPlotRef}>
-                <Plot data={lmResult.plot.data} layout={{ ...lmResult.plot.layout, ...baseLayout, title: lmResult.plot.layout.title }} config={{ responsive: true }} style={{ width: "100%", height: 400 }} />
-                <PlotExporter plotRef={lmPlotRef} title="Landmark_KM" />
-              </div>
+              <TitledPlot
+                plotRefOut={lmPlotRef}
+                storageKey="surv:landmark"
+                data={lmResult.plot.data}
+                layout={{ ...lmResult.plot.layout, ...baseLayout, title: lmResult.plot.layout.title }}
+                config={{ responsive: true }}
+                defaultTitle={lmResult.plot.layout?.title?.text ?? ""}
+                defaultSubtitle=""
+                defaultXAxis={lmResult.plot.layout?.xaxis?.title?.text ?? ""}
+                defaultYAxis={lmResult.plot.layout?.yaxis?.title?.text ?? ""}
+              />
             ) : (
               <div className="flex items-center justify-center h-[400px] border border-dashed border-gray-200 rounded-lg text-xs text-gray-400">
                 Run Landmark to render KM

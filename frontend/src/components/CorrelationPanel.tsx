@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
+import TitledPlot from "./TitledPlot";
 import PlotExporter from "./PlotExporter";
 import { useStore, PALETTES } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
@@ -228,9 +229,14 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
   );
 
   const middleCol = active ? (
-    <div className="panel h-[480px] relative flex flex-col" ref={corrScatterRef}>
-      <PlotExporter plotRef={corrScatterRef} title="Correlation_Scatter" />
-      <Plot
+    <div className="panel">
+      <TitledPlot
+        plotRefOut={corrScatterRef}
+        storageKey="corr:pairwise:scatter"
+        defaultTitle=""
+        defaultSubtitle=""
+        defaultXAxis={active.var1}
+        defaultYAxis={active.var2}
         data={[
           {
             type: "scatter",
@@ -288,10 +294,6 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
           ],
           margin: { t: 20, r: 20, b: 60, l: 60 },
         }}
-        onInitialized={(_: object, gd: HTMLElement) => { corrScatterRef.current = gd; }}
-        onUpdate={(_: object, gd: HTMLElement)      => { corrScatterRef.current = gd; }}
-        style={{ width: "100%", height: "100%" }}
-        useResizeHandler
         config={{ responsive: true, displayModeBar: false }}
       />
     </div>
@@ -618,8 +620,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
 
   const middleCol = data ? (
     displayMode === "heatmap" ? (
-      <div className="panel h-[480px] flex flex-col gap-2 relative" ref={corrHeatmapRef}>
-        <PlotExporter plotRef={corrHeatmapRef} title="Correlation_Matrix" />
+      <div className="panel flex flex-col gap-2">
         <div className="flex items-center justify-between flex-shrink-0">
           <span className="text-xs font-semibold text-gray-500">Correlation Matrix</span>
           <button
@@ -629,7 +630,13 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
             ↓ Export CSV
           </button>
         </div>
-        <Plot
+        <TitledPlot
+          plotRefOut={corrHeatmapRef}
+          storageKey="corr:matrix:heatmap"
+          defaultTitle=""
+          defaultSubtitle=""
+          defaultXAxis=""
+          defaultYAxis=""
           data={[{
             type: "heatmap",
             z: data.variables.map((c1: string) =>
@@ -665,10 +672,6 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
             yaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
             margin: { t: 20, r: 20, b: 100, l: 100 },
           }}
-          onInitialized={(_: object, gd: HTMLElement) => { corrHeatmapRef.current = gd; }}
-          onUpdate={(_: object, gd: HTMLElement)      => { corrHeatmapRef.current = gd; }}
-          style={{ width: "100%", height: "100%", flex: 1 }}
-          useResizeHandler
           config={{ responsive: true, displayModeBar: false }}
         />
         <div className="flex gap-4 text-[10px] text-gray-400 flex-shrink-0 border-t pt-1 border-gray-100">
@@ -870,9 +873,14 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
   );
 
   const middleCol = data ? (
-    <div className="panel h-[480px] relative flex flex-col" ref={blandAltmanRef}>
-      <PlotExporter plotRef={blandAltmanRef} title="Bland_Altman_Plot" />
-      <Plot
+    <div className="panel">
+      <TitledPlot
+        plotRefOut={blandAltmanRef}
+        storageKey="corr:icc:bland-altman"
+        defaultTitle="Bland-Altman Plot"
+        defaultSubtitle=""
+        defaultXAxis={`Mean of ${rater1} & ${rater2}`}
+        defaultYAxis={`${rater1} − ${rater2}`}
         data={[{
           type: "scatter", mode: "markers",
           x: data.bland_altman.means, y: data.bland_altman.diffs,
@@ -898,10 +906,6 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
           margin: { t: 20, r: 130, b: 60, l: 60 },
           title: { text: "Bland-Altman Plot", font: { color: "#374151", size: 12 } },
         }}
-        onInitialized={(_: object, gd: HTMLElement) => { blandAltmanRef.current = gd; }}
-        onUpdate={(_: object, gd: HTMLElement)      => { blandAltmanRef.current = gd; }}
-        style={{ width: "100%", height: "100%" }}
-        useResizeHandler
         config={{ responsive: true, displayModeBar: false }}
       />
     </div>
@@ -1044,9 +1048,14 @@ function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[]
   );
 
   const middleCol = data ? (
-    <div className="panel h-[480px] relative flex flex-col" ref={kappaMatrixRef}>
-      <PlotExporter plotRef={kappaMatrixRef} title="Kappa_Confusion_Matrix" />
-      <Plot
+    <div className="panel">
+      <TitledPlot
+        plotRefOut={kappaMatrixRef}
+        storageKey="corr:kappa:confusion"
+        defaultTitle="Confusion Matrix"
+        defaultSubtitle=""
+        defaultXAxis=""
+        defaultYAxis=""
         data={[{
           type: "heatmap",
           z: data.confusion_matrix,
@@ -1066,10 +1075,6 @@ function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[]
           yaxis: { showgrid: showGrid, gridcolor: "#e5e7eb", zeroline: false },
           margin: { t: 50, r: 20, b: 80, l: 100 },
         }}
-        onInitialized={(_: object, gd: HTMLElement) => { kappaMatrixRef.current = gd; }}
-        onUpdate={(_: object, gd: HTMLElement)      => { kappaMatrixRef.current = gd; }}
-        style={{ width: "100%", height: "100%" }}
-        useResizeHandler
         config={{ responsive: true, displayModeBar: false }}
       />
     </div>

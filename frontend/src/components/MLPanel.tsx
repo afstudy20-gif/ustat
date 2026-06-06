@@ -1,10 +1,9 @@
 import { useState, useRef } from "react";
-import Plot from "../PlotComponent";
 import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runRandomForest, runGradientBoosting } from "../api";
 import { Tip } from "./Tip";
-import PlotExporter from "./PlotExporter";
+import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 
@@ -215,8 +214,10 @@ export default function MLPanel() {
             <div className="space-y-3">
               {/* ROC (classification) or predicted-vs-actual (regression) */}
               {isClass ? (
-                <div className="relative panel" ref={rocRef}>
-                  <Plot
+                <div className="panel">
+                  <TitledPlot
+                    plotRefOut={rocRef}
+                    storageKey="ml:roc"
                     data={[
                       {
                         type: "scatter", mode: "lines",
@@ -235,9 +236,8 @@ export default function MLPanel() {
                     ]}
                     layout={{
                       ...baseLayout,
-                      title: { text: `${result.model} ROC — ${result.outcome}`, font: { color: "#374151", size: 13 } },
-                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "1 − Specificity (FPR)" }, range: [0, 1], zeroline: false },
-                      yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: "Sensitivity (TPR)" }, range: [0, 1.05], zeroline: false },
+                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, range: [0, 1], zeroline: false },
+                      yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, range: [0, 1.05], zeroline: false },
                       showlegend: false,
                       annotations: [{
                         x: 0.98, y: 0.04, xref: "paper" as const, yref: "paper" as const,
@@ -250,12 +250,16 @@ export default function MLPanel() {
                       }],
                     }}
                     config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                    style={{ width: "100%", height: 360 }} useResizeHandler />
-                  <PlotExporter plotRef={rocRef} title="ML_ROC" />
+                    defaultTitle={`${result.model} ROC — ${result.outcome}`}
+                    defaultSubtitle=""
+                    defaultXAxis="1 − Specificity (FPR)"
+                    defaultYAxis="Sensitivity (TPR)" />
                 </div>
               ) : (
-                <div className="relative panel" ref={scatterRef}>
-                  <Plot
+                <div className="panel">
+                  <TitledPlot
+                    plotRefOut={scatterRef}
+                    storageKey="ml:predVsActual"
                     data={[
                       {
                         type: "scatter", mode: "markers",
@@ -273,21 +277,24 @@ export default function MLPanel() {
                     ]}
                     layout={{
                       ...baseLayout,
-                      title: { text: `${result.model} — predicted vs actual (${result.outcome})`, font: { color: "#374151", size: 13 } },
-                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: "Actual" } },
-                      yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: "Predicted (out-of-fold)" } },
+                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
+                      yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid },
                       showlegend: false,
                     }}
                     config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                    style={{ width: "100%", height: 360 }} useResizeHandler />
-                  <PlotExporter plotRef={scatterRef} title="ML_PredVsActual" />
+                    defaultTitle={`${result.model} — predicted vs actual (${result.outcome})`}
+                    defaultSubtitle=""
+                    defaultXAxis="Actual"
+                    defaultYAxis="Predicted (out-of-fold)" />
                 </div>
               )}
 
               {/* Feature importance bar */}
               {topImp.length > 0 && (
-                <div className="relative panel" ref={impRef}>
-                  <Plot
+                <div className="panel">
+                  <TitledPlot
+                    plotRefOut={impRef}
+                    storageKey="ml:importance"
                     data={[{
                       type: "bar", orientation: "h",
                       x: topImp.map((d: any) => d.permutation),
@@ -298,14 +305,16 @@ export default function MLPanel() {
                     }]}
                     layout={{
                       ...baseLayout,
-                      title: { text: `Permutation importance (${isClass ? "ΔAUC" : "ΔR²"})`, font: { color: "#374151", size: 13 } },
-                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: isClass ? "Drop in AUC when shuffled" : "Drop in R² when shuffled" } },
+                      height: Math.max(240, topImp.length * 26 + 80),
+                      xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid },
                       yaxis: { ...(baseLayout.yaxis as object), showgrid: false, automargin: true },
                       margin: { t: 40, r: 20, b: 50, l: 10 },
                     }}
                     config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-                    style={{ width: "100%", height: Math.max(240, topImp.length * 26 + 80) }} useResizeHandler />
-                  <PlotExporter plotRef={impRef} title="ML_Importance" />
+                    defaultTitle={`Permutation importance (${isClass ? "ΔAUC" : "ΔR²"})`}
+                    defaultSubtitle=""
+                    defaultXAxis={isClass ? "Drop in AUC when shuffled" : "Drop in R² when shuffled"}
+                    defaultYAxis="" />
                 </div>
               )}
             </div>
