@@ -10,6 +10,12 @@ const Plot = forwardRef<InstanceType<typeof _Plot>, PlotParams>((props, ref) => 
   <PlotBase
     {...props}
     ref={ref}
+    // Plotly.toImage clones the layout, not the surrounding DOM background.
+    // A transparent paper layer therefore stays transparent even when
+    // config.setBackground is "opaque". Force the actual figure paper white
+    // so every export path (modebar, PNG, SVG, JPEG, TIFF and clipboard) has
+    // a real white background.
+    layout={{ ...props.layout, paper_bgcolor: "#ffffff" }}
     config={{ ...props.config, setBackground: "opaque" }}
   />
 ));
