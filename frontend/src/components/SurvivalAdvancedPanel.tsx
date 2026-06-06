@@ -2317,8 +2317,9 @@ export default function SurvivalAdvancedPanel() {
           />
         )}
 
-        {/* Model-specification (sensitivity) forest builder */}
-        {coxDuration && coxEvent && (
+        {/* Model-specification (sensitivity) forest builder — always visible so
+            the exposure picker is discoverable; Build validates duration/event. */}
+        {(
           <div className="rounded-lg border border-gray-200">
             <button onClick={() => setSpecOpen(!specOpen)}
               className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50">
