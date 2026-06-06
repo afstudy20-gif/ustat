@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra, runMancova } from "../api";
 import ResultExporter from "./ResultExporter";
 
@@ -258,28 +259,33 @@ export default function HypothesisPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
 
-  const [test, setTest] = useState("ttest_1sample");
-  const [col, setCol] = useState(numCols[0] ?? "");
-  const [col2, setCol2] = useState(catCols[1] ?? catCols[0] ?? "");
-  const [groupCol, setGroupCol] = useState(catCols[0] ?? "");
+  const [test, setTest] = usePersistedPanelState<string>("hypothesis", "test", "ttest_1sample");
+  const [col, setCol] = usePersistedPanelState<string>("hypothesis", "col", numCols[0] ?? "");
+  const [col2, setCol2] = usePersistedPanelState<string>("hypothesis", "col2", catCols[1] ?? catCols[0] ?? "");
+  const [groupCol, setGroupCol] = usePersistedPanelState<string>("hypothesis", "groupCol", catCols[0] ?? "");
   const [mu, setMu] = useState("0");
-  const [covariates, setCovariates] = useState<string[]>([]);
-  const [outcomes, setOutcomes] = useState<string[]>([]);  // MANCOVA: ≥2 dependent vars
-  const [factor2, setFactor2] = useState(catCols[1] ?? catCols[0] ?? "");
+  const [covariates, setCovariates] = usePersistedPanelState<string[]>("hypothesis", "covariates", []);
+  const [outcomes, setOutcomes] = usePersistedPanelState<string[]>("hypothesis", "outcomes", []);  // MANCOVA: ≥2 dependent vars
+  const [factor2, setFactor2] = usePersistedPanelState<string>("hypothesis", "factor2", catCols[1] ?? catCols[0] ?? "");
   // Dunn's post-hoc correction for Kruskal-Wallis. Bonferroni is the
   // conventional reporting choice in clinical journals; Holm is the
   // default because it strictly dominates Bonferroni while controlling
   // the same family-wise error rate.
-  const [posthocCorrection, setPosthocCorrection] = useState<"holm" | "bonferroni" | "fdr" | "none">("holm");
+  const [posthocCorrection, setPosthocCorrection] = usePersistedPanelState<"holm" | "bonferroni" | "fdr" | "none">("hypothesis", "correction", "holm");
   const cached = useStore((s) => s.panelCache.hypothesis);
   const setCache = useStore((s) => s.setPanelCache);
   const [result, _setResult] = useState<any>(cached?.result ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const setResult = (r: any) => { _setResult(r); setCache("hypothesis", { result: r }); };
+  // Merge into the existing cache object so the persisted selection keys
+  // (test, col, groupCol, …) written by usePersistedPanelState survive.
+  const setResult = (r: any) => {
+    _setResult(r);
+    setCache("hypothesis", { ...(useStore.getState().panelCache.hypothesis ?? {}), result: r });
+  };
 
   const isCat = test === "chisquare" || test === "fisher";
   const needsGroup = ["ttest_2sample", "anova", "mannwhitney", "kruskal", "jonckheere", "ancova", "mancova"].includes(test);

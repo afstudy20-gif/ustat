@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import Plot from "../PlotComponent";
 import { useStore } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
 import PlotExporter from "./PlotExporter";
@@ -12,14 +13,14 @@ export default function ChartsPanel() {
   const td       = useTraceDefaults();
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
 
-  const [chartType, setChartType] = useState("histogram");
-  const [x, setX] = useState(numCols[0] ?? "");
-  const [y, setY] = useState(numCols[1] ?? "");
-  const [color, setColor] = useState("");
-  const [bins, setBins] = useState(20);
+  const [chartType, setChartType] = usePersistedPanelState<string>("charts", "chartType", "histogram");
+  const [x, setX] = usePersistedPanelState<string>("charts", "x", numCols[0] ?? "");
+  const [y, setY] = usePersistedPanelState<string>("charts", "y", numCols[1] ?? "");
+  const [color, setColor] = usePersistedPanelState<string>("charts", "color", "");
+  const [bins, setBins] = usePersistedPanelState<number>("charts", "bins", 20);
   const [plotData, setPlotData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

@@ -9,7 +9,8 @@
  */
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
-import { useStore } from "../store";
+import { useStore, analysisCols } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runIPTW, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
@@ -209,7 +210,7 @@ export default function IPTWPanel() {
     useResizableRightCol("IPTWPanel.result", 480);
   if (!session) return null;
 
-  const allCols = session.columns.map((c) => c.name);
+  const allCols = analysisCols(session.columns).map((c) => c.name);
 
   const binaryCols = useMemo(() =>
     allCols.filter((col) => {
@@ -220,26 +221,26 @@ export default function IPTWPanel() {
   );
 
   // Form State
-  const [treatCol, setTreatCol] = useState(binaryCols[0] ?? allCols[0] ?? "");
-  const [outcomeCol, setOutcomeCol] = useState("");
-  const [covariates, setCovariates] = useState<string[]>([]);
-  const [trimCommonSupport, setTrimCommonSupport] = useState(false);
-  const [randomState, setRandomState] = useState<number>(42);
-  const [scoreMethod, setScoreMethod] = useState<"logistic" | "probit" | "gbm">("logistic");
-  const [outcomeType, setOutcomeType] = useState<"binary" | "survival">("binary");
-  const [survDuration, setSurvDuration] = useState("");
-  const [survEvent, setSurvEvent] = useState("");
+  const [treatCol, setTreatCol] = usePersistedPanelState<string>("iptw", "treatCol", binaryCols[0] ?? allCols[0] ?? "");
+  const [outcomeCol, setOutcomeCol] = usePersistedPanelState<string>("iptw", "outcomeCol", "");
+  const [covariates, setCovariates] = usePersistedPanelState<string[]>("iptw", "covariates", []);
+  const [trimCommonSupport, setTrimCommonSupport] = usePersistedPanelState<boolean>("iptw", "trimCommonSupport", false);
+  const [randomState, setRandomState] = usePersistedPanelState<number>("iptw", "randomState", 42);
+  const [scoreMethod, setScoreMethod] = usePersistedPanelState<"logistic" | "probit" | "gbm">("iptw", "scoreMethod", "logistic");
+  const [outcomeType, setOutcomeType] = usePersistedPanelState<"binary" | "survival">("iptw", "outcomeType", "binary");
+  const [survDuration, setSurvDuration] = usePersistedPanelState<string>("iptw", "survDuration", "");
+  const [survEvent, setSurvEvent] = usePersistedPanelState<string>("iptw", "survEvent", "");
   const [covFilter, setCovFilter] = useState("");
 
   // IPTW options
-  const [estimand, setEstimand] = useState<"ate" | "att" | "overlap">("ate");
-  const [stabilize, setStabilize] = useState(true);
-  const [weightTruncation, setWeightTruncation] = useState<"percentile" | "hard" | "none">("percentile");
-  const [weightTruncLo, setWeightTruncLo] = useState(0.01);
-  const [weightTruncHi, setWeightTruncHi] = useState(0.99);
-  const [weightTruncMax, setWeightTruncMax] = useState(10);
-  const [seMethod, setSeMethod] = useState<"robust" | "bootstrap">("robust");
-  const [bootstrapReps, setBootstrapReps] = useState(500);
+  const [estimand, setEstimand] = usePersistedPanelState<"ate" | "att" | "overlap">("iptw", "estimand", "ate");
+  const [stabilize, setStabilize] = usePersistedPanelState<boolean>("iptw", "stabilize", true);
+  const [weightTruncation, setWeightTruncation] = usePersistedPanelState<"percentile" | "hard" | "none">("iptw", "weightTruncation", "percentile");
+  const [weightTruncLo, setWeightTruncLo] = usePersistedPanelState<number>("iptw", "weightTruncLo", 0.01);
+  const [weightTruncHi, setWeightTruncHi] = usePersistedPanelState<number>("iptw", "weightTruncHi", 0.99);
+  const [weightTruncMax, setWeightTruncMax] = usePersistedPanelState<number>("iptw", "weightTruncMax", 10);
+  const [seMethod, setSeMethod] = usePersistedPanelState<"robust" | "bootstrap">("iptw", "seMethod", "robust");
+  const [bootstrapReps, setBootstrapReps] = usePersistedPanelState<number>("iptw", "bootstrapReps", 500);
 
   // Result & UI
   const [result, setResult] = useState<any>(null);
@@ -249,7 +250,7 @@ export default function IPTWPanel() {
   const [showConnectors, setShowConnectors] = useState(true);
 
   const toggleCov = (c: string) =>
-    setCovariates((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+    setCovariates(covariates.includes(c) ? covariates.filter((x) => x !== c) : [...covariates, c]);
 
   const run = async () => {
     if (covariates.length === 0) { setError("Select at least one covariate"); return; }

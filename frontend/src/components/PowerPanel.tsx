@@ -3,6 +3,7 @@ import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import { runPower, parseArticle } from "../api";
 import { useStore, PALETTES } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { Tip } from "./Tip";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
@@ -125,17 +126,17 @@ export default function PowerPanel() {
   const showGrid = useStore((s) => s.showGrid);
   const powerRef = useRef<any>(null);
 
-  const [test,       setTest]       = useState<TestId>("t_two");
-  const [solveFor,   setSolveFor]   = useState<SolveFor>("n");
-  const [alpha,      setAlpha]      = useState("0.05");
-  const [power,      setPower]      = useState("0.80");
-  const [effectSize, setEffectSize] = useState("0.50");
-  const [n,          setN]          = useState("64");
-  const [tails,      setTails]      = useState("2");
-  const [ratio,      setRatio]      = useState("1.0");
-  const [kGroups,    setKGroups]    = useState("3");
-  const [p1,         setP1]         = useState("0.50");
-  const [p2,         setP2]         = useState("0.30");
+  const [test,       setTest]       = usePersistedPanelState<TestId>("power_sel", "test", "t_two");
+  const [solveFor,   setSolveFor]   = usePersistedPanelState<SolveFor>("power_sel", "solveFor", "n");
+  const [alpha,      setAlpha]      = usePersistedPanelState<string>("power_sel", "alpha", "0.05");
+  const [power,      setPower]      = usePersistedPanelState<string>("power_sel", "power", "0.80");
+  const [effectSize, setEffectSize] = usePersistedPanelState<string>("power_sel", "effectSize", "0.50");
+  const [n,          setN]          = usePersistedPanelState<string>("power_sel", "n", "64");
+  const [tails,      setTails]      = usePersistedPanelState<string>("power_sel", "tails", "2");
+  const [ratio,      setRatio]      = usePersistedPanelState<string>("power_sel", "ratio", "1.0");
+  const [kGroups,    setKGroups]    = usePersistedPanelState<string>("power_sel", "kGroups", "3");
+  const [p1,         setP1]         = usePersistedPanelState<string>("power_sel", "p1", "0.50");
+  const [p2,         setP2]         = usePersistedPanelState<string>("power_sel", "p2", "0.30");
 
   const cachedPower = useStore((s) => s.panelCache.power);
   const setCachePower = useStore((s) => s.setPanelCache);

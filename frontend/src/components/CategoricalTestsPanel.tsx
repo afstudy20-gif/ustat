@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel, runCochranArmitage } from "../api";
 // ResultExporter available via ResultCard pattern
 
@@ -89,17 +90,17 @@ function ResultCard({ result }: { result: any }) {
 export default function CategoricalTestsPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
   const binCols = [...catCols, ...numCols]; // binary cols could be either
 
-  const [test, setTest] = useState<string>("binomial");
-  const [col, setCol] = useState(binCols[0] ?? "");
-  const [col2, setCol2] = useState(binCols[1] ?? binCols[0] ?? "");
-  const [groupCol, setGroupCol] = useState(catCols[0] ?? "");
-  const [strataCol, setStrataCol] = useState(catCols[1] ?? catCols[0] ?? "");
-  const [nullProp, setNullProp] = useState("0.5");
-  const [friedmanCols, setFriedmanCols] = useState<string[]>([]);
+  const [test, setTest] = usePersistedPanelState<string>("categorical_tests", "test", "binomial");
+  const [col, setCol] = usePersistedPanelState<string>("categorical_tests", "col", binCols[0] ?? "");
+  const [col2, setCol2] = usePersistedPanelState<string>("categorical_tests", "col2", binCols[1] ?? binCols[0] ?? "");
+  const [groupCol, setGroupCol] = usePersistedPanelState<string>("categorical_tests", "groupCol", catCols[0] ?? "");
+  const [strataCol, setStrataCol] = usePersistedPanelState<string>("categorical_tests", "strataCol", catCols[1] ?? catCols[0] ?? "");
+  const [nullProp, setNullProp] = usePersistedPanelState<string>("categorical_tests", "nullProp", "0.5");
+  const [friedmanCols, setFriedmanCols] = usePersistedPanelState<string[]>("categorical_tests", "friedmanCols", []);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);

@@ -6,6 +6,7 @@ import { useStore, PALETTES } from "../store";
 import { runROC, runROCCompare, runROCMultiCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { fmtP } from "../lib/format";
 
 // ── Helper to get current palette primary color ────────────────────────────
@@ -161,8 +162,8 @@ export default function ROCPanel() {
   const showGrid = useStore((s) => s.showGrid);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const allCols = session.columns.map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const allCols = session.columns.filter((c) => !c.analysis_excluded).map((c) => c.name);
 
   // Binary columns (≤ 2 unique non-null values, both ∈ {0, 1}) — ROC outcome
   // must be 0/1. Falls back to allCols if no binary column is detected so
@@ -170,6 +171,7 @@ export default function ROCPanel() {
   const binaryCols = useMemo(() => {
     const out: string[] = [];
     for (const col of session.columns) {
+      if (col.analysis_excluded) continue;
       const vals = new Set<unknown>();
       for (const row of session.preview) {
         const v = row[col.name];
@@ -194,24 +196,24 @@ export default function ROCPanel() {
     ?? "";
 
   // ── Mode ──
-  const [mode, setMode] = useState<"single" | "multi">("single");
+  const [mode, setMode] = usePersistedPanelState<"single" | "multi">("roc", "mode", "single");
 
   // ── Shared ──
-  const [outcomeCol, setOutcomeCol] = useState(defaultOutcome);
+  const [outcomeCol, setOutcomeCol] = usePersistedPanelState<string>("roc", "outcomeCol", defaultOutcome);
   const rocPlotRef = useRef<any>(null);
   const rocSingleRef = useRef<any>(null);
   const rocCompareRef = useRef<any>(null);
   const rocMultiRef = useRef<any>(null);
 
   // ── Single-curve state ──
-  const [scoreCol,     setScoreCol]     = useState(numCols[0] ?? "");
+  const [scoreCol,     setScoreCol]     = usePersistedPanelState<string>("roc", "scoreCol", numCols[0] ?? "");
   const [manualCutoff, setManualCutoff] = useState("");
   // Score direction for ROC. "auto" flips the score sign when the naive
   // AUC < 0.5 so protective biomarkers (albumin, eGFR, Hb) report the
   // correct ~0.69 instead of the inverted ~0.31 — see Heinze (2002) and
   // pROC's `direction="auto"` for the same convention.
-  const [scoreDirection, setScoreDirection]   = useState<"auto" | "higher" | "lower">("auto");
-  const [scoreDirection2, setScoreDirection2] = useState<"auto" | "higher" | "lower">("auto");
+  const [scoreDirection, setScoreDirection]   = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection", "auto");
+  const [scoreDirection2, setScoreDirection2] = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection2", "auto");
   const [useManual,    setUseManual]    = useState(false);
   const [result,       setResult]       = useState<any>(null);
   const [error,        setError]        = useState<string | null>(null);
@@ -219,7 +221,7 @@ export default function ROCPanel() {
   const [imputation,   setImputation]   = useState<ImputationStrategy>("listwise");
 
   const [showCompare, setShowCompare] = useState(false);
-  const [scoreCol2,   setScoreCol2]   = useState(numCols[1] ?? numCols[0] ?? "");
+  const [scoreCol2,   setScoreCol2]   = usePersistedPanelState<string>("roc", "scoreCol2", numCols[1] ?? numCols[0] ?? "");
   const [cmpResult,   setCmpResult]   = useState<any>(null);
   const [cmpError,    setCmpError]    = useState<string | null>(null);
   const [cmpLoading,  setCmpLoading]  = useState(false);
@@ -232,7 +234,7 @@ export default function ROCPanel() {
   }, [result?.auc, result?.n]);
 
   // ── Multi-curve state ──
-  const [multiCols,    setMultiCols]    = useState<string[]>([]);
+  const [multiCols,    setMultiCols]    = usePersistedPanelState<string[]>("roc", "multiCols", []);
   const [multiResults, setMultiResults] = useState<MultiResult[]>([]);
   const [multiStyles,  setMultiStyles]  = useState<CurveStyle[]>([]);
   const [multiLoading, setMultiLoading] = useState(false);
@@ -240,7 +242,7 @@ export default function ROCPanel() {
   // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
   const [multiDelong,    setMultiDelong]    = useState<any>(null);
   const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
-  const [multiPAdjust,   setMultiPAdjust]   = useState<"holm" | "bonferroni" | "none">("holm");
+  const [multiPAdjust,   setMultiPAdjust]   = usePersistedPanelState<"holm" | "bonferroni" | "none">("roc", "multiPAdjust", "holm");
   const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
 
   // Re-run pairwise DeLong with the new adjustment when the user changes
@@ -276,7 +278,7 @@ export default function ROCPanel() {
 
   // ── Combined model state ──
   const [showCombined,     setShowCombined]     = useState(false);
-  const [combinedCols,     setCombinedCols]     = useState<string[]>([]);
+  const [combinedCols,     setCombinedCols]     = usePersistedPanelState<string[]>("roc", "combinedCols", []);
   const [combinedName,     setCombinedName]     = useState("Combined Model");
   const [combinedResult,   setCombinedResult]   = useState<MultiResult | null>(null);
   const [combinedStyle,    setCombinedStyle]    = useState<CurveStyle>({ color: "#dc2626", width: 3, dash: "solid" });
@@ -286,11 +288,11 @@ export default function ROCPanel() {
   const [combinedFilter,  setCombinedFilter]  = useState("");
 
   const toggleCombinedCol = (col: string) =>
-    setCombinedCols((prev) => prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]);
+    setCombinedCols(combinedCols.includes(col) ? combinedCols.filter((c) => c !== col) : [...combinedCols, col]);
 
   const toggleMultiCol = (col: string) => {
-    setMultiCols((prev) =>
-      prev.includes(col) ? prev.filter((c) => c !== col) : [...prev, col]
+    setMultiCols(
+      multiCols.includes(col) ? multiCols.filter((c) => c !== col) : [...multiCols, col]
     );
     setMultiResults([]);
   };

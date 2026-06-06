@@ -64,6 +64,7 @@ import CausalPanel from "./components/CausalPanel";
 import ROCPanel from "./components/ROCPanel";
 import Table1Panel from "./components/Table1Panel";
 import PowerPanel from "./components/PowerPanel";
+import { usePersistedPanelState } from "./hooks/usePersistedPanelState";
 import ComputePanel from "./components/ComputePanel";
 import PSMPanel from "./components/PSMPanel";
 import IPTWPanel from "./components/IPTWPanel";
@@ -352,7 +353,7 @@ function SaveBeforeOpenModal({
 }
 
 function TestsCombo() {
-  const [sub, setSub] = useState<"hypothesis" | "repeated" | "categorical" | "reliability" | "noninferiority" | "gatekeeping" | "factor" | "bayesian">("hypothesis");
+  const [sub, setSub] = usePersistedPanelState<"hypothesis" | "repeated" | "categorical" | "reliability" | "noninferiority" | "gatekeeping" | "factor" | "bayesian">("combo_tests", "sub", "hypothesis");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
@@ -392,7 +393,7 @@ function ComputeCombo() {
 }
 
 function SummaryCombo() {
-  const [sub, setSub] = useState<"descriptive" | "weighted">("descriptive");
+  const [sub, setSub] = usePersistedPanelState<"descriptive" | "weighted">("combo_summary", "sub", "descriptive");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
@@ -413,7 +414,7 @@ function SummaryCombo() {
 }
 
 function ModelsCombo() {
-  const [sub, setSub] = useState<"regression" | "survival" | "rcs" | "ml" | "timeseries" | "validation">("regression");
+  const [sub, setSub] = usePersistedPanelState<"regression" | "survival" | "rcs" | "ml" | "timeseries" | "validation">("combo_models", "sub", "regression");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
       <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
@@ -439,7 +440,7 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = useState<"models" | "charts" | "subgroup" | "forest" | "addedvalue">("models");
+  const [sub, setSub] = usePersistedPanelState<"models" | "charts" | "subgroup" | "forest" | "addedvalue">("combo_visual", "sub", "models");
   // Deep-link: another panel can request a specific inner sub-tab (e.g.
   // the Cox time-horizon panel jumps straight to "forest"). Consume once.
   const visualSubTab = useStore((s) => s.visualSubTab);

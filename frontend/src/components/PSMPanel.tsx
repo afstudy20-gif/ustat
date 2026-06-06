@@ -10,7 +10,8 @@
  */
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
-import { useStore } from "../store";
+import { useStore, analysisCols } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runPSM, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
 import PlotExporter from "./PlotExporter";
@@ -210,7 +211,7 @@ export default function PSMPanel() {
     useResizableRightCol("PSMPanel.result", 480);
   if (!session) return null;
 
-  const allCols = session.columns.map((c) => c.name);
+  const allCols = analysisCols(session.columns).map((c) => c.name);
 
   const binaryCols = useMemo(() =>
     allCols.filter((col) => {
@@ -220,22 +221,22 @@ export default function PSMPanel() {
     [session.session_id]
   );
 
-  // Form State
-  const [treatCol, setTreatCol] = useState(binaryCols[0] ?? allCols[0] ?? "");
-  const [outcomeCol, setOutcomeCol] = useState("");
-  const [covariates, setCovariates] = useState<string[]>([]);
-  const [caliper, setCaliper] = useState(0.2);
-  const [caliperScale, setCaliperScale] = useState<"logit" | "raw">("logit");
-  const [trimCommonSupport, setTrimCommonSupport] = useState(false);
-  const [ratio, setRatio] = useState(1);
-  const [randomState, setRandomState] = useState<number>(42);
-  const [scoreMethod, setScoreMethod] = useState<"logistic" | "probit" | "gbm">("logistic");
-  const [matchingMethod, setMatchingMethod] = useState<"greedy" | "optimal">("greedy");
-  const [exactMatch, setExactMatch] = useState<string[]>([]);
-  const [outcomeType, setOutcomeType] = useState<"binary" | "survival">("binary");
-  const [survDuration, setSurvDuration] = useState("");
-  const [survEvent, setSurvEvent] = useState("");
-  const [computeRosenbaum, setComputeRosenbaum] = useState(false);
+  // Form State — genuine selections persisted across tab switches (per-session cache)
+  const [treatCol, setTreatCol] = usePersistedPanelState<string>("psm", "treatCol", binaryCols[0] ?? allCols[0] ?? "");
+  const [outcomeCol, setOutcomeCol] = usePersistedPanelState<string>("psm", "outcomeCol", "");
+  const [covariates, setCovariates] = usePersistedPanelState<string[]>("psm", "covariates", []);
+  const [caliper, setCaliper] = usePersistedPanelState<number>("psm", "caliper", 0.2);
+  const [caliperScale, setCaliperScale] = usePersistedPanelState<"logit" | "raw">("psm", "caliperScale", "logit");
+  const [trimCommonSupport, setTrimCommonSupport] = usePersistedPanelState<boolean>("psm", "trimCommonSupport", false);
+  const [ratio, setRatio] = usePersistedPanelState<number>("psm", "ratio", 1);
+  const [randomState, setRandomState] = usePersistedPanelState<number>("psm", "randomState", 42);
+  const [scoreMethod, setScoreMethod] = usePersistedPanelState<"logistic" | "probit" | "gbm">("psm", "scoreMethod", "logistic");
+  const [matchingMethod, setMatchingMethod] = usePersistedPanelState<"greedy" | "optimal">("psm", "matchingMethod", "greedy");
+  const [exactMatch, setExactMatch] = usePersistedPanelState<string[]>("psm", "exactMatch", []);
+  const [outcomeType, setOutcomeType] = usePersistedPanelState<"binary" | "survival">("psm", "outcomeType", "binary");
+  const [survDuration, setSurvDuration] = usePersistedPanelState<string>("psm", "survDuration", "");
+  const [survEvent, setSurvEvent] = usePersistedPanelState<string>("psm", "survEvent", "");
+  const [computeRosenbaum, setComputeRosenbaum] = usePersistedPanelState<boolean>("psm", "computeRosenbaum", false);
   const [rosenbaumGammaMax] = useState<number>(3.0);
   const [covFilter, setCovFilter] = useState("");
 
@@ -247,7 +248,7 @@ export default function PSMPanel() {
   const [showConnectors, setShowConnectors] = useState(true);
 
   const toggleCov = (c: string) =>
-    setCovariates((p) => (p.includes(c) ? p.filter((x) => x !== c) : [...p, c]));
+    setCovariates(covariates.includes(c) ? covariates.filter((x) => x !== c) : [...covariates, c]);
 
   const run = async () => {
     if (covariates.length === 0) { setError("Select at least one covariate"); return; }
@@ -462,7 +463,7 @@ export default function PSMPanel() {
                   <label key={c} className="flex items-center gap-1 text-[10px] px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer">
                     <input type="checkbox" className="accent-indigo-500"
                       checked={exactMatch.includes(c)}
-                      onChange={() => setExactMatch((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c])} />
+                      onChange={() => setExactMatch(exactMatch.includes(c) ? exactMatch.filter((x) => x !== c) : [...exactMatch, c])} />
                     <span className="text-gray-700 truncate">{c}</span>
                   </label>
                 ))}

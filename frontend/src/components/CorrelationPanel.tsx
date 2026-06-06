@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import { useStore, PALETTES } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 import { Tip, LabelTip, InfoBanner } from "./Tip";
@@ -78,16 +79,16 @@ interface PairResult {
 function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: string[] }) {
   const showGrid = useStore((s) => s.showGrid);
   const corrScatterRef = useRef<any>(null);
-  const [vars, setVars] = useState<string[]>(columns.slice(0, Math.min(4, columns.length)));
+  const [vars, setVars] = usePersistedPanelState<string[]>("correlation_pairwise", "vars", columns.slice(0, Math.min(4, columns.length)));
   const [varFilter, setVarFilter] = useState("");
-  const [method, setMethod] = useState("auto");
+  const [method, setMethod] = usePersistedPanelState<string>("correlation_pairwise", "method", "auto");
   const [results, setResults] = useState<PairResult[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   const toggle = (c: string) =>
-    setVars((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
+    setVars(vars.includes(c) ? vars.filter((x) => x !== c) : [...vars, c]);
 
   const nPairs = Math.max(0, vars.length * (vars.length - 1) / 2);
 
@@ -447,19 +448,19 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
   const showGrid = useStore((s) => s.showGrid);
   const corrHeatmapRef = useRef<any>(null);
   const corrSplomRef = useRef<any>(null);
-  const [selected, setSelected] = useState<string[]>(columns.slice(0, Math.min(8, columns.length)));
+  const [selected, setSelected] = usePersistedPanelState<string[]>("correlation_matrix", "selected", columns.slice(0, Math.min(8, columns.length)));
   const [colFilter, setColFilter] = useState("");
-  const [method, setMethod] = useState("pearson");
+  const [method, setMethod] = usePersistedPanelState<string>("correlation_matrix", "method", "pearson");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [displayMode, setDisplayMode] = useState<"heatmap" | "splom">("heatmap");
+  const [displayMode, setDisplayMode] = usePersistedPanelState<"heatmap" | "splom">("correlation_matrix", "displayMode", "heatmap");
   const [rawData, setRawData] = useState<Record<string, (number | null)[]> | null>(null);
   const [rawLoading, setRawLoading] = useState(false);
   const [selectedVar, setSelectedVar] = useState<string | null>(null);
 
   const toggle = (c: string) =>
-    setSelected((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
+    setSelected(selected.includes(c) ? selected.filter((x) => x !== c) : [...selected, c]);
 
   const run = async () => {
     if (selected.length < 2) { setError("Select at least 2 variables"); return; }
@@ -1142,9 +1143,11 @@ export default function CorrelationPanel() {
   if (!session) return null;
 
   const numColumns = session.columns
-    .filter((c) => c.kind === "numeric")
+    .filter((c) => c.kind === "numeric" && !c.analysis_excluded)
     .map((c) => c.name);
-  const allColumns = session.columns.map((c) => c.name);
+  const allColumns = session.columns
+    .filter((c) => !c.analysis_excluded)
+    .map((c) => c.name);
 
   const [activeTab, setActiveTab] = useState<Tab>("Pairwise");
 

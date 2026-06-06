@@ -1,11 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { useStore } from "../store";
 
 /**
- * usePersistedPanelState — a useState replacement that mirrors its value into
- * the Zustand `panelCache` so it survives a panel unmount/remount (e.g. the
- * user switches to the Data tab and back). The cached value is read once on
- * mount; if present it overrides `initialValue`.
+ * usePersistedPanelState — a drop-in `useState` replacement that mirrors its
+ * value into the Zustand `panelCache` so it survives a panel unmount/remount
+ * (e.g. the user switches to the Data tab and back). The cached value is read
+ * once on mount; if present it overrides `initialValue`.
+ *
+ * The returned setter has the exact `useState` signature, including the
+ * functional-updater form `setX(prev => next)`, so existing call sites work
+ * unchanged.
  *
  * panelCache is in-memory only and is cleared when the session changes, so
  * selections never leak across datasets.
@@ -18,22 +22,22 @@ export function usePersistedPanelState<T>(
   panelId: string,
   key: string,
   initialValue: T,
-): [T, (v: T) => void] {
-  const setPanelCache = useStore((s) => s.setPanelCache);
-
+): [T, Dispatch<SetStateAction<T>>] {
   // Read the cached value exactly once (on mount). Reading inside the lazy
-  // initialiser avoids re-subscribing the component to panelCache mutations,
+  // initialiser avoids subscribing the component to panelCache mutations,
   // which would defeat the "set once, mirror out" contract and risk loops.
   const [value, setValue] = useState<T>(() => {
     const cached = useStore.getState().panelCache[panelId];
     return cached && key in cached ? (cached[key] as T) : initialValue;
   });
 
-  const update = (next: T) => {
-    setValue(next);
+  // Mirror to panelCache whenever the value changes (idempotent when equal).
+  useEffect(() => {
     const cur = useStore.getState().panelCache[panelId] ?? {};
-    setPanelCache(panelId, { ...cur, [key]: next });
-  };
+    if (cur[key] !== value) {
+      useStore.getState().setPanelCache(panelId, { ...cur, [key]: value });
+    }
+  }, [panelId, key, value]);
 
-  return [value, update];
+  return [value, setValue];
 }

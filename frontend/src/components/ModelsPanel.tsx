@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
@@ -90,14 +91,22 @@ export default function ModelsPanel() {
     useResizableRightCol("ModelsPanel.result", 480);
   if (!session) return null;
 
-  const { numCols, allCols, binaryCols, missingCounts, sparklines } = useModelData(session);
+  const { numCols: numColsRaw, allCols: allColsRaw, binaryCols: binaryColsRaw, missingCounts, sparklines } = useModelData(session);
 
-  const [model, setModel] = useState("linear");
-  const [outcome, setOutcome] = useState(numCols[0] ?? "");
-  const [predictors, setPredictors] = useState<string[]>([]);
+  // Hide "exclude from analysis" columns from every variable picker in this panel.
+  // The list comes from useModelData as plain names, so we filter against the set
+  // of column names flagged analysis_excluded in the session metadata.
+  const excludedSet = new Set(session.columns.filter((c) => c.analysis_excluded).map((c) => c.name));
+  const numCols    = numColsRaw.filter((c) => !excludedSet.has(c));
+  const allCols    = allColsRaw.filter((c) => !excludedSet.has(c));
+  const binaryCols = binaryColsRaw.filter((c) => !excludedSet.has(c));
+
+  const [model, setModel] = usePersistedPanelState<string>("models", "model", "linear");
+  const [outcome, setOutcome] = usePersistedPanelState<string>("models", "outcome", numCols[0] ?? "");
+  const [predictors, setPredictors] = usePersistedPanelState<string[]>("models", "predictors", []);
   // Pairwise interaction terms applied to linear / logistic / Cox / poisson.
   // Stored as [colA, colB]; rendered as a small picker below the predictor list.
-  const [glmInteractions, setGlmInteractions] = useState<Array<[string, string]>>([]);
+  const [glmInteractions, setGlmInteractions] = usePersistedPanelState<Array<[string, string]>>("models", "glmInteractions", []);
   const [glmIxA, setGlmIxA] = useState<string>("");
   const [glmIxB, setGlmIxB] = useState<string>("");
 
@@ -106,11 +115,11 @@ export default function ModelsPanel() {
   const [nullHyp,   setNullHyp]   = useState("eq");    // eq | leq | geq
   const [robustSE,  setRobustSE]  = useState(false);
   const [scaleFactors, setScaleFactors] = useState<Record<string, string>>({}); // col → divisor string
-  const [selection, setSelection] = useState("p10"); // multivariate variable selection strategy
-  const [durationCol, setDurationCol] = useState(numCols[0] ?? "");
-  const [eventCol, setEventCol] = useState(binaryCols[0] ?? numCols[1] ?? "");
-  const [groupCol, setGroupCol] = useState("");
-  const [stratifyCol, setStratifyCol] = useState("");
+  const [selection, setSelection] = usePersistedPanelState<string>("models", "selection", "p10"); // multivariate variable selection strategy
+  const [durationCol, setDurationCol] = usePersistedPanelState<string>("models", "durationCol", numCols[0] ?? "");
+  const [eventCol, setEventCol] = usePersistedPanelState<string>("models", "eventCol", binaryCols[0] ?? numCols[1] ?? "");
+  const [groupCol, setGroupCol] = usePersistedPanelState<string>("models", "groupCol", "");
+  const [stratifyCol, setStratifyCol] = usePersistedPanelState<string>("models", "stratifyCol", "");
   const cachedModels = useStore((s) => s.panelCache.models);
   const setCacheModels = useStore((s) => s.setPanelCache);
   const [result, _setResultRaw] = useState<any>(cachedModels?.result ?? null);
@@ -144,14 +153,13 @@ export default function ModelsPanel() {
   };
 
   const togglePredictor = (col: string) => {
-    setPredictors((prev) => {
-      if (prev.includes(col)) {
-        // Removing — also clear its scale factor
-        setScaleFactors((sf) => { const next = { ...sf }; delete next[col]; return next; });
-        return prev.filter((c) => c !== col);
-      }
-      return [...prev, col];
-    });
+    if (predictors.includes(col)) {
+      // Removing — also clear its scale factor
+      setScaleFactors((sf) => { const next = { ...sf }; delete next[col]; return next; });
+      setPredictors(predictors.filter((c) => c !== col));
+    } else {
+      setPredictors([...predictors, col]);
+    }
   };
 
   const setScaleFactor = (col: string, val: string) => {

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useStore, PALETTES } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePalette } from "../plotStyle";
 import api from "../api";
 import Plot from "../PlotComponent";
@@ -507,10 +508,10 @@ function ScatterView({
   defaultX: string;
 }) {
   const showGrid = useStore((s) => s.showGrid);
-  const [xCol,    setXCol]    = useState(defaultX || numCols[0] || "");
-  const [yCol,    setYCol]    = useState(numCols.find((c) => c !== defaultX) ?? "");
-  const [color,   setColor]   = useState("");
-  const [shape,   setShape]   = useState("");
+  const [xCol,    setXCol]    = usePersistedPanelState<string>("descriptive_numeric", "xCol", defaultX || numCols[0] || "");
+  const [yCol,    setYCol]    = usePersistedPanelState<string>("descriptive_numeric", "yCol", numCols.find((c) => c !== defaultX) ?? "");
+  const [color,   setColor]   = usePersistedPanelState<string>("descriptive_numeric", "color", "");
+  const [shape,   setShape]   = usePersistedPanelState<string>("descriptive_numeric", "shape", "");
   const [data,    setData]    = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
@@ -775,7 +776,7 @@ export default function DescriptivePanel() {
   const [summary, setSummary] = useState<any | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [view, setView] = useState<"distribution" | "scatter">("distribution");
+  const [view, setView] = usePersistedPanelState<"distribution" | "scatter">("descriptive", "view", "distribution");
   const chartTab = useStore((s) => s.descriptiveTab);
   const setChartTab = useStore((s) => s.setDescriptiveTab);
 
@@ -968,8 +969,8 @@ export default function DescriptivePanel() {
 
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind !== "numeric").map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind !== "numeric" && !c.analysis_excluded).map((c) => c.name);
 
   const filtered = session.columns.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase())

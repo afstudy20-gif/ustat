@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
-import { useStore } from "../store";
+import { useStore, analysisCols } from "../store";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
@@ -543,14 +544,18 @@ function ResultBlock({ result }: { result: any }) {
 export default function SurvivalAdvancedPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
+  // Columns offered in variable pickers: hide any flagged "exclude from
+  // analysis". The full `columns` list is kept for display lookups of
+  // already-saved results (value_labels of selected columns).
+  const pickCols = useMemo(() => analysisCols(columns), [columns]);
   const sid = session?.session_id ?? "";
   // 2-grid layout: left method nav, right active method panel.
-  const [activeMethod, setActiveMethod] = useState<SurvMethod>("km");
+  const [activeMethod, setActiveMethod] = usePersistedPanelState<SurvMethod>("survival", "activeMethod", "km");
   // Binary 0/1-like columns for Cox event selectors (the `kind` enum has
   // no "binary", so a numeric filter would leak continuous columns).
   const binaryCols = useMemo(
-    () => binaryLikeColumns(columns, session?.preview),
-    [columns, session?.preview],
+    () => binaryLikeColumns(pickCols, session?.preview),
+    [pickCols, session?.preview],
   );
   // Cross-panel handoff to the Forest Builder + Visual-tab deep link.
   const setForestHandoff = useStore((s) => s.setForestHandoff);
@@ -565,11 +570,11 @@ export default function SurvivalAdvancedPanel() {
   const lmPlotRef = useRef<any>(null);
 
   // Fine-Gray state
-  const [fgDuration, setFgDuration] = useState("");
-  const [fgEvent, setFgEvent] = useState("");
-  const [fgInterest, setFgInterest] = useState(1);
-  const [fgGroup, setFgGroup] = useState("");
-  const [fgPredictors, setFgPredictors] = useState<string[]>([]);
+  const [fgDuration, setFgDuration] = usePersistedPanelState("survival", "fgDuration", "");
+  const [fgEvent, setFgEvent] = usePersistedPanelState("survival", "fgEvent", "");
+  const [fgInterest, setFgInterest] = usePersistedPanelState("survival", "fgInterest", 1);
+  const [fgGroup, setFgGroup] = usePersistedPanelState("survival", "fgGroup", "");
+  const [fgPredictors, setFgPredictors] = usePersistedPanelState<string[]>("survival", "fgPredictors", []);
   const [fgPredFilter, setFgPredFilter] = useState("");
   const [fgResult, setFgResult] = useState<any>(null);
   const [fgLoading, setFgLoading] = useState(false);
@@ -579,20 +584,20 @@ export default function SurvivalAdvancedPanel() {
   const [evEst, setEvEst] = useState("");
   const [evLo, setEvLo] = useState("");
   const [evHi, setEvHi] = useState("");
-  const [evType, setEvType] = useState("OR");
+  const [evType, setEvType] = usePersistedPanelState("survival", "evType", "OR");
   const [evP0, setEvP0] = useState("0.1");
   const [evResult, setEvResult] = useState<any>(null);
   const [evLoading, setEvLoading] = useState(false);
   const [evError, setEvError] = useState<string | null>(null);
 
   // KM state
-  const [kmDuration, setKmDuration] = useState("");
-  const [kmEvent, setKmEvent] = useState("");
-  const [kmGroup, setKmGroup] = useState("");
-  const [kmStratify, setKmStratify] = useState("");
-  const [kmSurvTimes, setKmSurvTimes] = useState("");          // e.g. "365, 1825"
-  const [kmPairwise, setKmPairwise] = useState(false);
-  const [kmCorrection, setKmCorrection] = useState("holm");    // none|bonferroni|holm|bh
+  const [kmDuration, setKmDuration] = usePersistedPanelState("survival", "kmDuration", "");
+  const [kmEvent, setKmEvent] = usePersistedPanelState("survival", "kmEvent", "");
+  const [kmGroup, setKmGroup] = usePersistedPanelState("survival", "kmGroup", "");
+  const [kmStratify, setKmStratify] = usePersistedPanelState("survival", "kmStratify", "");
+  const [kmSurvTimes, setKmSurvTimes] = usePersistedPanelState("survival", "kmSurvTimes", "");          // e.g. "365, 1825"
+  const [kmPairwise, setKmPairwise] = usePersistedPanelState("survival", "kmPairwise", false);
+  const [kmCorrection, setKmCorrection] = usePersistedPanelState("survival", "kmCorrection", "holm");    // none|bonferroni|holm|bh
   const [kmResult, setKmResult] = useState<any>(null);
   const [kmLoading, setKmLoading] = useState(false);
   const [kmError, setKmError] = useState<string | null>(null);
@@ -662,10 +667,10 @@ export default function SurvivalAdvancedPanel() {
   }, [kmRiskTable, kmShowCensors, kmResult]);
 
   // Cox state
-  const [coxDuration, setCoxDuration] = useState("");
-  const [coxEvent, setCoxEvent] = useState("");
-  const [coxPreds, setCoxPreds] = useState<string[]>([]);
-  const [coxInteractions, setCoxInteractions] = useState<Array<[string, string]>>([]);
+  const [coxDuration, setCoxDuration] = usePersistedPanelState("survival", "coxDuration", "");
+  const [coxEvent, setCoxEvent] = usePersistedPanelState("survival", "coxEvent", "");
+  const [coxPreds, setCoxPreds] = usePersistedPanelState<string[]>("survival", "coxPreds", []);
+  const [coxInteractions, setCoxInteractions] = usePersistedPanelState<Array<[string, string]>>("survival", "coxInteractions", []);
   const [coxIxA, setCoxIxA] = useState<string>("");
   const [coxIxB, setCoxIxB] = useState<string>("");
   const [coxResult, setCoxResult] = useState<any>(null);
@@ -694,44 +699,44 @@ export default function SurvivalAdvancedPanel() {
 
 
   // Time-horizon sensitivity (Cox at multiple administrative-censoring windows)
-  const [chDuration, setChDuration] = useState("");
-  const [chEvent, setChEvent] = useState("");
-  const [chPredictor, setChPredictor] = useState("");
-  const [chCovariates, setChCovariates] = useState<string[]>([]);
-  const [chHorizons, setChHorizons] = useState("365, 730");
-  const [chLabels, setChLabels] = useState("1 year, 2 years");
+  const [chDuration, setChDuration] = usePersistedPanelState("survival", "chDuration", "");
+  const [chEvent, setChEvent] = usePersistedPanelState("survival", "chEvent", "");
+  const [chPredictor, setChPredictor] = usePersistedPanelState("survival", "chPredictor", "");
+  const [chCovariates, setChCovariates] = usePersistedPanelState<string[]>("survival", "chCovariates", []);
+  const [chHorizons, setChHorizons] = usePersistedPanelState("survival", "chHorizons", "365, 730");
+  const [chLabels, setChLabels] = usePersistedPanelState("survival", "chLabels", "1 year, 2 years");
   const [chResult, setChResult] = useState<any>(null);
   const [chLoading, setChLoading] = useState(false);
   const [chError, setChError] = useState<string | null>(null);
 
   // RMST state — Restricted Mean Survival Time (PH-free alternative)
-  const [rmstDuration, setRmstDuration] = useState("");
-  const [rmstEvent, setRmstEvent] = useState("");
-  const [rmstGroup, setRmstGroup] = useState("");
-  const [rmstTau, setRmstTau] = useState<string>("");
+  const [rmstDuration, setRmstDuration] = usePersistedPanelState("survival", "rmstDuration", "");
+  const [rmstEvent, setRmstEvent] = usePersistedPanelState("survival", "rmstEvent", "");
+  const [rmstGroup, setRmstGroup] = usePersistedPanelState("survival", "rmstGroup", "");
+  const [rmstTau, setRmstTau] = usePersistedPanelState<string>("survival", "rmstTau", "");
   const [rmstResult, setRmstResult] = useState<any>(null);
   const [rmstLoading, setRmstLoading] = useState(false);
   const [rmstError, setRmstError] = useState<string | null>(null);
   const rmstPlotRef = useRef<any>(null);
 
   // Recurrent-events LWYY state
-  const [lwId, setLwId] = useState("");
-  const [lwStart, setLwStart] = useState("");
-  const [lwStop, setLwStop] = useState("");
-  const [lwEvent, setLwEvent] = useState("");
-  const [lwPreds, setLwPreds] = useState<string[]>([]);
-  const [lwGroup, setLwGroup] = useState("");
+  const [lwId, setLwId] = usePersistedPanelState("survival", "lwId", "");
+  const [lwStart, setLwStart] = usePersistedPanelState("survival", "lwStart", "");
+  const [lwStop, setLwStop] = usePersistedPanelState("survival", "lwStop", "");
+  const [lwEvent, setLwEvent] = usePersistedPanelState("survival", "lwEvent", "");
+  const [lwPreds, setLwPreds] = usePersistedPanelState<string[]>("survival", "lwPreds", []);
+  const [lwGroup, setLwGroup] = usePersistedPanelState("survival", "lwGroup", "");
   const [lwResult, setLwResult] = useState<any>(null);
   const [lwLoading, setLwLoading] = useState(false);
   const [lwError, setLwError] = useState<string | null>(null);
   const lwPlotRef = useRef<any>(null);
 
   // Landmark state
-  const [lmDuration, setLmDuration] = useState("");
-  const [lmEvent, setLmEvent] = useState("");
-  const [lmTime, setLmTime] = useState("");
-  const [lmGroup, setLmGroup] = useState("");
-  const [lmPreds, setLmPreds] = useState<string[]>([]);
+  const [lmDuration, setLmDuration] = usePersistedPanelState("survival", "lmDuration", "");
+  const [lmEvent, setLmEvent] = usePersistedPanelState("survival", "lmEvent", "");
+  const [lmTime, setLmTime] = usePersistedPanelState("survival", "lmTime", "");
+  const [lmGroup, setLmGroup] = usePersistedPanelState("survival", "lmGroup", "");
+  const [lmPreds, setLmPreds] = usePersistedPanelState<string[]>("survival", "lmPreds", []);
   const [lmResult, setLmResult] = useState<any>(null);
   const [lmLoading, setLmLoading] = useState(false);
   const [lmError, setLmError] = useState<string | null>(null);
@@ -753,7 +758,7 @@ export default function SurvivalAdvancedPanel() {
     finally { setFgLoading(false); }
   };
   const fgToggleP = (c: string) =>
-    setFgPredictors((p) => p.includes(c) ? p.filter((x) => x !== c) : [...p, c]);
+    setFgPredictors(fgPredictors.includes(c) ? fgPredictors.filter((x) => x !== c) : [...fgPredictors, c]);
 
   // ── RMST handler
   const handleRMST = async () => {
@@ -850,14 +855,14 @@ export default function SurvivalAdvancedPanel() {
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
-                <VarSelect label="Duration" value={fgDuration} onChange={setFgDuration} columns={columns} kinds={["numeric"]} />
-                <VarSelect label="Event (0=censor, 1,2..=events)" value={fgEvent} onChange={setFgEvent} columns={columns} />
+                <VarSelect label="Duration" value={fgDuration} onChange={setFgDuration} columns={pickCols} kinds={["numeric"]} />
+                <VarSelect label="Event (0=censor, 1,2..=events)" value={fgEvent} onChange={setFgEvent} columns={pickCols} />
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 font-medium">Event of interest</span>
                   <input type="number" value={fgInterest} onChange={(e) => setFgInterest(Number(e.target.value))} min={1}
                     className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 w-20 focus:outline-none focus:border-indigo-400" />
                 </label>
-                <VarSelect label="Group (optional)" value={fgGroup} onChange={setFgGroup} columns={columns} kinds={["categorical"]} />
+                <VarSelect label="Group (optional)" value={fgGroup} onChange={setFgGroup} columns={pickCols} kinds={["categorical"]} />
               </div>
               {/* Predictors for subdistribution-hazard regression (Fine-Gray 1999) */}
               <div className="space-y-1.5">
@@ -879,7 +884,7 @@ export default function SurvivalAdvancedPanel() {
                   onChange={(e) => setFgPredFilter(e.target.value)}
                   className="w-full text-xs border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:border-indigo-400" />
                 <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-1 space-y-0.5">
-                  {columns
+                  {pickCols
                     .map((c: any) => c.name)
                     .filter((n: string) =>
                       n !== fgDuration && n !== fgEvent && n !== fgGroup
@@ -985,7 +990,7 @@ export default function SurvivalAdvancedPanel() {
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
-                <VarSelect label="Duration" value={rmstDuration} onChange={setRmstDuration} columns={columns} kinds={["numeric"]} />
+                <VarSelect label="Duration" value={rmstDuration} onChange={setRmstDuration} columns={pickCols} kinds={["numeric"]} />
                 <VarSelect label="Event (0/1)" value={rmstEvent} onChange={setRmstEvent} columns={binaryCols} />
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 font-medium">τ (time horizon)</span>
@@ -994,7 +999,7 @@ export default function SurvivalAdvancedPanel() {
                     placeholder="e.g. 1825"
                     className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-400" />
                 </label>
-                <VarSelect label="Group (optional)" value={rmstGroup} onChange={setRmstGroup} columns={columns} kinds={["categorical"]} />
+                <VarSelect label="Group (optional)" value={rmstGroup} onChange={setRmstGroup} columns={pickCols} kinds={["categorical"]} />
               </div>
               <div className="flex items-center gap-3">
                 <RunButton onClick={handleRMST} loading={rmstLoading} label="Run RMST" />
@@ -1086,13 +1091,13 @@ export default function SurvivalAdvancedPanel() {
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
-                <VarSelect label="Subject id" value={lwId} onChange={setLwId} columns={columns} />
-                <VarSelect label="Start (interval entry)" value={lwStart} onChange={setLwStart} columns={columns} kinds={["numeric"]} />
-                <VarSelect label="Stop (interval / event time)" value={lwStop} onChange={setLwStop} columns={columns} kinds={["numeric"]} />
-                <VarSelect label="Event (1 = event at stop)" value={lwEvent} onChange={setLwEvent} columns={columns} />
-                <VarSelect label="Group for MCF plot (optional)" value={lwGroup} onChange={setLwGroup} columns={columns} kinds={["categorical"]} />
+                <VarSelect label="Subject id" value={lwId} onChange={setLwId} columns={pickCols} />
+                <VarSelect label="Start (interval entry)" value={lwStart} onChange={setLwStart} columns={pickCols} kinds={["numeric"]} />
+                <VarSelect label="Stop (interval / event time)" value={lwStop} onChange={setLwStop} columns={pickCols} kinds={["numeric"]} />
+                <VarSelect label="Event (1 = event at stop)" value={lwEvent} onChange={setLwEvent} columns={pickCols} />
+                <VarSelect label="Group for MCF plot (optional)" value={lwGroup} onChange={setLwGroup} columns={pickCols} kinds={["categorical"]} />
               </div>
-              <MultiSelect label="Predictors" columns={columns} selected={lwPreds} onChange={setLwPreds}
+              <MultiSelect label="Predictors" columns={pickCols} selected={lwPreds} onChange={setLwPreds}
                 excludeNames={[lwId, lwStart, lwStop, lwEvent].filter(Boolean)} />
               <div className="flex items-center gap-3">
                 <RunButton onClick={handleLWYY} loading={lwLoading} label="Run LWYY" />
@@ -1231,16 +1236,16 @@ export default function SurvivalAdvancedPanel() {
           left={
             <>
               <div className="grid grid-cols-1 gap-2">
-                <VarSelect label="Duration" value={lmDuration} onChange={setLmDuration} columns={columns} kinds={["numeric"]} />
+                <VarSelect label="Duration" value={lmDuration} onChange={setLmDuration} columns={pickCols} kinds={["numeric"]} />
                 <VarSelect label="Event (0/1)" value={lmEvent} onChange={setLmEvent} columns={binaryCols} />
                 <label className="flex flex-col gap-1">
                   <span className="text-xs text-gray-500 font-medium">Landmark time</span>
                   <input type="number" step="1" value={lmTime} onChange={(e) => setLmTime(e.target.value)}
                     className="text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-400" placeholder="e.g. 30" />
                 </label>
-                <VarSelect label="Group (optional)" value={lmGroup} onChange={setLmGroup} columns={columns} kinds={["categorical"]} />
+                <VarSelect label="Group (optional)" value={lmGroup} onChange={setLmGroup} columns={pickCols} kinds={["categorical"]} />
               </div>
-              <MultiSelect label="Predictors for Cox (optional)" columns={columns} selected={lmPreds} onChange={setLmPreds} excludeNames={[lmDuration, lmEvent].filter(Boolean)} />
+              <MultiSelect label="Predictors for Cox (optional)" columns={pickCols} selected={lmPreds} onChange={setLmPreds} excludeNames={[lmDuration, lmEvent].filter(Boolean)} />
               <div className="flex items-center gap-3">
                 <RunButton onClick={handleLandmark} loading={lmLoading} label="Run Landmark" />
               </div>
@@ -1298,10 +1303,10 @@ export default function SurvivalAdvancedPanel() {
       {activeMethod === "km" && (
       <Section title="Kaplan-Meier Survival" description="Visualise time-to-event data with survival curves and log-rank test">
         <div className="grid grid-cols-4 gap-3">
-          <VarSelect label="Duration (time)" value={kmDuration} onChange={setKmDuration} columns={columns} kinds={["numeric"]} />
+          <VarSelect label="Duration (time)" value={kmDuration} onChange={setKmDuration} columns={pickCols} kinds={["numeric"]} />
           <VarSelect label="Event (0/1)" value={kmEvent} onChange={setKmEvent} columns={binaryCols} />
-          <VarSelect label="Group (optional)" value={kmGroup} onChange={setKmGroup} columns={columns} kinds={["categorical"]} />
-          <VarSelect label="Stratify by (optional)" value={kmStratify} onChange={setKmStratify} columns={columns} kinds={["categorical"]} />
+          <VarSelect label="Group (optional)" value={kmGroup} onChange={setKmGroup} columns={pickCols} kinds={["categorical"]} />
+          <VarSelect label="Stratify by (optional)" value={kmStratify} onChange={setKmStratify} columns={pickCols} kinds={["categorical"]} />
         </div>
 
         {/* Landmark survival + pairwise log-rank options */}
@@ -1360,7 +1365,7 @@ export default function SurvivalAdvancedPanel() {
             <button
               disabled={kmScanLoading}
               onClick={async () => {
-                const catCols = columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+                const catCols = pickCols.filter((c) => c.kind === "categorical").map((c) => c.name);
                 if (catCols.length === 0) return;
                 setKmScanLoading(true);
                 const results: any[] = [];
@@ -2043,7 +2048,7 @@ export default function SurvivalAdvancedPanel() {
       {activeMethod === "cox" && (
       <Section title="Cox Proportional Hazards" description="Regression for time-to-event data — outputs Hazard Ratios (HR)">
         <div className="grid grid-cols-2 gap-3">
-          <VarSelect label="Duration (time)" value={coxDuration} onChange={setCoxDuration} columns={columns} kinds={["numeric"]} />
+          <VarSelect label="Duration (time)" value={coxDuration} onChange={setCoxDuration} columns={pickCols} kinds={["numeric"]} />
           <VarSelect label="Event (0/1)" value={coxEvent} onChange={setCoxEvent} columns={binaryCols} />
         </div>
 
@@ -2059,7 +2064,7 @@ export default function SurvivalAdvancedPanel() {
             )}
           </p>
           <div className="border border-gray-200 rounded-lg overflow-y-auto max-h-36 divide-y divide-gray-100">
-            {columns.map((c) => (
+            {pickCols.map((c) => (
               <label key={c.name} className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors text-xs
                 ${coxPreds.includes(c.name) ? "bg-indigo-50 text-indigo-800" : "hover:bg-gray-50 text-gray-700"}`}>
                 <input
@@ -2216,7 +2221,8 @@ export default function SurvivalAdvancedPanel() {
         {coxUMResult?.rows?.length > 0 && (
           <CoxUniMultiForest
             result={coxUMResult}
-            columns={columns}
+            /* full column list — used only to resolve value_labels for the saved result */
+            columns={columns /* display only */}
             plotRef={coxUMRef}
             refs={coxUMRefs}
             loading={coxUMLoading}
@@ -2325,9 +2331,9 @@ export default function SurvivalAdvancedPanel() {
         description="Run the same Cox model at several follow-up windows (1-year, 2-year, full) and send the hazard ratios straight to the Forest Builder. Answers 'does the effect hold early vs. late?'."
       >
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <VarSelect label="Duration / Time" value={chDuration} onChange={setChDuration} columns={columns} kinds={["numeric"]} />
+          <VarSelect label="Duration / Time" value={chDuration} onChange={setChDuration} columns={pickCols} kinds={["numeric"]} />
           <VarSelect label="Event (0/1)" value={chEvent} onChange={setChEvent} columns={binaryCols} />
-          <VarSelect label="Predictor (HR tracked)" value={chPredictor} onChange={setChPredictor} columns={columns} />
+          <VarSelect label="Predictor (HR tracked)" value={chPredictor} onChange={setChPredictor} columns={pickCols} />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">
@@ -2352,7 +2358,7 @@ export default function SurvivalAdvancedPanel() {
         </div>
 
         <div className="mt-2">
-          <MultiSelect label="Adjustment covariates (optional)" columns={columns}
+          <MultiSelect label="Adjustment covariates (optional)" columns={pickCols}
             selected={chCovariates} onChange={setChCovariates}
             excludeNames={[chDuration, chEvent, chPredictor].filter(Boolean)} />
         </div>

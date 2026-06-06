@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
 import PlotExporter from "./PlotExporter";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 
 type AnalysisType = "ttest_one" | "ttest_ind" | "ttest_paired" | "correlation" | "regression";
 
@@ -15,17 +16,17 @@ export default function BayesianPanel() {
   const plotRef = useRef<any>(null);
 
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
 
 
   // States
-  const [analysisType, setAnalysisType] = useState<AnalysisType>("ttest_one");
-  const [outcome, setOutcome] = useState(numCols[0] ?? "");
-  const [predictor, setPredictor] = useState(numCols[1] ?? numCols[0] ?? "");
-  const [predictors, setPredictors] = useState<string[]>([]);
+  const [analysisType, setAnalysisType] = usePersistedPanelState<AnalysisType>("bayesian", "analysisType", "ttest_one");
+  const [outcome, setOutcome] = usePersistedPanelState<string>("bayesian", "outcome", numCols[0] ?? "");
+  const [predictor, setPredictor] = usePersistedPanelState<string>("bayesian", "predictor", numCols[1] ?? numCols[0] ?? "");
+  const [predictors, setPredictors] = usePersistedPanelState<string[]>("bayesian", "predictors", []);
   const [mu, setMu] = useState<number>(0.0);
-  const [imputation, setImputation] = useState<string>("listwise");
+  const [imputation, setImputation] = usePersistedPanelState<string>("bayesian", "imputation", "listwise");
 
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
