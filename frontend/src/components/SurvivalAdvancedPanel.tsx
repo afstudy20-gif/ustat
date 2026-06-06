@@ -732,8 +732,15 @@ export default function SurvivalAdvancedPanel() {
       // per model with the MODEL NAME as the label (short, no clipping, matches
       // the manuscript). The contrast goes into the caption instead.
       const focusLevel = multiTerm && specExposureLevel ? specExposureLevel : null;
+      type SpecData = { label: string; n: number; n_events: number; terms: any[] };
+      const specsData = data.specs as SpecData[];
+      // If every model shares the same n / events (no covariate missingness),
+      // the per-row "(48/388 events)" is redundant — show it once in the
+      // caption. Only keep it per-row when models actually differ.
+      const neSet = new Set(specsData.map((s) => `${s.n_events}/${s.n}`));
+      const sameNE = neSet.size === 1 && specsData[0]?.n > 0;
       const rows: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> = [];
-      for (const s of data.specs) {
+      for (const s of specsData) {
         for (const t of s.terms) {
           if (focusLevel && String(t.category) !== String(focusLevel)) continue;
           // No focus level → prefix the model name so each row is identifiable.
@@ -743,7 +750,7 @@ export default function SurvivalAdvancedPanel() {
             label: `${s.label}${contrast}`,
             est: t.hr ?? null, ci_low: t.hr_ci_low ?? null, ci_high: t.hr_ci_high ?? null,
             p: t.p ?? null,
-            extra: s.n ? `(${s.n_events}/${s.n} events)` : "",
+            extra: sameNE ? "" : (s.n ? `(${s.n_events}/${s.n} events)` : ""),
           });
         }
       }
@@ -752,9 +759,10 @@ export default function SurvivalAdvancedPanel() {
       const exposureLine = focusTerm
         ? `Exposure: ${specExposure} (${vlab(focusTerm.category)} vs ${vlab(focusTerm.reference)})`
         : `Exposure: ${specExposure}`;
+      const cohortLine = sameNE ? ` · n=${specsData[0].n}, ${specsData[0].n_events} events` : "";
       setForestHandoff(rows, {
         customTitle: "",
-        customSubtitle: `${exposureLine} · adjusted HR across model specifications`,
+        customSubtitle: `${exposureLine} · adjusted HR across model specifications${cohortLine}`,
         xLabel: "Hazard ratio for all-cause mortality (95% CI, log scale)",
         leftHeader: "Model specification",
         rightHeader: "HR (95% CI)",
