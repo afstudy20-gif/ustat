@@ -91,8 +91,30 @@ export default function TitledPlot({
   // Resizable figure (like the KM plot). Width 'auto' fills the column.
   const [plotW, setPlotW]       = useState<number | undefined>(undefined);
   const [plotH, setPlotH]       = useState<number>(typeof layout?.height === "number" ? layout.height : 440);
+  // Hide chosen labels in the EXPORT only (kept on screen).
+  const [hideExport, setHideExport] = useState({ title: false, caption: false, axes: false });
   const localRef = useRef<any>(null);
   const refToUse = plotRefOut ?? localRef;
+
+  // Caption is appended after any caller-supplied annotations.
+  const captionIndex = Array.isArray(layout?.annotations) ? layout.annotations.length : 0;
+
+  // Transiently strip labels right before a copy/download capture, then
+  // restore — so the on-screen figure keeps its labels but the file omits the
+  // ones the user ticked (handy when the title goes in the manuscript legend).
+  const exportRelayout = async (strip: boolean) => {
+    const gd: any = (refToUse.current as any)?.el;
+    const Plotly: any = gd?._Plotly;
+    if (!gd || !Plotly?.relayout) return;
+    const upd: Record<string, any> = {};
+    if (hideExport.title) upd["title.text"] = strip ? "" : (title || "");
+    if (hideExport.caption && sub) upd[`annotations[${captionIndex}].visible`] = strip ? false : true;
+    if (hideExport.axes) {
+      upd["xaxis.title.text"] = strip ? "" : (xLab || (layout?.xaxis?.title?.text ?? ""));
+      upd["yaxis.title.text"] = strip ? "" : (yLab || (layout?.yaxis?.title?.text ?? ""));
+    }
+    if (Object.keys(upd).length) { try { await Plotly.relayout(gd, upd); } catch { /* non-fatal */ } }
+  };
 
   useEffect(() => {
     saveStored(storageKey, { title, sub, xLab, yLab });
@@ -201,6 +223,25 @@ export default function TitledPlot({
                   className="select w-full py-1 text-xs"
                 />
               </label>
+              <div className="col-span-1 md:col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-gray-100">
+                <span className="text-[10px] text-gray-400">Hide in export:</span>
+                <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                  <input type="checkbox" checked={hideExport.title}
+                    onChange={(e) => setHideExport((h) => ({ ...h, title: e.target.checked }))}
+                    className="accent-indigo-500" /> Title
+                </label>
+                <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                  <input type="checkbox" checked={hideExport.caption}
+                    onChange={(e) => setHideExport((h) => ({ ...h, caption: e.target.checked }))}
+                    className="accent-indigo-500" /> Caption
+                </label>
+                <label className="flex items-center gap-1 text-[10px] text-gray-500">
+                  <input type="checkbox" checked={hideExport.axes}
+                    onChange={(e) => setHideExport((h) => ({ ...h, axes: e.target.checked }))}
+                    className="accent-indigo-500" /> Axis titles
+                </label>
+                <span className="text-[9px] text-gray-400">(stays on screen; omitted from PNG/TIFF/copy)</span>
+              </div>
               <button
                 type="button"
                 onClick={() => {
@@ -245,7 +286,9 @@ export default function TitledPlot({
           useResizeHandler
         />
         <PlotExporter plotRef={refToUse} title={title || "chart"}
-          defaultWidth={plotW ?? 1000} defaultHeight={plotH} />
+          defaultWidth={plotW ?? 1000} defaultHeight={plotH}
+          onBeforeCapture={() => exportRelayout(true)}
+          onAfterCapture={() => exportRelayout(false)} />
       </div>
     </div>
   );

@@ -14,6 +14,10 @@ interface Props {
   className?: string;
   defaultWidth?: number;
   defaultHeight?: number;
+  /** Run just before the figure is captured (copy or download) and restored
+   *  right after — used to transiently strip labels from the export only. */
+  onBeforeCapture?: () => void | Promise<void>;
+  onAfterCapture?: () => void | Promise<void>;
 }
 
 export default function PlotExporter({
@@ -22,6 +26,8 @@ export default function PlotExporter({
   className = "",
   defaultWidth,
   defaultHeight,
+  onBeforeCapture,
+  onAfterCapture,
 }: Props) {
   const [open, setOpen]       = useState(false);
   const [width, setWidth]     = useState(defaultWidth ?? 1200);
@@ -88,7 +94,9 @@ export default function PlotExporter({
     if (busy) return;
     setBusy(true);
     try {
-      const blob = await renderPngBlob();
+      await onBeforeCapture?.();
+      let blob: Blob | null;
+      try { blob = await renderPngBlob(); } finally { await onAfterCapture?.(); }
       if (!blob) throw new Error("plot is not mounted yet");
       // ClipboardItem + write is supported in modern Chromium, Safari 13.4+,
       // and Firefox 127+. The user click is the gesture required by Safari.
@@ -110,6 +118,7 @@ export default function PlotExporter({
     const el = getEl();
     if (!el) return;
     setBusy(true);
+    await onBeforeCapture?.();
     try {
       if (fmt === "tiff") {
         // Plotly cannot emit TIFF natively — rasterise to PNG at the
@@ -165,6 +174,7 @@ export default function PlotExporter({
       console.error("PlotExporter download failed:", e);
       alert(`Chart export failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
+      await onAfterCapture?.();
       setBusy(false);
       setOpen(false);
     }
