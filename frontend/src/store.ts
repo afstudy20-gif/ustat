@@ -9,7 +9,16 @@ export interface ColMeta {
   units?: string;
   value_labels?: Record<string, string>;
   role?: "outcome" | "predictor" | "covariate" | "id" | "time" | "event" | "";
+  /** When true the column is hidden from analysis variable pickers (kept in the
+   *  dataset, e.g. NAME / row-id columns). Toggled from the data-tab menu. */
+  analysis_excluded?: boolean;
+  /** Optional pretty name suggestion (advisory; rename applies it). */
+  display_name?: string;
 }
+
+/** Columns eligible for analysis (not flagged "exclude from analysis"). */
+export const analysisCols = (cols: ColMeta[]): ColMeta[] =>
+  cols.filter((c) => !c.analysis_excluded);
 
 export interface Session {
   session_id: string;
@@ -118,6 +127,8 @@ interface AppState {
   columnDecimals: Record<string, number>;  // col name → decimal places
   setColumnDecimals: (col: string, decimals: number) => void;
   clearColumnDecimals: (col: string) => void;
+  // Hide a column from analysis variable pickers (kept in the dataset).
+  setColumnAnalysisExcluded: (name: string, excluded: boolean) => void;
   // Undo / Redo (backend-driven)
   undoDepth: number;
   redoDepth: number;
@@ -310,6 +321,20 @@ export const useStore = create<AppState>((set) => ({
     const next = { ...state.columnDecimals };
     delete next[col];
     return { columnDecimals: next };
+  }),
+  setColumnAnalysisExcluded: (name, excluded) => set((state) => {
+    if (!state.session) return state;
+    const sid = state.session.session_id;
+    import("./api").then(({ saveMetadata }) => {
+      saveMetadata(sid, { [name]: { analysis_excluded: excluded } }).catch(() => { /* non-fatal */ });
+    });
+    return {
+      session: {
+        ...state.session,
+        columns: state.session.columns.map((c) =>
+          c.name === name ? { ...c, analysis_excluded: excluded } : c),
+      },
+    };
   }),
   // Undo / Redo — backend-driven (DataFrame snapshots on server)
   undoDepth: 0,

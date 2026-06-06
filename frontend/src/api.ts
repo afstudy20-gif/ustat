@@ -192,6 +192,8 @@ export const parseArticle = (file: File) => {
 // Column operations
 export const renameColumn = (sessionId: string, oldName: string, newName: string) =>
   api.post(`/api/compute/${sessionId}/rename`, { old_name: oldName, new_name: newName });
+export const getNameSuggestions = (sessionId: string) =>
+  api.get(`/api/sessions/${sessionId}/name_suggestions`);
 
 // Session management
 export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${sessionId}/save_session`, { responseType: "blob" });
