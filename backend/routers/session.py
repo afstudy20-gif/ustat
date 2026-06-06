@@ -509,6 +509,10 @@ def _attach_value_labels(columns: list, session_id: str) -> list:
 def _session_preview(df: pd.DataFrame, session_id: str | None = None) -> dict:
     """Build a session-like response from a DataFrame for frontend state update."""
     import json as _json
+    # User-set kind overrides (data-tab badge / dictionary) must win over
+    # auto-detection — otherwise a GET / refresh / undo silently reverts a
+    # numeric-coded categorical (e.g. LDL groups 1/2/3) back to 'numeric'.
+    overrides = store.get_kind_overrides(session_id) if session_id else {}
     columns = []
     for col in df.columns:
         dtype = str(df[col].dtype)
@@ -521,7 +525,7 @@ def _session_preview(df: pd.DataFrame, session_id: str | None = None) -> dict:
             kind = "categorical"
         else:
             kind = "categorical" if df[col].nunique() <= 50 else "text"
-        columns.append({"name": col, "dtype": dtype, "kind": kind})
+        columns.append({"name": col, "dtype": dtype, "kind": overrides.get(col, kind)})
     if session_id:
         _attach_value_labels(columns, session_id)
     preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
