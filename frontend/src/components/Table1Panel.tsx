@@ -179,7 +179,10 @@ export default function Table1Panel() {
   const setPanelCache = useStore((s) => s.setPanelCache);
   if (!session) return null;
 
-  const allCols = session.columns.map((c) => c.name);
+  // Columns offered as Table 1 variables / group — drop those flagged
+  // "exclude from analysis" (e.g. NAME, row-id) in the data tab.
+  const pickableCols = session.columns.filter((c) => !c.analysis_excluded);
+  const allCols = pickableCols.map((c) => c.name);
 
   const [groupCol, setGroupCol] = useState<string>(cachedForm?.groupCol ?? "");
   // Hydrate the selected-variables set from cache when available; intersect
@@ -499,7 +502,7 @@ export default function Table1Panel() {
             onChange={(e) => handleGroupChange(e.target.value)}
           >
             <option value="">— Overall only —</option>
-            {session.columns.map((c) => (
+            {pickableCols.map((c) => (
               <option key={c.name} value={c.name}>
                 {c.name} [{c.kind === "numeric" ? "N" : "C"}]
               </option>
