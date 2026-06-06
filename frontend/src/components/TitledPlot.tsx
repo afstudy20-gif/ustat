@@ -32,6 +32,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import Plot from "../PlotComponent";
+import PlotExporter from "./PlotExporter";
 
 export interface TitledPlotProps {
   data: any[];
@@ -87,6 +88,9 @@ export default function TitledPlot({
   const [xLab,  setXLab]        = useState<string>(stored?.xLab     ?? defaultXAxis);
   const [yLab,  setYLab]        = useState<string>(stored?.yLab     ?? defaultYAxis);
   const [open,  setOpen]        = useState(false);
+  // Resizable figure (like the KM plot). Width 'auto' fills the column.
+  const [plotW, setPlotW]       = useState<number | undefined>(undefined);
+  const [plotH, setPlotH]       = useState<number>(typeof layout?.height === "number" ? layout.height : 440);
   const localRef = useRef<any>(null);
   const refToUse = plotRefOut ?? localRef;
 
@@ -136,6 +140,10 @@ export default function TitledPlot({
       xaxis: { ...(base.xaxis || {}), title: xLab ? { ...(base.xaxis?.title || {}), text: xLab } : (base.xaxis?.title) },
       yaxis: { ...(base.yaxis || {}), title: yLab ? { ...(base.yaxis?.title || {}), text: yLab } : (base.yaxis?.title) },
       annotations: [...userAnnotations, ...captionAnnotation],
+      // The container (sized by the Width/Height sliders) drives dimensions.
+      height: undefined,
+      width: undefined,
+      autosize: true,
     };
   }, [layout, title, sub, xLab, yLab]);
 
@@ -210,14 +218,35 @@ export default function TitledPlot({
         </div>
       )}
 
-      <Plot
-        ref={refToUse as any}
-        data={data}
-        layout={mergedLayout}
-        style={style}
-        config={config}
-        useResizeHandler
-      />
+      {/* Size controls — match the KM plot; export uses these dimensions. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1">
+        <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+          <span className="font-medium">Width</span>
+          <input type="range" min={460} max={1400} step={20} value={plotW ?? 820}
+            onChange={(e) => setPlotW(Number(e.target.value))} className="accent-indigo-500" style={{ width: 110 }} />
+          <span className="tabular-nums w-8">{plotW ?? "auto"}</span>
+          {plotW != null && <button onClick={() => setPlotW(undefined)} className="text-indigo-500 hover:text-indigo-700">auto</button>}
+        </label>
+        <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+          <span className="font-medium">Height</span>
+          <input type="range" min={260} max={900} step={20} value={plotH}
+            onChange={(e) => setPlotH(Number(e.target.value))} className="accent-indigo-500" style={{ width: 110 }} />
+          <span className="tabular-nums w-8">{plotH}</span>
+        </label>
+      </div>
+
+      <div className="relative" style={{ width: plotW != null ? plotW : "100%", height: plotH, maxWidth: "100%" }}>
+        <Plot
+          ref={refToUse as any}
+          data={data}
+          layout={mergedLayout}
+          style={{ ...(style as object), width: "100%", height: "100%" }}
+          config={config}
+          useResizeHandler
+        />
+        <PlotExporter plotRef={refToUse} title={title || "chart"}
+          defaultWidth={plotW ?? 1000} defaultHeight={plotH} />
+      </div>
     </div>
   );
 }
