@@ -703,6 +703,9 @@ export default function SurvivalAdvancedPanel() {
   const [specOpen, setSpecOpen] = usePersistedPanelState("survival", "specOpen", false);
   const [specExposure, setSpecExposure] = usePersistedPanelState("survival", "specExposure", "");
   const [specExposureRef, setSpecExposureRef] = usePersistedPanelState("survival", "specExposureRef", "");
+  // For a multi-level categorical exposure: show only this contrast level
+  // (e.g. <100) across models, so each row is one model — clean + matches text.
+  const [specExposureLevel, setSpecExposureLevel] = usePersistedPanelState("survival", "specExposureLevel", "");
   const [specRows, setSpecRows] = usePersistedPanelState<SpecRow[]>("survival", "specRows", [
     { label: "Parsimonious", covariates: [] },
     { label: "Fully adjusted", covariates: [] },
@@ -723,11 +726,19 @@ export default function SurvivalAdvancedPanel() {
         include_unadjusted: true,
       });
       const data = res.data;
-      const multiTerm = (data.exposure_terms?.length ?? 0) > 1;
+      const terms = (data.exposure_terms ?? []) as Array<{ term: string; kind: string; category: string | null; reference: string | null }>;
+      const multiTerm = terms.length > 1;
+      // When a single contrast level is chosen, keep only that term → one row
+      // per model with the MODEL NAME as the label (short, no clipping, matches
+      // the manuscript). The contrast goes into the caption instead.
+      const focusLevel = multiTerm && specExposureLevel ? specExposureLevel : null;
       const rows: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> = [];
       for (const s of data.specs) {
         for (const t of s.terms) {
-          const contrast = multiTerm && t.kind === "category" ? ` · ${vlab(t.category)} vs ${vlab(t.reference)}` : "";
+          if (focusLevel && String(t.category) !== String(focusLevel)) continue;
+          // No focus level → prefix the model name so each row is identifiable.
+          const contrast = (!focusLevel && multiTerm && t.kind === "category")
+            ? ` — ${vlab(t.category)} vs ${vlab(t.reference)}` : "";
           rows.push({
             label: `${s.label}${contrast}`,
             est: t.hr ?? null, ci_low: t.hr_ci_low ?? null, ci_high: t.hr_ci_high ?? null,
@@ -737,11 +748,13 @@ export default function SurvivalAdvancedPanel() {
         }
       }
       if (!rows.length) { setCoxError("No model fit — check exposure / covariates."); return; }
-      const expLabel = meta?.value_labels && data.exposure_terms?.[0]?.kind === "category"
-        ? `${specExposure}` : specExposure;
+      const focusTerm = focusLevel ? terms.find((t) => String(t.category) === String(focusLevel)) : null;
+      const exposureLine = focusTerm
+        ? `Exposure: ${specExposure} (${vlab(focusTerm.category)} vs ${vlab(focusTerm.reference)})`
+        : `Exposure: ${specExposure}`;
       setForestHandoff(rows, {
         customTitle: "",
-        customSubtitle: `Exposure: ${expLabel} · adjusted HR across model specifications`,
+        customSubtitle: `${exposureLine} · adjusted HR across model specifications`,
         xLabel: "Hazard ratio for all-cause mortality (95% CI, log scale)",
         leftHeader: "Model specification",
         rightHeader: "HR (95% CI)",
@@ -2331,23 +2344,33 @@ export default function SurvivalAdvancedPanel() {
             </button>
             {specOpen && (
               <div className="px-3 pb-3 space-y-2 border-t border-gray-100 pt-2">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  <VarSelect label="Exposure (HR tracked)" value={specExposure} onChange={(v) => { setSpecExposure(v); setSpecExposureRef(""); }} columns={pickCols} />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <VarSelect label="Exposure (HR tracked)" value={specExposure} onChange={(v) => { setSpecExposure(v); setSpecExposureRef(""); setSpecExposureLevel(""); }} columns={pickCols} />
                   {(() => {
                     const em = columns.find((c) => c.name === specExposure);
                     const vl = em?.value_labels ?? {};
                     const levels = Object.keys(vl);
-                    if (levels.length < 2) return <div />;
+                    if (levels.length < 2) return <><div /><div /></>;
+                    const sorted = levels.sort((a, b) => Number(a) - Number(b));
+                    const ref = specExposureRef || sorted[0];
                     return (
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-gray-500 font-medium">Reference level</span>
-                        <select value={specExposureRef} onChange={(e) => setSpecExposureRef(e.target.value)} className="select text-xs py-1">
-                          <option value="">(lowest code)</option>
-                          {levels.sort((a, b) => Number(a) - Number(b)).map((k) => (
-                            <option key={k} value={k}>{vl[k]}</option>
-                          ))}
-                        </select>
-                      </label>
+                      <>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs text-gray-500 font-medium">Reference level</span>
+                          <select value={specExposureRef} onChange={(e) => { setSpecExposureRef(e.target.value); setSpecExposureLevel(""); }} className="select text-xs py-1">
+                            <option value="">(lowest code)</option>
+                            {sorted.map((k) => <option key={k} value={k}>{vl[k]}</option>)}
+                          </select>
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs text-gray-500 font-medium inline-flex items-center">Show only level
+                            <Tip wide text="For a 3+ level exposure: show just this one contrast (e.g. <100 vs reference) across all models, so each forest row is one model labelled by its name — clean and matching the manuscript. Leave 'all levels' to plot every contrast (rows then carry the model name + contrast)." /></span>
+                          <select value={specExposureLevel} onChange={(e) => setSpecExposureLevel(e.target.value)} className="select text-xs py-1">
+                            <option value="">all levels</option>
+                            {sorted.filter((k) => k !== ref).map((k) => <option key={k} value={k}>{vl[k]} vs {vl[ref]}</option>)}
+                          </select>
+                        </label>
+                      </>
                     );
                   })()}
                 </div>

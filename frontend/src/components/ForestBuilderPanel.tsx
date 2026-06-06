@@ -305,6 +305,18 @@ export default function ForestBuilderPanel() {
   const yIdx = validRows.map((_, i) => n - 1 - i); // top-down order
   const colors = validRows.map((r) => rowColor(r));
 
+  // Left margin grows to fit the longest row label (and the left header), so
+  // long labels like "Fully adjusted — <100 vs >130" aren't clipped. The
+  // Width slider sizes the plotting area, not this label gutter.
+  const labelMargin = useMemo(() => {
+    const maxChars = Math.max(
+      (layout.leftHeader ?? "").length,
+      ...validRows.map((r) => (r.label ?? "").length),
+      8,
+    );
+    return Math.min(380, Math.max(130, Math.round(maxChars * 6.6) + 26));
+  }, [validRows, layout.leftHeader]);
+
   // Clean log-axis ticks. Plotly's default log axis labels every minor tick
   // (0.06, 0.07, … shown as bare "6 7 8") which clutters the figure. Pick a
   // 1–2–5 sequence spanning the data and label those only.
@@ -407,7 +419,7 @@ export default function ForestBuilderPanel() {
   if (layout.leftHeader) {
     annotations.push({
       xref: "paper", yref: "paper", x: 0, y: 1.04,
-      xanchor: "left", yanchor: "bottom", xshift: -120,
+      xanchor: "left", yanchor: "bottom", xshift: -(labelMargin - 10),
       text: `<b>${layout.leftHeader}</b>`, showarrow: false,
       font: { size: 12, color: "#1f2937" },
     });
@@ -888,7 +900,7 @@ export default function ForestBuilderPanel() {
                 plot_bgcolor: "#ffffff",
                 font: { color: "#374151", size: 12 },
                 autosize: true,
-                margin: { t: layout.customTitle ? 60 : 30, r: 24, b: 60, l: 130 },
+                margin: { t: layout.customTitle ? 60 : 30, r: 24, b: 60, l: labelMargin },
                 title: layout.customTitle
                   ? { text: titleHtml, font: { size: 13, color: "#1f2937" }, x: 0.5, xanchor: "center" }
                   : undefined,
