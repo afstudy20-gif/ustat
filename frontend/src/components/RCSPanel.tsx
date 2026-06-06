@@ -278,7 +278,7 @@ export default function RCSPanel() {
   const [rcsInteractionCov, setRcsInteractionCov] = useState<string[]>([]);
   const [rcsLogScale, setRcsLogScale] = useState(true);
   const [rcsShowData, setRcsShowData] = useState(true);
-  const [rcsOutcomeType, setRcsOutcomeType] = useState<"logistic" | "linear" | "cox">("logistic");
+  const [rcsOutcomeType, setRcsOutcomeType] = useState<"logistic" | "linear" | "cox">("cox");
   const [rcsCoxDuration, setRcsCoxDuration] = useState(numCols[0] ?? "");
   const [rcsCoxEvent, setRcsCoxEvent] = useState(binaryCols[0] ?? numCols[1] ?? "");
   const [rcsKnotMode, setRcsKnotMode] = useState<"harrell" | "custom">("harrell");
