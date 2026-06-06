@@ -745,6 +745,8 @@ export default function SurvivalAdvancedPanel() {
         xLabel: "Hazard ratio for all-cause mortality (95% CI, log scale)",
         leftHeader: "Model specification",
         rightHeader: "HR (95% CI)",
+        returnTab: "models",
+        returnLabel: "← Back to Cox model",
       });
       setVisualSubTab("forest");
       setActiveTab("visual");

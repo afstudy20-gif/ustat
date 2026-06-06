@@ -114,10 +114,10 @@ interface AppState {
   // a set of forest rows here, the Forest Builder picks them up on mount
   // and clears it. Shape matches ForestRowInput.
   forestHandoff: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> | null;
-  forestHandoffLayout: { customTitle?: string; customSubtitle?: string; xLabel?: string; leftHeader?: string; rightHeader?: string } | null;
+  forestHandoffLayout: { customTitle?: string; customSubtitle?: string; xLabel?: string; leftHeader?: string; rightHeader?: string; returnTab?: string; returnLabel?: string } | null;
   setForestHandoff: (
     rows: Array<{ label: string; est: number | null; ci_low: number | null; ci_high: number | null; p: number | null; extra: string }> | null,
-    layout?: { customTitle?: string; customSubtitle?: string; xLabel?: string; leftHeader?: string; rightHeader?: string } | null,
+    layout?: { customTitle?: string; customSubtitle?: string; xLabel?: string; leftHeader?: string; rightHeader?: string; returnTab?: string; returnLabel?: string } | null,
   ) => void;
   // Deep-link target for the Visual tab's inner sub-tab ("forest", etc.).
   // Consumed once by VisualChartsCombo then cleared.

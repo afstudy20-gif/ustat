@@ -109,6 +109,10 @@ export default function ForestBuilderPanel() {
   const forestHandoff = useStore((s) => s.forestHandoff);
   const forestHandoffLayout = useStore((s) => s.forestHandoffLayout);
   const setForestHandoff = useStore((s) => s.setForestHandoff);
+  const setActiveTab = useStore((s) => s.setActiveTab);
+  // Where to jump back to (set when a panel handed off these rows), so the
+  // user can return to the source model with their settings intact.
+  const [returnTo, setReturnTo] = useState<{ tab: string; label: string } | null>(null);
 
   // Consume a cross-panel handoff (e.g. from the Cox time-horizon panel):
   // load the supplied rows + layout, then clear the buffer so a later
@@ -117,12 +121,14 @@ export default function ForestBuilderPanel() {
     if (forestHandoff && forestHandoff.length > 0) {
       setRows(forestHandoff.map((r) => ({ ...r })));
       if (forestHandoffLayout) {
+        const { returnTab, returnLabel, ...rest } = forestHandoffLayout;
         setLayout((l) => ({
           ...l,
           xScale: "log",
           nullLine: 1,
-          ...forestHandoffLayout,
+          ...rest,
         }));
+        setReturnTo(returnTab ? { tab: returnTab, label: returnLabel || "← Back" } : null);
       }
       setForestHandoff(null);
     }
@@ -449,6 +455,14 @@ export default function ForestBuilderPanel() {
 
   const leftCol = (
     <div className="space-y-4 max-h-[82vh] overflow-y-auto pr-1">
+      {returnTo && (
+        <button
+          onClick={() => setActiveTab(returnTo.tab)}
+          className="w-full px-3 py-2 text-xs font-medium rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+        >
+          {returnTo.label}
+        </button>
+      )}
       {/* Load from Active Dataset */}
       <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
         <div className="flex items-center justify-between">
