@@ -508,7 +508,15 @@ export default function RCSPanel() {
                 </label>
                 <div className="max-h-32 overflow-y-auto space-y-1">
                   {allCols
-                    .filter((c) => c !== rcsPredictor && c !== rcsOutcome && c !== rcsCoxDuration && c !== rcsCoxEvent)
+                    .filter((c) => {
+                      // Exclude the predictor and the active outcome columns
+                      // only — in Cox mode the (unused) rcsOutcome default must
+                      // not hide a valid covariate like AGE.
+                      if (c === rcsPredictor) return false;
+                      return rcsOutcomeType === "cox"
+                        ? c !== rcsCoxDuration && c !== rcsCoxEvent
+                        : c !== rcsOutcome;
+                    })
                     .map((c) => {
                       const kind = session.columns.find((col) => col.name === c)?.kind ?? "numeric";
                       const isNum = kind === "numeric";
