@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle } from "lucide-react";
+import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle, Newspaper } from "lucide-react";
 import { uploadFile } from "../api";
 import api from "../api";
 import { useStore } from "../store";
@@ -202,13 +202,14 @@ export default function UploadZone() {
         <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider text-center mb-2">
           More tools by Dr. Yusuf Ho&#x15F;o&#x11F;lu
         </p>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
           {[
             { url: "https://not.drtr.uk",    Icon: NotebookPen, name: "Notepad",    desc: "Local-only text editor" },
             { url: "https://pdf.drtr.uk/",   Icon: FileText,    name: "PDF",        desc: "Annotate &amp; sign in browser" },
             { url: "https://ecgcal.drtr.uk/",Icon: HeartPulse,  name: "ECG Caliper",desc: "Digital ECG wave analyzer" },
             { url: "https://neodw.drtr.uk/", Icon: Layers,      name: "NeoDW",      desc: "DICOM workstation (any modality)" },
             { url: "https://flow.drtr.uk",   Icon: Workflow,    name: "AcademicFlow", desc: "Journal flowchart designer" },
+            { url: "https://articleditor.drtr.uk/", Icon: Newspaper, name: "Articleditor", desc: "Academic article editor" },
           ].map(({ url, Icon, name, desc }) => (
             <a
               key={url}
