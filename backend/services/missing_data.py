@@ -216,6 +216,61 @@ def missing_pattern_summary(df: pd.DataFrame, cols: List[str]) -> Dict[str, Any]
 # Rubin's Rules (Pooling)
 # =============================================================================
 
+def pool_rubin_terms(per_imputation: List[Dict[str, tuple]]) -> Dict[str, Dict[str, Any]]:
+    """Generic Rubin's-rules pooling for arbitrary survival/regression estimands.
+
+    `per_imputation` is a list (length m) of ``{term: (estimate, se)}`` on a
+    scale where the sampling distribution is ~normal (log-HR / log-sHR for ratio
+    measures, the raw value for RMST differences). Returns, per term, the pooled
+    estimate with total variance T = Ubar + (1 + 1/m)·B, the Barnard–Rubin-style
+    degrees of freedom, a t-based p-value and 95% CI, and the fraction of missing
+    information. Correct within+between decomposition (unlike a between-only proxy).
+    """
+    from scipy import stats as _st
+
+    m = len(per_imputation)
+    if m == 0:
+        return {}
+    terms: List[str] = []
+    for d in per_imputation:
+        for k in d:
+            if k not in terms:
+                terms.append(k)
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for term in terms:
+        pairs = [d[term] for d in per_imputation if term in d and d[term] is not None]
+        est = np.array([float(p[0]) for p in pairs if p[0] is not None and np.isfinite(p[0])], dtype=float)
+        se = np.array([float(p[1]) for p in pairs if p[1] is not None and np.isfinite(p[1])], dtype=float)
+        if len(est) == 0 or len(se) != len(est):
+            continue
+        q_bar = float(np.mean(est))
+        u_bar = float(np.mean(se ** 2))
+        b = float(np.var(est, ddof=1)) if len(est) > 1 else 0.0
+        t_var = u_bar + (1.0 + 1.0 / m) * b
+        pooled_se = float(np.sqrt(max(t_var, 1e-12)))
+        if b > 0 and u_bar > 0:
+            df = (m - 1) * (1.0 + u_bar / ((1.0 + 1.0 / m) * b)) ** 2
+            fmi = ((1.0 + 1.0 / m) * b) / t_var
+        else:
+            df = 1.0e6
+            fmi = 0.0
+        t_stat = q_bar / pooled_se if pooled_se > 0 else 0.0
+        p_val = float(2 * _st.t.sf(abs(t_stat), df)) if pooled_se > 0 else None
+        crit = float(_st.t.ppf(0.975, df))
+        out[term] = {
+            "coef": q_bar,
+            "se": pooled_se,
+            "ci_low": q_bar - crit * pooled_se,
+            "ci_high": q_bar + crit * pooled_se,
+            "t": float(t_stat),
+            "p": p_val,
+            "df": round(float(df), 1),
+            "fmi": round(float(fmi), 4),
+            "m": m,
+        }
+    return out
+
 def pool_linear_results(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Pool results from multiple imputed linear models using Rubin's Rules.

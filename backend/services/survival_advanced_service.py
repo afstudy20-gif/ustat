@@ -658,6 +658,57 @@ def fit_mice(req):
 # ── 2. Fine-Gray Competing Risks ────────────────────────────────────────────
 
 
+def _fine_gray_mi_pooled(df_cols, cols_needed, dur, event, cause, predictors,
+                         coerce_fn, n_imputations: int = 10):
+    """Fit the Fine-Gray sHR model on m multiply-imputed datasets and pool
+    log(sHR) with Rubin's rules. Returns the same shape as _fine_gray_fit so the
+    UI renders it unchanged, plus mi_pooled / fmi metadata."""
+    import math as _math
+    from services.missing_data import mice_multiple, pool_rubin_terms
+
+    imp = mice_multiple(df_cols, cols_needed, n_imputations=n_imputations)
+    per: list = []
+    base = None
+    for dfi in imp.imputed_datasets:
+        rr = _fine_gray_fit(coerce_fn(dfi), dur, event, cause, list(predictors))
+        if rr is None:
+            continue
+        base = base or rr
+        terms = {c["variable"]: (c.get("estimate"), c.get("se"))
+                 for c in rr["coefficients"] if c.get("estimate") is not None and c.get("se")}
+        if terms:
+            per.append(terms)
+    if not per or base is None:
+        return None
+
+    pooled = pool_rubin_terms(per)
+    coefs = []
+    for var, pv in pooled.items():
+        beta, se = pv["coef"], pv["se"]
+        coefs.append({
+            "variable": var,
+            "estimate": round(beta, 6),
+            "shr": round(_math.exp(beta), 4),
+            "se": round(se, 6),
+            "z": round(pv["t"], 4),
+            "p": round(pv["p"], 6) if pv["p"] is not None else None,
+            "ci_low": round(pv["ci_low"], 4),
+            "ci_high": round(pv["ci_high"], 4),
+            "shr_low": round(_math.exp(pv["ci_low"]), 4),
+            "shr_high": round(_math.exp(pv["ci_high"]), 4),
+            "fmi": pv["fmi"],
+        })
+    out = dict(base)
+    out["coefficients"] = coefs
+    out["mi_pooled"] = True
+    out["n_imputations"] = len(per)
+    out["method_note"] = (
+        f"Multiple imputation: {len(per)} chained-PMM datasets pooled by Rubin's "
+        "rules on the log-subdistribution-hazard scale. " + str(base.get("method_note", ""))
+    )
+    return out
+
+
 def fit_fine_gray(req):
     df = _get_df(req.session_id)
 
@@ -823,13 +874,25 @@ def fit_fine_gray(req):
         # Reuse the imputation infrastructure used by other survival endpoints
         from services.impute import apply_imputation
         cols_needed = [req.duration_col, req.event_col] + req.predictors
-        df_reg = apply_imputation(df[cols_needed], cols_needed, req.imputation or "listwise").reset_index(drop=True)
-        # Coerce duration/event numeric; event_of_interest match is integer.
-        df_reg[req.duration_col] = pd.to_numeric(df_reg[req.duration_col], errors="coerce")
-        df_reg[req.event_col] = pd.to_numeric(df_reg[req.event_col], errors="coerce")
-        regression_result = _fine_gray_fit(
-            df_reg, req.duration_col, req.event_col, int(req.event_of_interest), list(req.predictors),
-        )
+
+        def _coerce(d):
+            d = d.reset_index(drop=True)
+            d[req.duration_col] = pd.to_numeric(d[req.duration_col], errors="coerce")
+            d[req.event_col] = pd.to_numeric(d[req.event_col], errors="coerce")
+            return d
+
+        if (req.imputation or "listwise") == "mice":
+            # Proper multiple imputation: fit the Fine-Gray sHR model on each of
+            # m completed datasets and pool log(sHR) with Rubin's rules.
+            regression_result = _fine_gray_mi_pooled(
+                df[cols_needed], cols_needed, req.duration_col, req.event_col,
+                int(req.event_of_interest), list(req.predictors), _coerce,
+            )
+        else:
+            df_reg = _coerce(apply_imputation(df[cols_needed], cols_needed, req.imputation or "listwise"))
+            regression_result = _fine_gray_fit(
+                df_reg, req.duration_col, req.event_col, int(req.event_of_interest), list(req.predictors),
+            )
         if regression_result is not None:
             result_text = (
                 result_text
