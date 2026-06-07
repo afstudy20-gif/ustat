@@ -35,12 +35,15 @@ interface RefreshAppButtonProps {
   confirmBeforeReload?: boolean;
   /** Visual variant: 'icon' for header (compact), 'inline' for splash (text + icon). */
   variant?: "icon" | "inline";
+  /** Idle label for the 'inline' variant (e.g. "Refresh app", "Update app"). */
+  label?: string;
   className?: string;
 }
 
 export default function RefreshAppButton({
   confirmBeforeReload = false,
   variant = "icon",
+  label = "Refresh app",
   className = "",
 }: RefreshAppButtonProps) {
   const [spinning, setSpinning] = useState(false);
@@ -69,7 +72,7 @@ export default function RefreshAppButton({
         className={`flex items-center gap-1.5 text-gray-400 hover:text-indigo-600 text-xs transition-colors disabled:opacity-50 ${className}`}
       >
         <RefreshCw size={14} className={spinning ? "animate-spin" : ""} />
-        {spinning ? "Refreshing…" : "Refresh app"}
+        {spinning ? "Refreshing…" : label}
       </button>
     );
   }

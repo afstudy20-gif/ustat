@@ -29,12 +29,18 @@ class ErrorBoundary extends Component<
           <p className="text-sm text-gray-500 mt-1">
             The rest of the app is fine — switch tabs, or try again. Your data is unaffected.
           </p>
-          <button
-            onClick={this.reset}
-            className="mt-4 px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            Try again
-          </button>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <button
+              onClick={this.reset}
+              className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
+            >
+              Try again
+            </button>
+            <RefreshAppButton variant="inline" label="Update app" confirmBeforeReload />
+          </div>
+          <p className="mt-2 text-xs text-gray-400">
+            Still broken? Update the app to fetch the latest version.
+          </p>
           <details className="mt-4 text-left">
             <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600">Technical details</summary>
             <pre className="mt-2 p-3 bg-gray-50 rounded-lg text-[11px] text-red-600 whitespace-pre-wrap overflow-x-auto max-h-60">
