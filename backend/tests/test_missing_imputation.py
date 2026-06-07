@@ -35,7 +35,7 @@ def test_panel_mice_mixed_numeric_and_categorical():
     assert r.status_code == 200, r.text
     d = r.json()
     methods = {c["column"]: c["method"] for c in d["columns"]}
-    assert methods["age"] == "MICE"
+    assert methods["age"] == "PMM"
     assert methods["sex"] == "mode"
     df = store.get(sid)
     assert df["age"].isna().sum() == 0

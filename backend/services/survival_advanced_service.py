@@ -522,10 +522,9 @@ def fit_mice(req):
     if not cols_with_missing:
         raise HTTPException(status_code=422, detail="No missing values in selected columns")
 
-    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
-    from sklearn.impute import IterativeImputer
+    from services.missing_data import mice_multiple
 
-    # Split targets: numeric → MICE; non-numeric (text/categorical) → mode.
+    # Split targets: numeric → PMM; non-numeric (text/categorical) → mode.
     # Previously any non-numeric target hard-failed the whole request.
     def _is_numeric(c: str) -> bool:
         if pd.api.types.is_numeric_dtype(df[c]):
@@ -559,26 +558,21 @@ def fit_mice(req):
                 med = pd.to_numeric(df_work[t], errors="coerce").median()
                 df_work[t] = pd.to_numeric(df_work[t], errors="coerce").fillna(med)
         else:
+            # Single Predictive Mean Matching imputation (chained equations).
+            # PMM draws a real observed donor — preserving the distribution —
+            # instead of averaging several parametric draws into a synthetic
+            # value (the old IterativeImputer behaviour underestimated variance
+            # and could yield impossible values).
             subset = df_work[numeric_cols].apply(pd.to_numeric, errors="coerce")
-            missing_mask = subset.isna().values
-            imputed_sum = np.zeros_like(subset.values, dtype=float)
-            for i in range(req.n_imputations):
-                imp = IterativeImputer(
-                    max_iter=req.max_iter,
-                    random_state=req.random_state + i,
-                    sample_posterior=True,
-                )
-                imputed_sum += imp.fit_transform(subset)
-            imputed_avg = imputed_sum / req.n_imputations
-            result = subset.values.copy()
-            result[missing_mask] = imputed_avg[missing_mask]
-            subset_filled = pd.DataFrame(result, columns=numeric_cols, index=subset.index)
+            imp = mice_multiple(subset, numeric_cols, n_imputations=1,
+                                max_iter=req.max_iter, random_state=req.random_state)
+            subset_filled = imp.imputed_datasets[0]
             for t in num_targets:
                 df_work[t] = subset_filled[t]
         for c in num_targets:
             imputed_vals = pd.to_numeric(df_work.loc[df[c].isna(), c], errors="coerce")
             col_summaries.append({
-                "column": c, "method": "MICE", "n_imputed": pre_missing[c],
+                "column": c, "method": "PMM", "n_imputed": pre_missing[c],
                 "mean_imputed": _safe(round(float(imputed_vals.mean()), 4)) if len(imputed_vals) > 0 else None,
                 "min_imputed": _safe(round(float(imputed_vals.min()), 4)) if len(imputed_vals) > 0 else None,
                 "max_imputed": _safe(round(float(imputed_vals.max()), 4)) if len(imputed_vals) > 0 else None,
@@ -606,24 +600,29 @@ def fit_mice(req):
     assumptions = [
         {"name": "Missing mechanism",
          "met": mech_ok,
-         "detail": f"Assumed {mech_label}. MICE is valid under MAR/MCAR."
+         "detail": f"Assumed {mech_label}. Imputation is valid under MAR/MCAR."
                    + (" MNAR may produce biased estimates — consider sensitivity analysis." if not mech_ok else "")},
         {"name": "Imputation methods", "met": True,
-         "detail": f"{len(num_targets)} numeric column(s) via MICE (chained equations); "
+         "detail": f"{len(num_targets)} numeric column(s) via Predictive Mean Matching (chained "
+                   f"equations, {req.max_iter} iterations); "
                    f"{len(cat_targets)} categorical column(s) via most-frequent (mode)."},
-        {"name": "Imputations", "met": True, "detail": f"{req.n_imputations} imputations averaged (Rubin's rules approximation)."},
+        {"name": "Single completed dataset", "met": True,
+         "detail": "The session is filled with one PMM-completed dataset (single imputation). "
+                   "For variance-correct inference use the model panels' MICE option "
+                   "(m datasets pooled by Rubin's rules)."},
     ]
 
     method_bits = []
     if num_targets:
-        method_bits.append(f"{len(num_targets)} numeric variable(s) via MICE ({req.n_imputations} imputations, {req.max_iter} iterations)")
+        method_bits.append(f"{len(num_targets)} numeric variable(s) via Predictive Mean Matching ({req.max_iter} iterations)")
     if cat_targets:
         method_bits.append(f"{len(cat_targets)} categorical variable(s) via most-frequent value")
     result_text = (
-        f"Imputation was performed assuming a {mech_label} mechanism: "
+        f"Single imputation was performed assuming a {mech_label} mechanism: "
         + "; ".join(method_bits) + ". "
         f"{total_imputed} missing values were imputed across "
-        f"{len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}."
+        f"{len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}. "
+        "For inference, prefer the model panels' pooled MICE (Rubin's rules)."
     )
 
     export_rows = [["Column", "Method", "N Imputed", "Mean / Mode", "Min", "Max"]]

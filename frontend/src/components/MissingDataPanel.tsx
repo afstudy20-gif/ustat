@@ -39,7 +39,6 @@ export default function MissingDataPanel() {
 
   // Selection + MICE state
   const [selected, setSelected] = useState<string[]>([]);
-  const [miceN, setMiceN] = useState(20);
   const [miceIter, setMiceIter] = useState(20);
   const [miceSeed, setMiceSeed] = useState(42);
   const [miceMechanism, setMiceMechanism] = useState<"unknown" | "MCAR" | "MAR" | "MNAR">("unknown");
@@ -112,7 +111,7 @@ export default function MissingDataPanel() {
     setMiceLoading(true); setErr(null); setMiceResult(null);
     try {
       const res = await runMICE({
-        session_id: sid, columns: selected, n_imputations: miceN,
+        session_id: sid, columns: selected, n_imputations: 1,
         max_iter: miceIter, random_state: miceSeed, mechanism: miceMechanism,
       });
       setMiceResult(res.data);
@@ -273,14 +272,14 @@ export default function MissingDataPanel() {
           {/* ── MICE (multi-column) ── */}
           <div className="border border-indigo-200 rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 bg-indigo-50 border-b border-indigo-100">
-              <h3 className="text-sm font-semibold text-indigo-800">MICE Multiple Imputation (selected columns)</h3>
+              <h3 className="text-sm font-semibold text-indigo-800">PMM Imputation (selected columns)</h3>
               <p className="text-[11px] text-indigo-400 mt-0.5">
-                Fills the session in place. For valid inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
+                Fills the session with one Predictive-Mean-Matching completed dataset (single imputation). For variance-correct inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
               </p>
             </div>
             <div className="px-5 py-4 space-y-4">
               <div className="flex gap-4 flex-wrap">
-                {[["Imputations (m)", miceN, setMiceN, 1, 100], ["Max iterations", miceIter, setMiceIter, 1, 100], ["Seed", miceSeed, setMiceSeed, 0, 999999]].map(([lab, val, set, mn, mx]: any) => (
+                {[["Max iterations", miceIter, setMiceIter, 1, 100], ["Seed", miceSeed, setMiceSeed, 0, 999999]].map(([lab, val, set, mn, mx]: any) => (
                   <label key={lab} className="flex flex-col gap-1">
                     <span className="text-xs text-gray-500 font-medium">{lab}</span>
                     <input type="number" value={val} onChange={(e) => set(Number(e.target.value))} min={mn} max={mx}
@@ -291,7 +290,7 @@ export default function MissingDataPanel() {
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={handleMICE} disabled={miceLoading || selected.length === 0}
                   className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {miceLoading ? "Running MICE…" : `Apply MICE to ${selected.length || ""} column(s)`}
+                  {miceLoading ? "Imputing…" : `Apply PMM to ${selected.length || ""} column(s)`}
                 </button>
                 <button onClick={runCompare} disabled={busy === "compare" || selected.length === 0}
                   className="px-4 py-2 text-sm font-medium border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">
