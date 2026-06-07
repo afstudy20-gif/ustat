@@ -15,11 +15,12 @@ export interface ModelData {
 
 /** Derived column metadata + async sparklines for the Models panel.
  * Extracted from ModelsPanel so the panel owns flow/UI, not data shaping. */
-export function useModelData(session: Session): ModelData {
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const allCols = session.columns.map((c) => c.name);
+export function useModelData(session: Session | null): ModelData {
+  const numCols = session ? session.columns.filter((c) => c.kind === "numeric").map((c) => c.name) : [];
+  const allCols = session ? session.columns.map((c) => c.name) : [];
 
   const binaryCols = useMemo(() => {
+    if (!session) return [];
     const out: string[] = [];
     for (const col of session.columns) {
       const vals = new Set<unknown>();
@@ -35,9 +36,10 @@ export function useModelData(session: Session): ModelData {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.session_id]);
+  }, [session?.session_id]);
 
   const missingCounts = useMemo(() => {
+    if (!session) return {};
     const counts: Record<string, number> = {};
     for (const col of session.columns) {
       counts[col.name] = session.preview.filter(
@@ -45,14 +47,15 @@ export function useModelData(session: Session): ModelData {
       ).length;
     }
     return counts;
-  }, [session.preview, session.columns]);
+  }, [session?.preview, session?.columns]);
 
   const [sparklines, setSparklines] = useState<Record<string, { type: string; data: number[] }>>({});
   useEffect(() => {
+    if (!session) return;
     getSparklines(session.session_id)
       .then((r) => setSparklines(r.data))
       .catch(() => {});
-  }, [session.session_id]);
+  }, [session?.session_id]);
 
   return { numCols, allCols, binaryCols, missingCounts, sparklines };
 }

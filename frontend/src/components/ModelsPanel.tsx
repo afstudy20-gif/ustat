@@ -77,14 +77,17 @@ function SparklineMini({ data, type }: { data: number[]; type: string }) {
   // categorical → stacked horizontal proportion bars
   const total = data.reduce((a, b) => a + b, 0);
   const CATS  = _pal();
-  let cx = 0;
+  // Cumulative left offset per segment, precomputed immutably (no reassigned
+  // closure variable inside the render map) — react-hooks/immutability.
+  const offsets = data.reduce<number[]>(
+    (acc, _v, i) => [...acc, i === 0 ? 0 : acc[i - 1] + (data[i - 1] / total) * W],
+    [],
+  );
   return (
     <svg width={W} height={H} style={{ display: "block", flexShrink: 0 }}>
       {data.map((v, i) => {
         const w = (v / total) * W;
-        const rect = <rect key={i} x={cx} y={0} width={Math.max(w, 0.5)} height={H} fill={CATS[i % CATS.length]} />;
-        cx += w;
-        return rect;
+        return <rect key={i} x={offsets[i]} y={0} width={Math.max(w, 0.5)} height={H} fill={CATS[i % CATS.length]} />;
       })}
     </svg>
   );
@@ -95,14 +98,14 @@ export default function ModelsPanel() {
   const session  = useStore((s) => s.session);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
     useResizableRightCol("ModelsPanel.result", 480);
-  if (!session) return null;
 
   const { numCols: numColsRaw, allCols: allColsRaw, binaryCols: binaryColsRaw, missingCounts, sparklines } = useModelData(session);
 
   // Hide "exclude from analysis" columns from every variable picker in this panel.
   // The list comes from useModelData as plain names, so we filter against the set
   // of column names flagged analysis_excluded in the session metadata.
-  const excludedSet = new Set(session.columns.filter((c) => c.analysis_excluded).map((c) => c.name));
+  // Computed before the early-return so it is null-safe and usable as hook defaults.
+  const excludedSet = new Set((session?.columns ?? []).filter((c) => c.analysis_excluded).map((c) => c.name));
   const numCols    = numColsRaw.filter((c) => !excludedSet.has(c));
   const allCols    = allColsRaw.filter((c) => !excludedSet.has(c));
   const binaryCols = binaryColsRaw.filter((c) => !excludedSet.has(c));
@@ -137,6 +140,10 @@ export default function ModelsPanel() {
   const [loading, setLoading] = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
   const [predFilter, setPredFilter] = useState("");
+
+  // All hooks above run unconditionally (react-hooks/rules-of-hooks). The
+  // session guard sits here, after every hook is declared.
+  if (!session) return null;
 
   const sid = session.session_id;
 
