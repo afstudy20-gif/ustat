@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
-import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti } from "../api";
+import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti, runOrdinal } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES, type ColMeta } from "../store";
@@ -43,6 +43,11 @@ const MODEL_GUIDANCE: Record<string, { use: string; check: string; interpret: st
     use: "Regression for time-to-event data with multiple predictors. Returns Hazard Ratios (HR) — the multiplicative effect on the event rate.",
     check: "Proportional hazards assumption: HR should be constant over time (check Schoenfeld residuals). Event column must be binary 0/1.",
     interpret: "HR > 1 = higher hazard (worse prognosis). HR < 1 = protective. HR = 1 = no effect. Report: HR (95% CI), p-value.",
+  },
+  ordinal: {
+    use: "Ordinal outcome with ≥3 ordered categories (e.g. NYHA I–IV, Killip, none/mild/severe). Proportional-odds model — one OR per predictor shared across the cumulative thresholds.",
+    check: "Outcome must be an ordered categorical (mark it 'Ordered Categorical' in the Data tab). Proportional-odds assumption: each predictor's effect is constant across the category cut-points.",
+    interpret: "OR > 1 = higher odds of being in a HIGHER category per unit increase. One OR per predictor (not one per category). Report OR (95% CI), p.",
   },
   hrtable: {
     use: "Publication HR table (Table 3): each predictor's univariable HR, its parsimonious-model HR (a subset you tick), and its fully-adjusted HR (all predictors together) side by side.",
@@ -162,6 +167,7 @@ export default function ModelsPanel() {
       else if (model === "ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation });
       else if (model === "firth_ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation, use_firth: true });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
+      else if (model === "ordinal") res = await runOrdinal({ session_id: sid, outcome, predictors, imputation });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
       else if (model === "hrtable") {
         const refs = Object.fromEntries(Object.entries(references).filter(([col]) => predictors.includes(col)));
@@ -206,6 +212,9 @@ export default function ModelsPanel() {
   const isSurvival  = false;  // KM/Cox moved to Survival Advanced tab
   const isORTable   = model === "ortable" || model === "firth_ortable";
   const isHRTable   = model === "hrtable";
+  // Ordinal outcome → proportional-odds model is the right choice.
+  const outcomeIsOrdinal = session.columns.some((c) => c.name === outcome && c.kind === "ordinal");
+  const suggestOrdinal = outcomeIsOrdinal && model !== "ordinal" && !isHRTable;
   const hasRobustSE = model === "linear" || model === "logistic" || model === "poisson";
 
   const toggleParsimonious = (col: string) => {
@@ -228,6 +237,7 @@ export default function ModelsPanel() {
             ["firth",    "Firth Logistic (penalized)", "Bias-corrected logistic regression (Firth 1993). Use when standard logistic fails or returns infinite ORs from rare events / separation. Same output shape as Logistic but with Jeffreys-prior penalty."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
             ["firth_ortable", "Firth OR Table (Uni + Multi)", "Same univariate + multivariate OR table as above but every cell is fitted via Firth's penalised likelihood — handles rare events and quasi-separation. Use for the LAR / albumin-style protective biomarker workflow when standard logistic returns ∞ or near-zero ORs."],
+            ["ordinal",  "Ordinal Logistic (proportional odds)", "For an ordered categorical outcome with ≥3 levels (NYHA, Killip, none/mild/severe). Proportional-odds model: one OR per predictor shared across the cumulative thresholds. Mark the outcome 'Ordered Categorical' in the Data tab."],
             ["hrtable",  "HR Table (Uni + Multi)",   "Cox survival version of the OR table (publication Table 3). Each predictor's univariable HR, its parsimonious-model HR (a subset you tick), and its fully-adjusted HR — side by side. Needs a duration + binary event column."],
             ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
           ] as const).map(([v, l, desc]) => (
@@ -450,6 +460,17 @@ export default function ModelsPanel() {
                 <select className="select w-full" value={outcome} onChange={(e) => setOutcome(e.target.value)}>
                   {allCols.map((c) => <option key={c}>{c}</option>)}
                 </select>
+                {suggestOrdinal && (
+                  <div className="mt-1 text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1.5 leading-snug flex items-start gap-1.5">
+                    <span className="flex-1">
+                      Outcome is ordinal — <strong>Ordinal Logistic (proportional odds)</strong> keeps
+                      the category order (linear regression assumes equal spacing).
+                    </span>
+                    <button onClick={() => { setModel("ordinal"); setResult(null); }} className="flex-shrink-0 underline hover:text-teal-900">
+                      Use ordinal
+                    </button>
+                  </div>
+                )}
               </div>
 
               {isORTable && (
@@ -704,7 +725,7 @@ export default function ModelsPanel() {
               <div className="panel xl:col-start-2">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-semibold text-gray-900">
-                    {model === "cox" ? "Coefficients (Hazard Ratios)" : (model === "logistic" || model === "firth") ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
+                    {model === "cox" ? "Coefficients (Hazard Ratios)" : (model === "logistic" || model === "firth" || model === "ordinal") ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
                     {model === "linear" && <Tip text="Each β coefficient shows how much the outcome changes for a 1-unit increase in that predictor, holding all others constant. Significant predictors (p < 0.05) are highlighted." wide />}
                     {(model === "logistic" || model === "firth") && <Tip text="Odds Ratio (OR) > 1 means higher odds of the outcome; OR < 1 means lower odds. E.g. OR = 2.0 means the outcome is twice as likely per unit increase. 95% CI not crossing 1 = significant." wide />}
                     {model === "cox" && <Tip text="Hazard Ratio (HR) > 1 means a higher rate of the event over time; HR < 1 means a protective effect. E.g. HR = 1.5 means 50% higher event rate per unit increase." wide />}
@@ -752,7 +773,7 @@ export default function ModelsPanel() {
             )}
 
             {/* Forest plot — logistic or cox */}
-            {result.coefficients && (model === "logistic" || model === "firth" || model === "cox") &&
+            {result.coefficients && (model === "logistic" || model === "firth" || model === "cox" || model === "ordinal") &&
               result.coefficients.filter((c: any) => c.variable !== "const").length > 0 && (
               <div className="panel xl:col-start-1">
                 <h4 className="font-semibold text-gray-900 mb-2">

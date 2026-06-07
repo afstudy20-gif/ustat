@@ -354,7 +354,17 @@ class OrdinalRequest(BaseModel):
 
 @router.post("/ordinal")
 def ordinal_regression(req: OrdinalRequest):
-    from sklearn.preprocessing import LabelEncoder
+    """Proportional-odds ordinal logistic regression (statsmodels OrderedModel).
+
+    One odds ratio per predictor (shared across the cumulative thresholds) — the
+    proportional-odds assumption — rather than a separate effect per category as
+    a multinomial model would give. Returns OR (95% CI) + p per predictor, the
+    cumulative cut-points, and McFadden's pseudo-R².
+    """
+    try:
+        from statsmodels.miscmodels.ordinal_model import OrderedModel
+    except ImportError:
+        raise HTTPException(status_code=501, detail="statsmodels OrderedModel unavailable.")
 
     df_full = _get_df(req.session_id)
     cols = [req.outcome] + req.predictors
@@ -362,50 +372,94 @@ def ordinal_regression(req: OrdinalRequest):
     n_excluded = len(df_full) - len(df)
 
     y_raw = df[req.outcome]
-    le = LabelEncoder()
-    y = le.fit_transform(y_raw)
-    cats = list(le.classes_)
-
+    # Order categories: numeric sort when the codes are numeric (e.g. 1/2/3),
+    # otherwise lexical. Preserves the clinical ordering for numeric-coded
+    # ordinal variables (NYHA, Killip, LDL groups, …).
+    uniq = list(pd.Series(y_raw.dropna().unique()))
+    num = pd.to_numeric(pd.Series(uniq), errors="coerce")
+    if num.notna().all():
+        cats = [u for _, u in sorted(zip(num.tolist(), uniq))]
+    else:
+        cats = sorted(uniq, key=lambda v: str(v))
     if len(cats) < 3:
         raise HTTPException(status_code=422, detail="Ordinal outcome must have at least 3 ordered categories.")
 
+    y = pd.Categorical(y_raw, categories=cats, ordered=True).codes
     X = pd.get_dummies(df[req.predictors], drop_first=True).astype(float)
-    Xc = sm.add_constant(X, has_constant="add")
+    if X.shape[1] == 0:
+        raise HTTPException(status_code=422, detail="No usable predictors after encoding.")
+    X = X.reset_index(drop=True)
+    y = pd.Series(y, name=req.outcome).reset_index(drop=True)
 
     try:
-        model = sm.MNLogit(y, Xc)
-        result = model.fit(disp=False, maxiter=200)
+        model = OrderedModel(y, X, distr="logit")
+        result = model.fit(method="bfgs", disp=False, maxiter=200)
     except Exception as e:
         logger.exception("Ordinal regression fit failed")
         raise HTTPException(status_code=422, detail=_sanitize_model_error(e, "ordinal logistic"))
 
-    coefs = []
-    for i, cat in enumerate(cats[1:]):
-        for j, var in enumerate(result.params.index):
-            if var == "const":
-                continue
-            est = float(result.params.iloc[j, i]) if result.params.ndim > 1 else float(result.params.iloc[j])
-            se = float(result.bse.iloc[j, i]) if result.bse.ndim > 1 else float(result.bse.iloc[j])
-            p = float(result.pvalues.iloc[j, i]) if result.pvalues.ndim > 1 else float(result.pvalues.iloc[j])
-            coefs.append({
-                "variable": var,
-                "category": str(cat),
-                "estimate": round(est, 6),
-                "se": round(se, 6),
-                "p": round(p, 6),
-            })
+    exog_names = list(X.columns)
+    conf = result.conf_int()
 
-    brant = {
-        "computed": False,
-        "note": "Formal Brant test for proportional odds assumption is not yet implemented in this endpoint."
-    }
+    def _ci_row(name):
+        try:
+            row = conf.loc[name]
+            return float(row[0]), float(row[1])
+        except Exception:
+            return None, None
+
+    coefs = []
+    for name in exog_names:
+        beta = float(result.params[name])
+        se = float(result.bse[name])
+        p = float(result.pvalues[name])
+        lo, hi = _ci_row(name)
+        import math
+        coefs.append({
+            "variable": name,
+            "log_odds": round(beta, 6),
+            "se": round(se, 6),
+            "z": round(beta / se, 4) if se else None,
+            "p": round(p, 6),
+            "odds_ratio": round(math.exp(beta), 6),
+            "or_ci_low": round(math.exp(lo), 6) if lo is not None else None,
+            "or_ci_high": round(math.exp(hi), 6) if hi is not None else None,
+        })
+
+    # Cumulative cut-points (thresholds) — params after the predictor betas.
+    thresholds = []
+    for name in result.params.index:
+        if name not in exog_names:
+            thresholds.append({"boundary": str(name), "coef": round(float(result.params[name]), 6)})
+
+    # McFadden pseudo-R² against the intercept-only (category-frequency) model.
+    pseudo_r2 = None
+    try:
+        counts = np.bincount(np.asarray(y), minlength=len(cats)).astype(float)
+        probs = counts / counts.sum()
+        ll_null = float(np.sum(counts * np.log(probs + 1e-12)))
+        if ll_null != 0:
+            pseudo_r2 = round(1.0 - (float(result.llf) / ll_null), 4)
+    except Exception:
+        pseudo_r2 = None
 
     res = {
+        "model": "Ordinal Logistic (proportional odds)",
+        "outcome": req.outcome,
         "categories_in_rank_order": [str(c) for c in cats],
+        "n": int(len(df)),
         "n_obs": int(len(df)),
         "n_excluded": int(n_excluded),
         "coefficients": coefs,
-        "brant_proportional_odds": brant,
+        "thresholds": thresholds,
+        "pseudo_r2": pseudo_r2,
+        "aic": round(float(result.aic), 4) if result.aic is not None else None,
+        "bic": round(float(result.bic), 4) if result.bic is not None else None,
+        "brant_proportional_odds": {
+            "computed": False,
+            "note": "Effects are constrained equal across thresholds (proportional-odds "
+                    "assumption). Inspect category-specific patterns if you suspect non-proportionality.",
+        },
         "result_text": _ordinal_results_text(len(cats), len(df)),
     }
 
