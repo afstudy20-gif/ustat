@@ -1336,3 +1336,78 @@ def find_replace(session_id: str, req: FindReplaceRequest):
     store.save(session_id, df)
     store.log_action(session_id, "find_replace", {"columns": req.columns, "replaced_count": replaced_count})
     return {"replaced_count": replaced_count}
+
+
+# ── Per-column value-map replace (in place) ─────────────────────────────────────
+
+class ReplaceValuesRequest(BaseModel):
+    column: str
+    # old display value (as shown in the grid) → new value, both as strings.
+    mapping: Dict[str, str]
+
+
+def _norm_key(series: pd.Series) -> pd.Series:
+    """String view of a column for matching: trims and normalises integer-coded
+    floats so "1.0" matches a user-entered "1"."""
+    s = series.astype(str).str.strip()
+    return s.str.replace(r"^(-?\d+)\.0+$", r"\1", regex=True)
+
+
+@router.post("/{session_id}/replace_values")
+def replace_values(session_id: str, req: ReplaceValuesRequest):
+    """Replace cell values in ONE column via a value→value map, in place.
+
+    Backs the data-grid 'Find & Replace' modal. After replacing, if every
+    non-null value parses as a number the column is cast to numeric (so e.g.
+    kadın→0 / erkek→1 yields a real 0/1 predictor, not object strings). Any
+    existing value labels have their keys remapped so they keep matching.
+    """
+    df = _get_df(session_id)
+    col = req.column
+    if col not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{col}' not found")
+    if not req.mapping:
+        raise HTTPException(status_code=422, detail="At least one replacement is required")
+
+    df = df.copy()
+    # Match against the original (normalised) string view so replacements never
+    # chain (a value mapped to another mapped value is matched on the original).
+    as_str = _norm_key(df[col])
+    new_vals = df[col].astype(object).copy()
+    n_replaced = 0
+    for old, new in req.mapping.items():
+        mask = as_str == str(old).strip()
+        n = int(mask.sum())
+        if n:
+            new_vals[mask] = new
+            n_replaced += n
+    df[col] = new_vals
+
+    # Auto-cast to numeric when every non-null value is a number.
+    nonnull = int(df[col].notna().sum())
+    coerced = pd.to_numeric(df[col], errors="coerce")
+    if nonnull > 0 and int(coerced.notna().sum()) == nonnull:
+        if df[col].isna().any():
+            df[col] = coerced  # NaN forces float
+        elif (coerced % 1 == 0).all():
+            df[col] = coerced.astype(int)
+        else:
+            df[col] = coerced
+
+    store.save(session_id, df)
+
+    # Remap existing value-label keys through the same mapping so labels follow.
+    meta = store.get_metadata(session_id) or {}
+    vl = (meta.get(col, {}) or {}).get("value_labels")
+    if vl:
+        norm = {str(k).strip(): v for k, v in req.mapping.items()}
+        new_vl = {str(norm.get(str(k).strip(), k)): label for k, label in vl.items()}
+        store.save_metadata(session_id, {col: {"value_labels": new_vl}})
+
+    store.log_action(session_id, "replace_values", {"column": col, "replaced_count": n_replaced})
+    result = _build_result(df, col)
+    result["n_replaced"] = n_replaced
+    final_vl = (store.get_metadata(session_id).get(col, {}) or {}).get("value_labels")
+    if final_vl:
+        result["value_labels"] = final_vl
+    return result

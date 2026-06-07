@@ -23,6 +23,7 @@ const KIND_LABEL: Record<string, string> = {
 
 import { SelectCasesModal } from "./datatable/SelectCasesModal";
 import { ValueLabelsModal } from "./datatable/ValueLabelsModal";
+import { FindReplaceModal } from "./datatable/FindReplaceModal";
 type SortDir = "asc" | "desc";
 
 export default function DataTable() {
@@ -82,6 +83,7 @@ export default function DataTable() {
 
   // Value labels editor
   const [valueLabelCol, setValueLabelCol] = useState<string | null>(null);
+  const [findReplaceCol, setFindReplaceCol] = useState<string | null>(null);
   const [valueLabelDraft, setValueLabelDraft] = useState<Record<string, string>>({});
 
   // Analysis-exclude flag + move-to-position + name-suggestion modals
@@ -1084,6 +1086,10 @@ export default function DataTable() {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             🔤 Value Labels
           </button>
+          <button onClick={() => { setFindReplaceCol(ctxMenu.col); setCtxMenu(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            🔁 Find &amp; Replace…
+          </button>
           <button onClick={() => {
             const col = columns.find((c) => c.name === ctxMenu.col);
             setColumnAnalysisExcluded(ctxMenu.col, !(col?.analysis_excluded ?? false));
@@ -1295,6 +1301,18 @@ export default function DataTable() {
           setDraft={setValueLabelDraft}
           session={session}
           onClose={() => setValueLabelCol(null)}
+        />
+      )}
+
+      {/* ── Find & Replace Modal ── */}
+      {findReplaceCol && (
+        <FindReplaceModal
+          colName={findReplaceCol}
+          columns={columns}
+          preview={preview}
+          session={session}
+          onClose={() => setFindReplaceCol(null)}
+          onApplied={bumpUndo}
         />
       )}
 

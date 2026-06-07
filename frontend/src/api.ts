@@ -231,6 +231,7 @@ export const runBayesian = (data: object) => api.post("/api/bayesian", data);
 export const runDropMissing = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/drop_missing`, data);
 export const runCleanOutliers = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/clean_outliers`, data);
 export const runFindReplace = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/find_replace`, data);
+export const replaceColumnValues = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/replace_values`, data);
 
 // ── Code runner ────────────────────────────────────────────────────────────
 
