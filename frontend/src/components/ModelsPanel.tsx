@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { useStore } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
-import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson } from "../api";
+import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES } from "../store";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { CoefTable, ORTable, ForestPlot, PredictionPanel, CoefDetailPanel, ModelSummaryTable } from "./models/resultViews";
+import CoxHRTable from "./models/CoxHRTable";
 import { useModelData } from "./models/useModelData";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
@@ -42,6 +43,11 @@ const MODEL_GUIDANCE: Record<string, { use: string; check: string; interpret: st
     use: "Regression for time-to-event data with multiple predictors. Returns Hazard Ratios (HR) — the multiplicative effect on the event rate.",
     check: "Proportional hazards assumption: HR should be constant over time (check Schoenfeld residuals). Event column must be binary 0/1.",
     interpret: "HR > 1 = higher hazard (worse prognosis). HR < 1 = protective. HR = 1 = no effect. Report: HR (95% CI), p-value.",
+  },
+  hrtable: {
+    use: "Publication HR table (Table 3): each predictor's univariable HR, its parsimonious-model HR (a subset you tick), and its fully-adjusted HR (all predictors together) side by side.",
+    check: "Event column must be binary 0/1, duration positive. Tick which predictors enter the parsimonious column. Categorical predictors expand to one row per level vs the reference.",
+    interpret: "Univariable = crude effect. Parsimonious = adjusted for the chosen subset. Fully adjusted = adjusted for everything. A blank (—) cell means the predictor was not in that model.",
   },
   rcs: {
     use: "Model non-linear (U/J-shaped) dose-response relationships using Restricted Cubic Splines. Essential for continuous biomarkers where the effect is not a straight line.",
@@ -104,6 +110,9 @@ export default function ModelsPanel() {
   const [model, setModel] = usePersistedPanelState<string>("models", "model", "linear");
   const [outcome, setOutcome] = usePersistedPanelState<string>("models", "outcome", numCols[0] ?? "");
   const [predictors, setPredictors] = usePersistedPanelState<string[]>("models", "predictors", []);
+  // HR Table (Cox uni/parsimonious/full): subset of predictors that enter the
+  // parsimonious (middle) model column.
+  const [parsimonious, setParsimonious] = usePersistedPanelState<string[]>("models", "parsimonious", []);
   // Pairwise interaction terms applied to linear / logistic / Cox / poisson.
   // Stored as [colA, colB]; rendered as a small picker below the predictor list.
   const [glmInteractions, setGlmInteractions] = usePersistedPanelState<Array<[string, string]>>("models", "glmInteractions", []);
@@ -144,6 +153,7 @@ export default function ModelsPanel() {
       else if (model === "firth_ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation, use_firth: true });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
+      else if (model === "hrtable") res = await runCoxUniMulti({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, parsimonious: parsimonious.filter((p) => predictors.includes(p)) });
       else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation, interactions });
       setResult(res.data);
     } catch (e: any) {
@@ -178,7 +188,12 @@ export default function ModelsPanel() {
 
   const isSurvival  = false;  // KM/Cox moved to Survival Advanced tab
   const isORTable   = model === "ortable" || model === "firth_ortable";
+  const isHRTable   = model === "hrtable";
   const hasRobustSE = model === "linear" || model === "logistic" || model === "poisson";
+
+  const toggleParsimonious = (col: string) => {
+    setParsimonious(parsimonious.includes(col) ? parsimonious.filter((c) => c !== col) : [...parsimonious, col]);
+  };
 
   return (
     <div className="flex gap-4">
@@ -191,6 +206,7 @@ export default function ModelsPanel() {
             ["firth",    "Firth Logistic (penalized)", "Bias-corrected logistic regression (Firth 1993). Use when standard logistic fails or returns infinite ORs from rare events / separation. Same output shape as Logistic but with Jeffreys-prior penalty."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
             ["firth_ortable", "Firth OR Table (Uni + Multi)", "Same univariate + multivariate OR table as above but every cell is fitted via Firth's penalised likelihood — handles rare events and quasi-separation. Use for the LAR / albumin-style protective biomarker workflow when standard logistic returns ∞ or near-zero ORs."],
+            ["hrtable",  "HR Table (Uni + Multi)",   "Cox survival version of the OR table (publication Table 3). Each predictor's univariable HR, its parsimonious-model HR (a subset you tick), and its fully-adjusted HR — side by side. Needs a duration + binary event column."],
             ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
@@ -222,7 +238,79 @@ export default function ModelsPanel() {
         </div>
 
         <div className="panel space-y-3">
-          {isSurvival ? (
+          {isHRTable ? (
+            <>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">Duration column</label>
+                <select className="select w-full" value={durationCol} onChange={(e) => setDurationCol(e.target.value)}>
+                  {numCols.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-400 block mb-1">
+                  Event column (0/1)
+                  {binaryCols.length === 0 && <span className="ml-1 text-[10px] text-amber-600">⚠ no binary 0/1 column detected</span>}
+                </label>
+                <select className="select w-full" value={eventCol} onChange={(e) => setEventCol(e.target.value)}>
+                  {(binaryCols.length > 0 ? binaryCols : numCols).map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-gray-400">Predictors</label>
+                  <button onClick={() => { setPredictors([]); setParsimonious([]); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
+                </div>
+                <div className="mb-2 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
+                  Tick a predictor to include it. The <strong>★</strong> box marks which predictors
+                  also enter the <strong>parsimonious</strong> (middle) model column. Univariable and
+                  fully-adjusted columns always use every ticked predictor.
+                </div>
+                <input
+                  type="text"
+                  placeholder="Filter variables…"
+                  value={predFilter}
+                  onChange={(e) => setPredFilter(e.target.value)}
+                  className="select w-full text-xs mb-1 py-1"
+                />
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {allCols
+                    .filter((c) => c !== durationCol && c !== eventCol && c.toLowerCase().includes(predFilter.toLowerCase()))
+                    .map((c) => {
+                      const checked = predictors.includes(c);
+                      const spk = sparklines[c];
+                      return (
+                        <div key={c} className="flex items-center gap-2 text-sm">
+                          <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                            <input type="checkbox" checked={checked} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
+                            <span className="text-gray-700 truncate flex-1">{c}</span>
+                            {(missingCounts[c] ?? 0) > 0 && (
+                              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200 flex-shrink-0"
+                                title={`${missingCounts[c]} missing values`}>
+                                {missingCounts[c]}✕
+                              </span>
+                            )}
+                            {spk && <SparklineMini data={spk.data} type={spk.type} />}
+                          </label>
+                          <label
+                            className={`flex items-center gap-0.5 text-[10px] flex-shrink-0 ${checked ? "cursor-pointer text-amber-600" : "opacity-30"}`}
+                            title="Include in the parsimonious model column"
+                          >
+                            <input
+                              type="checkbox"
+                              disabled={!checked}
+                              checked={checked && parsimonious.includes(c)}
+                              onChange={() => toggleParsimonious(c)}
+                              className="accent-amber-500"
+                            />
+                            ★
+                          </label>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </>
+          ) : isSurvival ? (
             <>
               <div>
                 <label className="text-xs text-gray-400 block mb-1">Duration column</label>
@@ -439,7 +527,9 @@ export default function ModelsPanel() {
           )}
           <MissingGuard
             sessionId={sid}
-            columns={isSurvival
+            columns={isHRTable
+              ? [durationCol, eventCol, ...predictors]
+              : isSurvival
               ? [durationCol, eventCol, ...(model === "cox" ? predictors : [])]
               : [...predictors, outcome]}
             imputation={imputation}
@@ -471,6 +561,24 @@ export default function ModelsPanel() {
         )}
 
         {result ? (
+          isHRTable && result.rows ? (
+            <div className="panel">
+              <h4 className="font-semibold text-gray-900 mb-2">
+                Univariable, Parsimonious &amp; Fully adjusted Cox HR Table
+                <Tip wide text="Publication Table 3. Univariable = each predictor fitted alone. Parsimonious = the subset you ticked (★) fitted together. Fully adjusted = all predictors fitted together. A blank (—) cell means the predictor was not in that model." />
+              </h4>
+              <CoxHRTable
+                rows={result.rows}
+                columns={session.columns}
+                n={result.n}
+                nEvents={result.n_events}
+                nPars={result.n_pars}
+                nEventsPars={result.n_events_pars}
+                durationCol={result.duration_col}
+                eventCol={result.event_col}
+              />
+            </div>
+          ) : (
           <div
             className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
             style={{ ["--right-col" as any]: `${rightColW}px` }}
@@ -672,6 +780,7 @@ export default function ModelsPanel() {
               </div>
             )}
           </div>
+          )
         ) : (
           <div className="panel h-64 flex items-center justify-center text-gray-400">
             Configure and fit a model

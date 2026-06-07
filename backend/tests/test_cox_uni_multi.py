@@ -53,6 +53,42 @@ def test_cox_uni_multi_shape():
         assert row["adjusted"] is not None
 
 
+def test_cox_uni_multi_parsimonious_subset():
+    """A parsimonious subset fits its own multivariable model; predictors
+    outside the subset get a null parsimonious cell (Table 3 middle column)."""
+    sid = _seed()
+    r = client.post("/api/models/survival/cox_uni_multi", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "predictors": ["ldl_grp", "age"],
+        "parsimonious": ["age"],  # only age enters the parsimonious model
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["n_pars"] > 0 and d["n_events_pars"] > 0
+    by_term = {row["term"]: row for row in d["rows"]}
+    # age is in the parsimonious set -> populated; uni + full also present
+    age = by_term["age"]
+    assert age["parsimonious"] is not None and "hr" in age["parsimonious"]
+    assert age["unadjusted"] is not None and age["adjusted"] is not None
+    # ldl_grp excluded -> parsimonious cell blank, but uni/full still there
+    assert by_term["ldl_grp=2"]["parsimonious"] is None
+    assert by_term["ldl_grp=3"]["parsimonious"] is None
+    assert by_term["ldl_grp=2"]["adjusted"] is not None
+
+
+def test_cox_uni_multi_no_parsimonious_is_backward_compatible():
+    """Omitting `parsimonious` yields null cells + zero counts, never errors."""
+    sid = _seed()
+    r = client.post("/api/models/survival/cox_uni_multi", json={
+        "session_id": sid, "duration_col": "time", "event_col": "event",
+        "predictors": ["ldl_grp", "age"],
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["n_pars"] == 0 and d["n_events_pars"] == 0
+    assert all(row["parsimonious"] is None for row in d["rows"])
+
+
 def test_cox_uni_multi_reference_override():
     sid = _seed()
     r = client.post("/api/models/survival/cox_uni_multi", json={

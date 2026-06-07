@@ -1665,6 +1665,10 @@ class CoxUniMultiRequest(BaseModel):
     # Optional per-predictor reference level (value code as string) for
     # categorical predictors. Default = lowest value code.
     references: Optional[dict] = None
+    # Optional subset of `predictors` fitted together as the "parsimonious"
+    # multivariable model (publication Table 3 middle column). When omitted,
+    # only the univariable and fully-adjusted columns are produced.
+    parsimonious: Optional[List[str]] = None
 
 
 def _encode_cox_predictor(series: pd.Series, name: str, force_categorical: bool = False,
@@ -1811,11 +1815,37 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
         except Exception:
             logger.exception("Multivariable Cox failed")
 
+    # ── Parsimonious pass: a user-chosen subset fitted together ──
+    # Only the selected predictors enter this model; every other predictor's
+    # parsimonious cell stays empty (null) so the table renders a blank, not a
+    # borrowed estimate. Mirrors the fully-adjusted pass on a smaller design.
+    pars_set = [p for p in (req.parsimonious or []) if p in encoded]
+    pars_stats: dict[str, dict] = {}
+    n_pars = 0
+    n_events_pars = 0
+    if pars_set:
+        pars_design = pd.concat([encoded[p] for p in pars_set], axis=1)
+        fit_pars = pd.concat([base, pars_design], axis=1).dropna()
+        if len(fit_pars) >= 10:
+            cph_pars = CoxPHFitter()
+            try:
+                await asyncio.to_thread(cph_pars.fit, fit_pars, duration_col=req.duration_col, event_col=req.event_col)
+                n_pars = len(fit_pars)
+                n_events_pars = int(fit_pars[req.event_col].sum())
+                for t in all_terms:
+                    if t["predictor"] in pars_set:
+                        st = _cox_term_stats(cph_pars, t["term"])
+                        if st:
+                            pars_stats[t["term"]] = st
+            except Exception:
+                logger.exception("Parsimonious Cox failed")
+
     rows = []
     for t in all_terms:
         rows.append({
             **t,
             "unadjusted": uni_stats.get(t["term"]),
+            "parsimonious": pars_stats.get(t["term"]),
             "adjusted": adj_stats.get(t["term"]),
         })
 
@@ -1824,6 +1854,8 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
         "event_col": req.event_col,
         "n": n_used,
         "n_events": n_events,
+        "n_pars": n_pars,
+        "n_events_pars": n_events_pars,
         "rows": rows,
     }
 
