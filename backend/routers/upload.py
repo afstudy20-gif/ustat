@@ -87,10 +87,21 @@ def _detect_kind(series: pd.Series) -> str:
         if isinstance(first_nonnull, (_dt.time, _dt.date, _dt.datetime)):
             return "date"
 
-    # For object/string columns: check if values look like dates/times
+    # For object/string columns: check if values look like dates/times.
+    # Numeric-separator/ISO/time forms via regex, plus TR/EN month-name dates
+    # via the date parser. Pure numbers are NOT treated as dates here so Excel
+    # serial numbers / integer IDs are never mislabelled (serial parsing stays
+    # opt-in through the 'Parse as date' tool).
+    from services.date_parser import parse_one
+    _pure_num = re.compile(r"^-?\d+(\.\d+)?$")
     sample = series.dropna().head(50).astype(str)
     if len(sample) > 0:
-        matches = sum(1 for v in sample if any(p.match(v.strip()) for p in _DATE_PATTERNS))
+        def _looks_date(v: str) -> bool:
+            v = v.strip()
+            if _pure_num.match(v):
+                return False
+            return any(p.match(v) for p in _DATE_PATTERNS) or parse_one(v) is not None
+        matches = sum(1 for v in sample if _looks_date(v))
         if matches / len(sample) >= 0.7:  # ≥70% match → date
             return "date"
 

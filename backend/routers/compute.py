@@ -1411,3 +1411,63 @@ def replace_values(session_id: str, req: ReplaceValuesRequest):
     if final_vl:
         result["value_labels"] = final_vl
     return result
+
+
+# ── Parse a text column to real dates (datetime64, in place) ────────────────────
+
+class ParseDatesRequest(BaseModel):
+    column: str
+    order: str = "auto"            # auto | dmy | mdy (gg/aa ambiguity)
+    century_threshold: int = 50    # 2-digit year cutoff (≤ → 2000s)
+    preview_only: bool = False
+
+
+def _iso_or_none(ts) -> Optional[str]:
+    return None if pd.isna(ts) else pd.Timestamp(ts).strftime("%Y-%m-%d")
+
+
+@router.post("/{session_id}/parse_dates")
+def parse_dates(session_id: str, req: ParseDatesRequest):
+    """Convert a column of mixed-format date text into real datetime64, in place.
+
+    Backs the data-grid 'Parse as date' modal. Recognises numeric separators,
+    TR/EN month names, Excel serial numbers and 2-digit years, and resolves
+    DMY/MDY ambiguity across the whole column (see services.date_parser).
+    Stored as datetime64 (ISO) so survival / time-series read it directly.
+    """
+    from services.date_parser import parse_series
+
+    df = _get_df(session_id)
+    if req.column not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{req.column}' not found")
+
+    ser, stats = parse_series(df[req.column], order=req.order, threshold=req.century_threshold)
+
+    # Always return a small raw→parsed sample for the live preview.
+    raws = list(df[req.column].head(20))
+    sample = [
+        {
+            "raw": (None if (r is None or (isinstance(r, float) and pd.isna(r))) else str(r)),
+            "parsed": _iso_or_none(v),
+        }
+        for r, v in zip(raws, ser.head(20))
+    ]
+    if req.preview_only:
+        return {"column": req.column, "stats": stats, "sample": sample}
+
+    df = df.copy()
+    df[req.column] = ser
+    store.save(session_id, df)
+    store.log_action(session_id, "parse_dates", {"column": req.column, **stats})
+
+    preview_values = [_iso_or_none(v) for v in ser.head(2000)]
+    return {
+        "name": req.column,
+        "dtype": "datetime64[ns]",
+        "kind": "date",
+        "preview_values": preview_values,
+        "n_computed": stats["n_ok"],
+        "n_missing": stats["n_bad"] + stats["n_empty"],
+        "stats": stats,
+        "sample": sample,
+    }

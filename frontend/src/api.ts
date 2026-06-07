@@ -232,6 +232,7 @@ export const runDropMissing = (sessionId: string, data: object) => api.post(`/ap
 export const runCleanOutliers = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/clean_outliers`, data);
 export const runFindReplace = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/find_replace`, data);
 export const replaceColumnValues = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/replace_values`, data);
+export const parseColumnDates = (sessionId: string, data: object) => api.post(`/api/compute/${sessionId}/parse_dates`, data);
 
 // ── Code runner ────────────────────────────────────────────────────────────
 
