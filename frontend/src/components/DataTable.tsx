@@ -263,7 +263,7 @@ export default function DataTable() {
   }, [ctxMenu, rowCtx, cellCtx]);
 
   // Bump undo depth after each backend mutation
-  const bumpUndo = () => useStore.setState((s) => ({ undoDepth: s.undoDepth + 1, redoDepth: 0 }));
+  const bumpUndo = () => useStore.setState((s) => ({ undoDepth: s.undoDepth + 1, redoDepth: 0, dataVersion: s.dataVersion + 1 }));
 
   const deleteColumn = async (colName: string) => {
     if (!session) return;

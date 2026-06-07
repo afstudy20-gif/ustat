@@ -154,6 +154,11 @@ interface AppState {
   redoDepth: number;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
+  /** Monotonic counter bumped on every data mutation (column add/remove, cell
+   *  edit, recode, find-replace, date parse, paste, undo/redo). Drives autosave
+   *  so in-place edits that don't change row/column counts still get persisted. */
+  dataVersion: number;
+  bumpDataVersion: () => void;
   deleteRow: (rowIdx: number) => Promise<void>;
   
   // Descriptive tab UI state
@@ -216,6 +221,7 @@ export const useStore = create<AppState>((set) => ({
       panelCache: {},
       undoDepth: 0,
       redoDepth: 0,
+      dataVersion: 0,
       columnDecimals: {},
       sessionHistory: [],
     };
@@ -255,12 +261,13 @@ export const useStore = create<AppState>((set) => ({
       };
     });
   },
+  bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
   updatePreviewCell: (rowIdx, col, value) =>
     set((state) => {
       if (!state.session) return state;
       const preview = [...state.session.preview];
       preview[rowIdx] = { ...preview[rowIdx], [col]: value };
-      return { session: { ...state.session, preview } };
+      return { session: { ...state.session, preview }, dataVersion: state.dataVersion + 1 };
     }),
   addSessionColumn: (col, previewValues) =>
     set((state) => {
@@ -274,7 +281,7 @@ export const useStore = create<AppState>((set) => ({
         ...row,
         [col.name]: previewValues[i] ?? null,
       }));
-      return { session: { ...state.session, columns, preview } };
+      return { session: { ...state.session, columns, preview }, dataVersion: state.dataVersion + 1 };
     }),
   removeSessionColumn: (name) =>
     set((state) => {
@@ -285,7 +292,7 @@ export const useStore = create<AppState>((set) => ({
         delete r[name];
         return r;
       });
-      return { session: { ...state.session, columns, preview } };
+      return { session: { ...state.session, columns, preview }, dataVersion: state.dataVersion + 1 };
     }),
   reorderColumns: (fromIndex, toIndex) =>
     set((state) => {
@@ -367,7 +374,7 @@ export const useStore = create<AppState>((set) => ({
       const res = await api.post(`/api/sessions/${state.session.session_id}/undo`);
       const d = res.data;
       set({ session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
-            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0 });
+            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0, dataVersion: state.dataVersion + 1 });
     } catch { /* nothing to undo */ }
   },
   redo: async () => {
@@ -378,7 +385,7 @@ export const useStore = create<AppState>((set) => ({
       const res = await api.post(`/api/sessions/${state.session.session_id}/redo`);
       const d = res.data;
       set({ session: { ...state.session, rows: d.rows, columns: d.columns, preview: d.preview },
-            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0 });
+            undoDepth: d.undo_depth ?? 0, redoDepth: d.redo_depth ?? 0, dataVersion: state.dataVersion + 1 });
     } catch { /* nothing to redo */ }
   },
   deleteRow: async (rowIdx: number) => {

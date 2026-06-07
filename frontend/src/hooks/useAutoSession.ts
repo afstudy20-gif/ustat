@@ -27,6 +27,14 @@ import { upsertRecentSession, notifySessionsChanged } from "../lib/sessionDb";
 const DEBOUNCE_MS = 5_000;
 const PERIODIC_MS = 60_000;
 
+/** Cheap, full-payload fingerprint (djb2). Catches in-place edits that keep the
+ *  JSON length constant, which a length+prefix hash missed. */
+function djb2(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return `${s.length}:${h >>> 0}`;
+}
+
 interface AutoSaveDeps {
   /** Optional setter for a status indicator in the header. */
   onStatus?: (status: "idle" | "saving" | "saved" | "error", at?: number) => void;
@@ -41,6 +49,11 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
   const nCols     = useStore((s) => s.session?.columns.length ?? null);
   const activeTab = useStore((s) => s.activeTab);
   const caseFilter = useStore((s) => s.caseFilter);
+  // Bumped on EVERY data mutation (incl. in-place edits that leave row/column
+  // counts unchanged: cell edits, recode-in-place, find-replace, date parse).
+  // Without this, such edits only got picked up by the 60 s periodic snapshot,
+  // so a quick reload after editing could resume from a stale blob.
+  const dataVersion = useStore((s) => s.dataVersion);
   // Value-labels / decimals changes don't alter row or column counts, so they
   // wouldn't retrigger the debounce on their own — a quick reload before the
   // 60 s periodic snapshot would resume from a stale blob and lose the labels.
@@ -79,7 +92,9 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
           : JSON.stringify(res.data);
         // Skip the write if the blob hasn't changed since the last
         // snapshot — cuts down on IndexedDB churn for read-only sessions.
-        const hash = `${payload.length}:${payload.slice(0, 64)}`;
+        // djb2 over the whole payload (not just length + prefix, which was
+        // blind to in-place edits that keep the JSON length constant).
+        const hash = djb2(payload);
         if (hash === lastSavedHashRef.current) {
           onStatusRef.current?.("saved", Date.now());
           return;
@@ -125,5 +140,5 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
       clearInterval(interval);
       window.removeEventListener("beforeunload", onBeforeUnload);
     };
-  }, [sessionId, filename, nRows, nCols, activeTab, caseFilter, valueLabelSig]);
+  }, [sessionId, filename, nRows, nCols, activeTab, caseFilter, valueLabelSig, dataVersion]);
 }

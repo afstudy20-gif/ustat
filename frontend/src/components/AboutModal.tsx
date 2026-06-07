@@ -289,7 +289,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
                 <span className="text-[10px] text-gray-400">build {BUILD}</span>
               </div>
               <p className="text-xs text-gray-500">
-                Statistical Analysis Platform · by <span className="font-medium text-gray-700">Dr. Yusuf Ho&#x15F;o&#x11F;lu</span>
+                Statistical Analysis Platform · Editor <span className="font-medium text-gray-700">Dr. Yusuf Ho&#x15F;o&#x11F;lu</span> · Associate Editor <span className="font-medium text-gray-700">Dr. Ay&#x15F;e Ho&#x15F;o&#x11F;lu</span>
               </p>
             </div>
           </div>
@@ -326,7 +326,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
           {/* ── What is uSTAT ──────────────────────────────────────────────── */}
           <Section title="What is uSTAT?">
             <p className="text-xs text-gray-700 leading-relaxed">
-              uSTAT is a free, browser-based statistical analysis platform — an SPSS / R / Stata alternative for clinicians, biostatisticians, and medical researchers. Created and maintained by <strong>Dr. Yusuf Ho&#x15F;o&#x11F;lu</strong>. Upload CSV, Excel, SPSS (.sav), SAS (.sas7bdat), or Stata (.dta) files and run 90+ analyses — from t-tests to machine learning, survival, meta-analysis, and non-inferiority trials — in your browser. No installation, no account, no usage limits.
+              uSTAT is a free, browser-based statistical analysis platform — an SPSS / R / Stata alternative for clinicians, biostatisticians, and medical researchers. Editor <strong>Dr. Yusuf Ho&#x15F;o&#x11F;lu</strong>, Associate Editor <strong>Dr. Ay&#x15F;e Ho&#x15F;o&#x11F;lu</strong>. Upload CSV, Excel, SPSS (.sav), SAS (.sas7bdat), or Stata (.dta) files and run 90+ analyses — from t-tests to machine learning, survival, meta-analysis, and non-inferiority trials — in your browser. No installation, no account, no usage limits.
             </p>
           </Section>
 
@@ -438,7 +438,7 @@ export default function AboutModal({ onClose }: { onClose: () => void }) {
           {/* ── Footer ─────────────────────────────────────────────────────── */}
           <div className="text-[10px] text-gray-400 pt-3 border-t border-gray-100">
             <p>
-              Created by <span className="font-medium text-gray-600">Dr. Yusuf Ho&#x15F;o&#x11F;lu</span>. &copy; 2026. All rights reserved.
+              Editor <span className="font-medium text-gray-600">Dr. Yusuf Ho&#x15F;o&#x11F;lu</span> · Associate Editor <span className="font-medium text-gray-600">Dr. Ay&#x15F;e Ho&#x15F;o&#x11F;lu</span>. &copy; 2026. All rights reserved.
             </p>
           </div>
         </div>

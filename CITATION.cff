@@ -7,7 +7,9 @@ authors:
     family-names: Hoşoğlu
     email: contact@drtr.uk
     affiliation: Department of Cardiology, Diyarbakır Gazi Yaşargil Training and Research Hospital
-repository-code: "https://github.com/afstudy20-gif/wiz3"
+  - given-names: Ayşe
+    family-names: Hoşoğlu
+repository-code: "https://github.com/afstudy20-gif/ustat"
 url: "https://ustat.drtr.uk"
 abstract: >-
   uSTAT is a free, browser-based statistical analysis platform aimed at
@@ -43,6 +45,8 @@ preferred-citation:
   authors:
     - given-names: Yusuf
       family-names: Hoşoğlu
+    - given-names: Ayşe
+      family-names: Hoşoğlu
   year: 2026
   url: "https://ustat.drtr.uk"
-  repository-code: "https://github.com/afstudy20-gif/wiz3"
+  repository-code: "https://github.com/afstudy20-gif/ustat"
