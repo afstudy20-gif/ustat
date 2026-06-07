@@ -952,28 +952,61 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         fill_val = float(num_col.median())
         method_label = f"median ({fill_val:.2f})"
         df[req.column] = num_col.fillna(fill_val)
+    elif req.value == "__mode__":
+        observed = col.dropna()
+        observed = observed[observed.astype(str).str.strip() != ""]
+        if observed.empty:
+            raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no values to impute from.")
+        fill_val = observed.mode().iloc[0]
+        df[req.column] = col.fillna(fill_val)
+        if col.dtype == object:
+            df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+        method_label = f"most frequent ({fill_val})"
     elif req.value == "__mice__":
-        # MICE imputation for this single column using all other numeric columns
-        from sklearn.experimental import enable_iterative_imputer  # noqa
-        from sklearn.impute import IterativeImputer
-        num_cols = df.select_dtypes(include="number").columns.tolist()
-        if req.column not in num_cols:
-            num_col = pd.to_numeric(col, errors="coerce")
-            df[req.column] = num_col
-            num_cols = df.select_dtypes(include="number").columns.tolist()
-        if req.column in num_cols and len(num_cols) >= 2:
-            imp = IterativeImputer(max_iter=10, random_state=42)
-            imputed = imp.fit_transform(df[num_cols])
-            idx = num_cols.index(req.column)
-            df[req.column] = imputed[:, idx]
-            fill_val = "MICE"
-            method_label = "MICE (multiple imputation)"
+        coerced = pd.to_numeric(col, errors="coerce")
+        is_numeric_col = pd.api.types.is_numeric_dtype(col) or (
+            col.notna().any() and coerced.notna().mean() >= 0.8
+        )
+        if not is_numeric_col:
+            # MICE is undefined on text/categorical → impute with the most
+            # frequent value (mode). Never crash; never silently no-op.
+            mode = col.dropna()
+            mode = mode[mode.astype(str).str.strip() != ""]
+            if mode.empty:
+                raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no values to impute from.")
+            fill_val = mode.mode().iloc[0]
+            df[req.column] = col.fillna(fill_val)
+            if col.dtype == object:
+                df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+            method_label = f"most frequent ({fill_val})"
         else:
-            # Fallback to median if MICE not possible
-            num_col = pd.to_numeric(col, errors="coerce")
-            fill_val = float(num_col.median())
-            method_label = f"median fallback ({fill_val:.2f})"
-            df[req.column] = num_col.fillna(fill_val)
+            # Numeric → MICE using the other numeric feature columns that have
+            # data. Pre-filter all-NaN features so the imputer can't drop a
+            # column and misalign positions (the previous IndexError).
+            from sklearn.experimental import enable_iterative_imputer  # noqa
+            from sklearn.impute import IterativeImputer
+            work = df.copy()
+            work[req.column] = coerced
+            feat_cols = [c for c in work.select_dtypes(include="number").columns if work[c].notna().any()]
+            if req.column not in feat_cols:
+                feat_cols = [req.column, *feat_cols]
+            if len(feat_cols) >= 2 and work[req.column].notna().any():
+                try:
+                    imp = IterativeImputer(max_iter=10, random_state=42)
+                    out = pd.DataFrame(imp.fit_transform(work[feat_cols]), columns=feat_cols, index=work.index)
+                    df[req.column] = out[req.column]
+                    method_label = "MICE (multiple imputation)"
+                except Exception:
+                    med = coerced.median()
+                    df[req.column] = coerced.fillna(med)
+                    method_label = f"median fallback ({med:.2f})" if pd.notna(med) else "median fallback"
+            else:
+                # Too few numeric features for chained equations → median.
+                med = coerced.median()
+                if pd.isna(med):
+                    raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no numeric values to impute from.")
+                df[req.column] = coerced.fillna(med)
+                method_label = f"median fallback ({med:.2f})"
     else:
         # Custom value — try numeric cast first
         try:
@@ -993,6 +1026,70 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
     store.save(session_id, df)
     store.log_action(session_id, "fill_blanks", {"column": req.column, "method": method_label, "n_filled": n_filled})
     return {"column": req.column, "fill_value": method_label, "n_filled": n_filled}
+
+
+# ── 6b. Missing-data diagnostics (MCAR vs MAR heuristic) ────────────────────────
+
+@router.post("/{session_id}/missing_diagnostics")
+def missing_diagnostics(session_id: str):
+    """Heuristic MCAR-vs-MAR hint (no AI). For each column with missing values,
+    test whether its missingness indicator is associated with the OTHER numeric
+    columns (Welch t-test of each other column, missing vs observed rows). Any
+    association → the data depend on observed values → consistent with MAR, so
+    MICE is appropriate; none → consistent with MCAR."""
+    df = _get_df(session_id)
+    from scipy import stats as _stats
+
+    n = len(df)
+    num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].notna().any()]
+    columns = []
+    any_mar = False
+    for c in df.columns:
+        miss = df[c].isna() | (df[c].astype(str).str.strip() == "")
+        n_miss = int(miss.sum())
+        if n_miss == 0:
+            continue
+        depends_on = []
+        for o in num_cols:
+            if o == c:
+                continue
+            a = pd.to_numeric(df.loc[miss, o], errors="coerce").dropna()
+            b = pd.to_numeric(df.loc[~miss, o], errors="coerce").dropna()
+            if len(a) >= 3 and len(b) >= 3:
+                try:
+                    _, p = _stats.ttest_ind(a, b, equal_var=False)
+                    if pd.notna(p) and p < 0.05:
+                        depends_on.append(o)
+                except Exception:
+                    pass
+        likely = "MAR" if depends_on else "MCAR-consistent"
+        if depends_on:
+            any_mar = True
+        columns.append({
+            "name": c,
+            "n_missing": n_miss,
+            "pct": round(100.0 * n_miss / n, 1) if n else 0.0,
+            "kind": _col_kind(df[c]),
+            "is_numeric": bool(pd.api.types.is_numeric_dtype(df[c])),
+            "depends_on": depends_on,
+            "likely": likely,
+        })
+
+    if not columns:
+        overall = "No missing values detected."
+        recommendation = ""
+    elif any_mar:
+        overall = ("At least one variable's missingness is associated with other observed "
+                   "variables — consistent with MAR (not MCAR).")
+        recommendation = ("MAR → MICE (multiple imputation) is the appropriate choice. Mean/median "
+                          "or listwise deletion can bias results when the missing fraction is non-trivial.")
+    else:
+        overall = ("No association detected between missingness and the observed numeric variables "
+                   "— consistent with MCAR.")
+        recommendation = ("MCAR → listwise deletion is unbiased; MICE is still valid and more "
+                          "efficient (keeps the full sample).")
+
+    return {"columns": columns, "overall_hint": overall, "recommendation": recommendation, "any_mar": any_mar}
 
 
 # ── 7. Delete rows ──────────────────────────────────────────────────────────

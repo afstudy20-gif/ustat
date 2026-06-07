@@ -152,6 +152,8 @@ export const runCronbach     = (data: object) => api.post("/api/reliability/cron
 export const runMissingPattern = (data: object) => api.post("/api/missing_data/pattern", data);
 export const runMCARTest     = (data: object) => api.post("/api/missing_data/mcar_test", data);
 export const runImputationCompare = (data: object) => api.post("/api/missing_data/imputation_compare", data);
+export const runMissingDiagnostics = (sessionId: string) => api.post(`/api/compute/${sessionId}/missing_diagnostics`, {});
+export const fillBlanks = (sessionId: string, column: string, value: string) => api.post(`/api/compute/${sessionId}/fill_blanks`, { column, value });
 
 // Diagnostics
 export const runLinearDiagFull = (data: object) => api.post("/api/diagnostics/linear_full", data);

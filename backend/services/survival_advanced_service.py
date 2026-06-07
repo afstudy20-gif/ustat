@@ -525,59 +525,78 @@ def fit_mice(req):
     from sklearn.experimental import enable_iterative_imputer  # noqa: F401
     from sklearn.impute import IterativeImputer
 
-    # Use all numeric columns as features for imputation
-    numeric_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-    if not numeric_cols:
-        raise HTTPException(status_code=422, detail="No numeric columns available for MICE")
+    # Split targets: numeric → MICE; non-numeric (text/categorical) → mode.
+    # Previously any non-numeric target hard-failed the whole request.
+    def _is_numeric(c: str) -> bool:
+        if pd.api.types.is_numeric_dtype(df[c]):
+            return True
+        coerced = pd.to_numeric(df[c], errors="coerce")
+        return bool(df[c].notna().any() and coerced.notna().mean() >= 0.8)
 
-    # Ensure target columns are numeric
-    non_numeric = [c for c in req.columns if c not in numeric_cols]
-    if non_numeric:
-        raise HTTPException(status_code=422, detail=f"Non-numeric columns cannot be imputed with MICE: {non_numeric}")
+    num_targets = [c for c in cols_with_missing if _is_numeric(c)]
+    cat_targets = [c for c in cols_with_missing if c not in num_targets]
 
     df_work = df.copy()
-    subset = df_work[numeric_cols].copy()
+    pre_missing = {c: int(df[c].isna().sum()) for c in cols_with_missing}
+    col_summaries: list = []
 
-    # Record pre-imputation state
-    pre_missing = {c: int(subset[c].isna().sum()) for c in cols_with_missing}
+    # ── Numeric targets via MICE ──
+    if num_targets:
+        # Numeric feature columns with at least one observed value (an all-NaN
+        # feature makes IterativeImputer drop/realign columns and crash).
+        numeric_cols = [
+            c for c in df.columns
+            if pd.api.types.is_numeric_dtype(df[c]) and df[c].notna().any()
+        ]
+        for t in num_targets:
+            if t not in numeric_cols:
+                df_work[t] = pd.to_numeric(df_work[t], errors="coerce")
+                if df_work[t].notna().any():
+                    numeric_cols.append(t)
+        if len(numeric_cols) < 2:
+            # Not enough features for chained equations → per-column median.
+            for t in num_targets:
+                med = pd.to_numeric(df_work[t], errors="coerce").median()
+                df_work[t] = pd.to_numeric(df_work[t], errors="coerce").fillna(med)
+        else:
+            subset = df_work[numeric_cols].apply(pd.to_numeric, errors="coerce")
+            missing_mask = subset.isna().values
+            imputed_sum = np.zeros_like(subset.values, dtype=float)
+            for i in range(req.n_imputations):
+                imp = IterativeImputer(
+                    max_iter=req.max_iter,
+                    random_state=req.random_state + i,
+                    sample_posterior=True,
+                )
+                imputed_sum += imp.fit_transform(subset)
+            imputed_avg = imputed_sum / req.n_imputations
+            result = subset.values.copy()
+            result[missing_mask] = imputed_avg[missing_mask]
+            subset_filled = pd.DataFrame(result, columns=numeric_cols, index=subset.index)
+            for t in num_targets:
+                df_work[t] = subset_filled[t]
+        for c in num_targets:
+            imputed_vals = pd.to_numeric(df_work.loc[df[c].isna(), c], errors="coerce")
+            col_summaries.append({
+                "column": c, "method": "MICE", "n_imputed": pre_missing[c],
+                "mean_imputed": _safe(round(float(imputed_vals.mean()), 4)) if len(imputed_vals) > 0 else None,
+                "min_imputed": _safe(round(float(imputed_vals.min()), 4)) if len(imputed_vals) > 0 else None,
+                "max_imputed": _safe(round(float(imputed_vals.max()), 4)) if len(imputed_vals) > 0 else None,
+            })
 
-    # Run MICE (averaged over n_imputations)
-    imputed_sum = np.zeros_like(subset.values, dtype=float)
-    missing_mask = subset.isna().values
-
-    for i in range(req.n_imputations):
-        imp = IterativeImputer(
-            max_iter=req.max_iter,
-            random_state=req.random_state + i,
-            sample_posterior=True,
-        )
-        imputed_sum += imp.fit_transform(subset)
-
-    imputed_avg = imputed_sum / req.n_imputations
-
-    # Only fill originally missing values
-    result = subset.values.copy()
-    result[missing_mask] = imputed_avg[missing_mask]
-    subset_filled = pd.DataFrame(result, columns=numeric_cols, index=subset.index)
-
-    # Update only the requested columns
-    for c in cols_with_missing:
-        df_work[c] = subset_filled[c]
+    # ── Categorical / text targets via most-frequent (mode) ──
+    for c in cat_targets:
+        observed = df_work[c].dropna()
+        observed = observed[observed.astype(str).str.strip() != ""]
+        fill_val = observed.mode().iloc[0] if not observed.empty else None
+        if fill_val is not None:
+            df_work[c] = df_work[c].fillna(fill_val)
+        col_summaries.append({
+            "column": c, "method": "mode", "n_imputed": pre_missing[c],
+            "mode_imputed": _safe(fill_val), "mean_imputed": None, "min_imputed": None, "max_imputed": None,
+        })
 
     store.save(req.session_id, df_work)
-
-    # Build per-column summary
-    col_summaries = []
-    for c in cols_with_missing:
-        mask = df[c].isna()
-        imputed_vals = df_work.loc[mask, c]
-        col_summaries.append({
-            "column": c,
-            "n_imputed": pre_missing[c],
-            "mean_imputed": _safe(round(float(imputed_vals.mean()), 4)) if len(imputed_vals) > 0 else None,
-            "min_imputed": _safe(round(float(imputed_vals.min()), 4)) if len(imputed_vals) > 0 else None,
-            "max_imputed": _safe(round(float(imputed_vals.max()), 4)) if len(imputed_vals) > 0 else None,
-        })
 
     total_imputed = sum(s["n_imputed"] for s in col_summaries)
 
@@ -589,20 +608,28 @@ def fit_mice(req):
          "met": mech_ok,
          "detail": f"Assumed {mech_label}. MICE is valid under MAR/MCAR."
                    + (" MNAR may produce biased estimates — consider sensitivity analysis." if not mech_ok else "")},
-        {"name": "Numeric columns", "met": True, "detail": f"{len(numeric_cols)} numeric features used as predictors."},
+        {"name": "Imputation methods", "met": True,
+         "detail": f"{len(num_targets)} numeric column(s) via MICE (chained equations); "
+                   f"{len(cat_targets)} categorical column(s) via most-frequent (mode)."},
         {"name": "Imputations", "met": True, "detail": f"{req.n_imputations} imputations averaged (Rubin's rules approximation)."},
     ]
 
+    method_bits = []
+    if num_targets:
+        method_bits.append(f"{len(num_targets)} numeric variable(s) via MICE ({req.n_imputations} imputations, {req.max_iter} iterations)")
+    if cat_targets:
+        method_bits.append(f"{len(cat_targets)} categorical variable(s) via most-frequent value")
     result_text = (
-        f"Multiple imputation (MICE) was performed assuming {mech_label} mechanism, "
-        f"using {req.n_imputations} imputations with {req.max_iter} iterations each. "
-        f"{total_imputed} missing values were imputed "
-        f"across {len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}."
+        f"Imputation was performed assuming a {mech_label} mechanism: "
+        + "; ".join(method_bits) + ". "
+        f"{total_imputed} missing values were imputed across "
+        f"{len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}."
     )
 
-    export_rows = [["Column", "N Imputed", "Mean", "Min", "Max"]]
+    export_rows = [["Column", "Method", "N Imputed", "Mean / Mode", "Min", "Max"]]
     for s in col_summaries:
-        export_rows.append([s["column"], s["n_imputed"], s["mean_imputed"], s["min_imputed"], s["max_imputed"]])
+        center = s.get("mode_imputed") if s.get("method") == "mode" else s.get("mean_imputed")
+        export_rows.append([s["column"], s.get("method", "MICE"), s["n_imputed"], center, s.get("min_imputed"), s.get("max_imputed")])
 
     r_code = (
         f"library(mice)\n"

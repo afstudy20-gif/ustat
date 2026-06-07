@@ -503,7 +503,12 @@ export default function DataTable() {
       // Refresh preview
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
       useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
-    } catch { /* ignore */ }
+    } catch (e: unknown) {
+      // Surface the failure — previously swallowed, so MICE/fill errors looked
+      // like nothing happened.
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      alert(detail ?? "Could not fill blanks for this column.");
+    }
   };
 
   const startRename = (colName: string) => {
