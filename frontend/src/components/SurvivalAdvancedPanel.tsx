@@ -915,14 +915,22 @@ export default function SurvivalAdvancedPanel() {
 
   return (
     <div className="flex gap-4 max-w-[1400px] mx-auto">
-      <nav className="w-52 shrink-0 space-y-1">
-        {SURV_METHODS.map((m) => (
-          <button key={m.id} onClick={() => setActiveMethod(m.id)}
-            className={`w-full text-left px-3 py-2 rounded-lg border transition-colors ${activeMethod === m.id ? "bg-indigo-600 text-white border-indigo-600 shadow-sm" : "bg-white text-gray-700 border-gray-200 hover:border-indigo-300 hover:bg-indigo-50"}`}>
-            <div className="text-xs font-semibold">{m.title}</div>
-            <div className={`text-[10px] mt-0.5 ${activeMethod === m.id ? "text-indigo-100" : "text-gray-400"}`}>{m.desc}</div>
-          </button>
-        ))}
+      <nav className="w-52 shrink-0">
+        <div className="panel space-y-2">
+          <h3 className="text-sm font-semibold text-gray-700">Method</h3>
+          {SURV_METHODS.map((m) => (
+            <label key={m.id} className="flex items-start gap-2 cursor-pointer group">
+              <input type="radio" name="surv-method" value={m.id}
+                checked={activeMethod === m.id}
+                onChange={() => setActiveMethod(m.id)}
+                className="accent-indigo-500 mt-0.5" />
+              <span className="leading-tight">
+                <span className={`block text-sm font-medium ${activeMethod === m.id ? "text-indigo-700" : "text-gray-700"}`}>{m.title}</span>
+                <span className="block text-[10px] text-gray-400">{m.desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
       </nav>
       <div className="flex-1 min-w-0 space-y-3">
       {/* ── Fine-Gray ── */}
