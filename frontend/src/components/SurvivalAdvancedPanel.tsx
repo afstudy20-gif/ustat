@@ -278,6 +278,28 @@ function kindMatches(kinds: string[] | undefined, kind: string): boolean {
   return kind === "ordinal" && (kinds.includes("numeric") || kinds.includes("categorical"));
 }
 
+/** Missing-data strategy toggle for the regression-style survival analyses.
+ *  MICE → m datasets pooled by Rubin's rules (covariate imputation only). */
+function ImputeToggle({ value, onChange }: { value: "listwise" | "mice"; onChange: (v: "listwise" | "mice") => void }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs text-gray-500 font-medium">Missing data</span>
+      <div className="flex gap-1">
+        {([["listwise", "Complete-case"], ["mice", "MICE (pooled)"]] as const).map(([v, lab]) => (
+          <button key={v} type="button" onClick={() => onChange(v)}
+            className={`text-[11px] px-2.5 py-1 rounded-lg border transition-colors ${
+              value === v ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-gray-600 border-gray-200 hover:border-indigo-300"}`}>
+            {lab}
+          </button>
+        ))}
+      </div>
+      {value === "mice" && (
+        <span className="text-[10px] text-gray-400 leading-snug">m=10 chained-PMM datasets, Rubin's-rules pooling (covariates imputed; outcome kept complete-case).</span>
+      )}
+    </div>
+  );
+}
+
 function VarSelect({ label, value, onChange, columns, kinds }: {
   label: string; value: string; onChange: (v: string) => void;
   columns: { name: string; kind: string }[]; kinds?: string[];
@@ -794,6 +816,10 @@ export default function SurvivalAdvancedPanel() {
   const [chLoading, setChLoading] = useState(false);
   const [chError, setChError] = useState<string | null>(null);
 
+  // Missing-data strategy shared by the regression-style survival analyses
+  // (Fine-Gray sHR, landmark Cox, RMST). 'mice' → m datasets pooled (Rubin).
+  const [survImputation, setSurvImputation] = usePersistedPanelState<"listwise" | "mice">("survival", "imputation", "listwise");
+
   // RMST state — Restricted Mean Survival Time (PH-free alternative)
   const [rmstDuration, setRmstDuration] = usePersistedPanelState("survival", "rmstDuration", "");
   const [rmstEvent, setRmstEvent] = usePersistedPanelState("survival", "rmstEvent", "");
@@ -837,6 +863,7 @@ export default function SurvivalAdvancedPanel() {
         session_id: sid, duration_col: fgDuration, event_col: fgEvent,
         event_of_interest: fgInterest, group_col: fgGroup || undefined,
         predictors: fgPredictors.length > 0 ? fgPredictors : undefined,
+        imputation: survImputation,
       });
       setFgResult(res.data);
     } catch (e: any) { setFgError(e?.response?.data?.detail ?? "Fine-Gray failed"); }
@@ -855,6 +882,7 @@ export default function SurvivalAdvancedPanel() {
       const res = await runRMST({
         session_id: sid, duration_col: rmstDuration, event_col: rmstEvent,
         tau, group_col: rmstGroup || undefined,
+        imputation: survImputation,
       });
       setRmstResult(res.data);
     } catch (e: any) { setRmstError(e?.response?.data?.detail ?? "RMST failed"); }
@@ -884,6 +912,7 @@ export default function SurvivalAdvancedPanel() {
         session_id: sid, duration_col: lmDuration, event_col: lmEvent,
         landmark_time: parseFloat(lmTime), group_col: lmGroup || undefined,
         predictors: lmPreds.length > 0 ? lmPreds : undefined,
+        imputation: survImputation,
       });
       setLmResult(res.data);
     } catch (e: any) { setLmError(e?.response?.data?.detail ?? "Landmark analysis failed"); }
@@ -993,6 +1022,7 @@ export default function SurvivalAdvancedPanel() {
                 </div>
               </div>
               <div className="flex items-center gap-3">
+                {fgPredictors.length > 0 && <ImputeToggle value={survImputation} onChange={setSurvImputation} />}
                 <RunButton onClick={handleFineGray} loading={fgLoading} label="Run Fine-Gray" />
               </div>
               {fgError && <p className="text-xs text-red-500">{fgError}</p>}
@@ -1102,6 +1132,7 @@ export default function SurvivalAdvancedPanel() {
                 <VarSelect label="Group (optional)" value={rmstGroup} onChange={setRmstGroup} columns={pickCols} kinds={["categorical"]} />
               </div>
               <div className="flex items-center gap-3">
+                {rmstGroup && <ImputeToggle value={survImputation} onChange={setSurvImputation} />}
                 <RunButton onClick={handleRMST} loading={rmstLoading} label="Run RMST" />
               </div>
               {rmstError && <p className="text-xs text-red-500">{rmstError}</p>}
@@ -1150,6 +1181,9 @@ export default function SurvivalAdvancedPanel() {
                     </tbody>
                   </table>
                 </div>
+              )}
+              {rmstResult?.rmst_mi_note && (
+                <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 mb-1">{rmstResult.rmst_mi_note}</div>
               )}
               {rmstResult?.contrasts && rmstResult.contrasts.length > 0 && (
                 <div className="overflow-auto rounded-lg border border-indigo-200 bg-indigo-50/30">
@@ -1359,6 +1393,7 @@ export default function SurvivalAdvancedPanel() {
               </div>
               <MultiSelect label="Predictors for Cox (optional)" columns={pickCols} selected={lmPreds} onChange={setLmPreds} excludeNames={[lmDuration, lmEvent].filter(Boolean)} />
               <div className="flex items-center gap-3">
+                {lmPreds.length > 0 && <ImputeToggle value={survImputation} onChange={setSurvImputation} />}
                 <RunButton onClick={handleLandmark} loading={lmLoading} label="Run Landmark" />
               </div>
               {lmError && <p className="text-xs text-red-500">{lmError}</p>}
@@ -1385,6 +1420,9 @@ export default function SurvivalAdvancedPanel() {
           }
           right={
             <>
+              {lmResult?.cox_mi_note && (
+                <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1 mb-1">{lmResult.cox_mi_note}</div>
+              )}
               {lmResult?.cox_results && lmResult.cox_results.length > 0 && !lmResult.cox_results[0].error && (
                 <div className="overflow-auto rounded-lg border border-gray-200">
                   <table className="text-[11px] w-full">
@@ -1394,6 +1432,7 @@ export default function SurvivalAdvancedPanel() {
                         <th className="px-1.5 py-1.5 text-left text-gray-500">HR</th>
                         <th className="px-1.5 py-1.5 text-left text-gray-500">95% CI</th>
                         <th className="px-1.5 py-1.5 text-left text-gray-500">p</th>
+                        {lmResult.cox_results[0]?.fmi != null && <th className="px-1.5 py-1.5 text-right text-gray-500" title="Fraction of missing information">FMI</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -1405,6 +1444,7 @@ export default function SurvivalAdvancedPanel() {
                           <td className={`px-1.5 py-1 font-mono ${r.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
                             {r.p < 0.001 ? "<0.001" : r.p?.toFixed(3)}
                           </td>
+                          {r.fmi != null && <td className="px-1.5 py-1 text-right text-gray-400 font-mono">{r.fmi}</td>}
                         </tr>
                       ))}
                     </tbody>

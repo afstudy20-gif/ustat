@@ -1465,6 +1465,68 @@ def fit_landmark(req):
 # proper SE (Royston & Parmar 2013) → z-test + 95 % CI + p.
 
 
+def _rmst_mi_pool(df_full, req, n_imputations: int = 10):
+    """Pool RMST(τ) per group and ΔRMST contrasts over m imputations of the
+    GROUP covariate. The outcome (time/event) is kept complete-case — outcome
+    values are never imputed (Royston/White caution). Returns
+    (rmst_by_group, contrasts, note) or (None, None, None) when there is nothing
+    to multiply-impute."""
+    from services.missing_data import mice_multiple, pool_rubin_terms
+
+    gc = req.group_col
+    base = df_full[[req.duration_col, req.event_col, gc]].copy()
+    base[req.duration_col] = pd.to_numeric(base[req.duration_col], errors="coerce")
+    base[req.event_col] = pd.to_numeric(base[req.event_col], errors="coerce")
+    base = base.dropna(subset=[req.duration_col, req.event_col])  # outcome complete-case
+    if not (base[gc].isna() | (base[gc].astype(str).str.strip() == "")).any():
+        return None, None, None  # group fully observed → nothing to MI
+
+    imp = mice_multiple(base, [gc], n_imputations=n_imputations)
+    per_rmst: list = []
+    per_contrast: list = []
+    counts: dict = {}  # group → list of (n, n_events) across imputations
+    for dfi in imp.imputed_datasets:
+        d = dfi.dropna(subset=[req.duration_col, req.event_col, gc])
+        t = d[req.duration_col].to_numpy(dtype=float)
+        e = d[req.event_col].to_numpy(dtype=int)
+        gvals = d[gc].to_numpy()
+        gs = sorted(pd.unique(d[gc].dropna()).tolist(), key=lambda x: (isinstance(x, str), x))
+        rg = {str(g): _rmst_one_group(t[gvals == g], e[gvals == g], float(req.tau)) for g in gs}
+        for k, v in rg.items():
+            counts.setdefault(k, []).append((v["n"], v["n_events"]))
+        per_rmst.append({k: (v["rmst"], v["se"]) for k, v in rg.items()})
+        cdict = {}
+        for i in range(len(gs)):
+            for j in range(i + 1, len(gs)):
+                a, b = rg[str(gs[i])], rg[str(gs[j])]
+                cdict[f"{gs[i]}|{gs[j]}"] = (a["rmst"] - b["rmst"],
+                                             float(np.sqrt(a["se"] ** 2 + b["se"] ** 2)))
+        per_contrast.append(cdict)
+
+    pooled_rmst = pool_rubin_terms(per_rmst)
+    rmst_by_group = {}
+    for g, pv in pooled_rmst.items():
+        ns = counts.get(g, [(0, 0)])
+        rmst_by_group[g] = {
+            "n": int(round(float(np.mean([c[0] for c in ns])))),
+            "n_events": int(round(float(np.mean([c[1] for c in ns])))),
+            "rmst": round(pv["coef"], 4), "se": round(pv["se"], 4),
+            "ci_low": round(pv["ci_low"], 4), "ci_high": round(pv["ci_high"], 4),
+            "fmi": pv["fmi"],
+        }
+    contrasts = []
+    for key, pv in pool_rubin_terms(per_contrast).items():
+        a, b = key.split("|")
+        contrasts.append({"group_a": a, "group_b": b, "delta_rmst": round(pv["coef"], 4),
+                          "se": round(pv["se"], 4), "z": round(pv["t"], 4),
+                          "p": round(pv["p"], 6) if pv["p"] is not None else None,
+                          "ci_low": round(pv["ci_low"], 4), "ci_high": round(pv["ci_high"], 4),
+                          "fmi": pv["fmi"]})
+    note = (f"RMST and ΔRMST pooled across {len(imp.imputed_datasets)} imputations of the "
+            "group covariate (Rubin's rules; time/event kept complete-case).")
+    return rmst_by_group, contrasts, note
+
+
 def fit_rmst(req):
     if req.tau is None or req.tau <= 0:
         raise HTTPException(status_code=422, detail="tau must be > 0.")
@@ -1478,7 +1540,11 @@ def fit_rmst(req):
 
     cols_needed = [req.duration_col, req.event_col] + ([req.group_col] if req.group_col else [])
     from services.impute import apply_imputation
-    df = apply_imputation(df_full[cols_needed], cols_needed, req.imputation or "listwise").reset_index(drop=True)
+    # For MICE the descriptive KM plot + group set stay complete-case (single
+    # imputation would turn a discrete group into fractional values); the pooled
+    # RMST/ΔRMST numbers come from _rmst_mi_pool below.
+    desc_strategy = "listwise" if (req.imputation or "listwise") == "mice" else (req.imputation or "listwise")
+    df = apply_imputation(df_full[cols_needed], cols_needed, desc_strategy).reset_index(drop=True)
     df[req.duration_col] = pd.to_numeric(df[req.duration_col], errors="coerce")
     df[req.event_col] = pd.to_numeric(df[req.event_col], errors="coerce")
     df = df.dropna()
@@ -1542,6 +1608,15 @@ def fit_rmst(req):
                     "ci_low": round(lo, 4),
                     "ci_high": round(hi, 4),
                 })
+
+    # Multiple imputation of the group covariate → pooled RMST / ΔRMST (the KM
+    # plot above stays complete-case / single-dataset and is descriptive only).
+    rmst_mi_note = None
+    if req.group_col and (req.imputation or "listwise") == "mice":
+        mi_rmst, mi_contrasts, rmst_mi_note = _rmst_mi_pool(df_full, req)
+        if mi_rmst is not None:
+            rmst_by_group = mi_rmst
+            contrasts = mi_contrasts
 
     # Build plot (KM curves capped at tau, with shaded area = RMST per group)
     from lifelines import KaplanMeierFitter
@@ -1682,6 +1757,7 @@ def fit_rmst(req):
         "tau": float(req.tau),
         "rmst_by_group": rmst_by_group,
         "contrasts": contrasts,
+        "rmst_mi_note": rmst_mi_note,
         "plot": plot,
         "assumptions": assumptions,
         "warnings": rmst_warnings,

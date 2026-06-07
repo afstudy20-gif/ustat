@@ -70,3 +70,23 @@ def test_landmark_cox_mice_is_pooled():
     assert j["cox_mi_note"] and "pooled" in j["cox_mi_note"].lower()
     by = {c["variable"]: c for c in j["cox_results"]}
     assert by["x"]["HR"] > 1 and by["x"]["fmi"] > by["grp"]["fmi"]
+
+
+def test_rmst_mice_pools_group_covariate():
+    rng = np.random.default_rng(8)
+    n = 300
+    grp = rng.integers(0, 2, n)
+    t = rng.exponential(np.where(grp == 1, 8, 5)).clip(0.1, 25)
+    ev = (t < rng.exponential(12, n)).astype(int)
+    df = pd.DataFrame({"time": t, "event": ev, "arm": grp.astype(float)})
+    df.loc[rng.choice(n, 45, replace=False), "arm"] = np.nan  # missing GROUP only
+    store.save("rmst_mi", df)
+    client = TestClient(app)
+    base = {"session_id": "rmst_mi", "duration_col": "time", "event_col": "event",
+            "tau": 10.0, "group_col": "arm"}
+    j = client.post("/api/survival_advanced/rmst", json={**base, "imputation": "mice"}).json()
+    assert j["rmst_mi_note"] and "pooled" in j["rmst_mi_note"].lower()
+    # Two groups pooled with a fraction of missing information from the imputed arm.
+    assert len(j["rmst_by_group"]) == 2
+    assert all("fmi" in v and v["fmi"] > 0 for v in j["rmst_by_group"].values())
+    assert j["contrasts"] and j["contrasts"][0]["fmi"] > 0
