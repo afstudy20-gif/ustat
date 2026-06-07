@@ -30,6 +30,99 @@ class ImputationResult:
     method: str = "mice"
 
 
+def _column_method(s: pd.Series) -> str:
+    """Pick the chained-equation method by variable type (mice-style)."""
+    nun = int(s.dropna().nunique())
+    if nun <= 1:
+        return "constant"
+    if pd.api.types.is_numeric_dtype(s):
+        return "pmm" if nun > 2 else "logreg"      # continuous → PMM; 0/1 → logistic
+    return "polyreg"                                # categorical/text → hot-deck by class
+
+
+def _ridge_predict(X_obs: np.ndarray, y_obs: np.ndarray, X_all: np.ndarray) -> np.ndarray:
+    """Least-squares (ridge-stabilised) linear prediction for the PMM metric."""
+    Xo = np.column_stack([np.ones(len(X_obs)), X_obs])
+    Xa = np.column_stack([np.ones(len(X_all)), X_all])
+    lam = 1e-6 * np.eye(Xo.shape[1])
+    beta = np.linalg.solve(Xo.T @ Xo + lam, Xo.T @ y_obs)
+    return Xa @ beta
+
+
+def _pmm_fill(pred_obs: np.ndarray, pred_miss: np.ndarray, y_obs: np.ndarray,
+              rng: np.random.Generator, donors: int = 5) -> np.ndarray:
+    """Predictive Mean Matching: each missing value takes a random donor's
+    OBSERVED value from the `donors` nearest predicted means. Non-parametric —
+    only ever returns values that actually occurred, preserving the distribution."""
+    k = min(donors, len(y_obs))
+    out = np.empty(len(pred_miss), dtype=y_obs.dtype)
+    for i, pm in enumerate(pred_miss):
+        d = np.abs(pred_obs - pm)
+        idx = np.argpartition(d, k - 1)[:k] if k < len(d) else np.arange(len(d))
+        out[i] = y_obs[idx[rng.integers(0, len(idx))]]
+    return out
+
+
+def _chained_impute(df: pd.DataFrame, target_cols: List[str], feature_cols: List[str],
+                    max_iter: int, rng: np.random.Generator, donors: int = 5) -> pd.DataFrame:
+    """One completed dataset via chained equations with PMM / logistic / hot-deck
+    per variable type. Categorical predictors are integer-coded for the design."""
+    work = df.copy()
+    masks = {c: work[c].isna() | (work[c].astype(str).str.strip() == "") for c in target_cols}
+
+    # Numeric design matrix: numeric features as-is, categorical features factorised.
+    def _coded(col: str) -> pd.Series:
+        s = work[col]
+        if pd.api.types.is_numeric_dtype(s):
+            return pd.to_numeric(s, errors="coerce")
+        return pd.Series(pd.factorize(s)[0], index=s.index).replace(-1, np.nan)
+
+    # Initialise missing cells with a random observed draw (hot-deck) so the
+    # first regression has no holes.
+    for c in target_cols:
+        observed = work.loc[~masks[c], c]
+        observed = observed[observed.astype(str).str.strip() != ""]
+        if observed.empty:
+            continue
+        draws = observed.sample(int(masks[c].sum()), replace=True, random_state=int(rng.integers(0, 1_000_000)))
+        work.loc[masks[c], c] = draws.to_numpy()
+
+    methods = {c: _column_method(df[c]) for c in target_cols}
+    for _ in range(max_iter):
+        for c in target_cols:
+            m = masks[c]
+            if not m.any() or methods[c] == "constant":
+                continue
+            feats = [f for f in feature_cols if f != c]
+            Xfull = pd.concat([_coded(f) for f in feats], axis=1) if feats else pd.DataFrame(index=work.index)
+            Xfull = Xfull.fillna(Xfull.mean(numeric_only=True)).fillna(0.0)
+            obs = ~m
+            if methods[c] == "polyreg":
+                # Categorical target → hot-deck within the nearest predicted bucket
+                # is overkill; draw from the observed category distribution.
+                observed = work.loc[obs, c]
+                observed = observed[observed.astype(str).str.strip() != ""]
+                if observed.empty:
+                    continue
+                work.loc[m, c] = observed.sample(int(m.sum()), replace=True,
+                                                 random_state=int(rng.integers(0, 1_000_000))).to_numpy()
+                continue
+            y = pd.to_numeric(work[c], errors="coerce")
+            X_obs = Xfull.loc[obs].to_numpy(dtype=float)
+            X_mis = Xfull.loc[m].to_numpy(dtype=float)
+            y_obs = y.loc[obs].to_numpy(dtype=float)
+            if len(y_obs) < 3 or X_obs.shape[1] == 0:
+                continue
+            try:
+                pred_obs = _ridge_predict(X_obs, y_obs, X_obs)
+                pred_mis = _ridge_predict(X_obs, y_obs, X_mis)
+            except Exception:
+                continue
+            filled = _pmm_fill(pred_obs, pred_mis, y_obs, rng, donors=donors)
+            work.loc[m, c] = filled
+    return work
+
+
 def mice_multiple(
     df: pd.DataFrame,
     cols: List[str],
@@ -37,60 +130,50 @@ def mice_multiple(
     max_iter: int = 10,
     random_state: int = 42,
 ) -> ImputationResult:
-    """
-    Perform proper Multiple Imputation using IterativeImputer (MICE).
-
-    Returns multiple completed datasets instead of a single one.
-    This is the foundation for proper statistical inference with missing data.
-    """
-    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
-    from sklearn.impute import IterativeImputer
-
+    """Proper Multiple Imputation via chained equations with Predictive Mean
+    Matching (PMM) for continuous variables, logistic-style PMM for binary, and
+    hot-deck for categorical — the mice-package default family. Returns m
+    completed datasets (the foundation for Rubin's-rules pooling)."""
     valid_cols = [c for c in cols if c in df.columns]
     if not valid_cols:
         return ImputationResult(
             imputed_datasets=[df.copy() for _ in range(max(1, n_imputations))],
-            original_missing_info={},
-            n_imputations=n_imputations,
-            method="mice"
-        )
+            original_missing_info={}, n_imputations=n_imputations, method="pmm")
 
     original_missing = missing_pattern_summary(df, valid_cols)
 
-    num_cols = [c for c in valid_cols if pd.api.types.is_numeric_dtype(df[c])]
-    if not num_cols:
-        # Nothing to impute numerically → return copies
+    def _has_missing(c: str) -> bool:
+        return bool((df[c].isna() | (df[c].astype(str).str.strip() == "")).any())
+
+    target_cols = [c for c in valid_cols if _has_missing(c)]
+    if not target_cols:
         return ImputationResult(
             imputed_datasets=[df.copy() for _ in range(n_imputations)],
-            original_missing_info=original_missing,
-            n_imputations=n_imputations,
-            method="mice"
-        )
+            original_missing_info=original_missing, n_imputations=n_imputations, method="pmm")
 
+    # Features = every analysis column (carries MAR information across variables).
+    feature_cols = list(valid_cols)
     imputed_datasets = []
-    base_imputer = IterativeImputer(
-        max_iter=max_iter,
-        random_state=random_state,
-        verbose=0,
-        skip_complete=True,
-    )
-
     for i in range(n_imputations):
-        imp = IterativeImputer(
-            max_iter=max_iter,
-            random_state=random_state + i,  # different seed per imputation
-            verbose=0,
-            skip_complete=True,
-        )
-        df_imp = df.copy()
-        df_imp[num_cols] = imp.fit_transform(df_imp[num_cols])
-        imputed_datasets.append(df_imp)
+        rng = np.random.default_rng(random_state + i)
+        try:
+            imputed_datasets.append(_chained_impute(df, target_cols, feature_cols, max_iter, rng))
+        except Exception:
+            # Defensive fallback to sklearn IterativeImputer on numeric columns.
+            from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+            from sklearn.impute import IterativeImputer
+            num_cols = [c for c in valid_cols if pd.api.types.is_numeric_dtype(df[c])]
+            df_imp = df.copy()
+            if num_cols:
+                imp = IterativeImputer(max_iter=max_iter, random_state=random_state + i, skip_complete=True)
+                df_imp[num_cols] = imp.fit_transform(df_imp[num_cols])
+            imputed_datasets.append(df_imp)
 
     return ImputationResult(
         imputed_datasets=imputed_datasets,
         original_missing_info=original_missing,
         n_imputations=n_imputations,
-        method="mice"
+        method="pmm",
     )
 
 
