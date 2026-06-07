@@ -3,9 +3,12 @@
 Regression guards: categorical columns must not crash or hard-fail; they are
 imputed with the most-frequent value. Numeric columns use MICE.
 """
+import io
+
 import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
+from docx import Document
 
 from main import app
 from services import store
@@ -95,3 +98,47 @@ def test_panel_mice_new_columns_preserves_originals():
     assert df["sex"].equals(before_sex)
     assert df["age_imp"].isna().sum() == 0
     assert df["sex_imp"].isna().sum() == 0
+
+
+def test_missing_diagnostics_only_reports_selected_columns():
+    sid = _seed("mi_diag_selected")
+    r = client.post(f"/api/compute/{sid}/missing_diagnostics", json={
+        "columns": ["age"],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["analyzed_columns"] == ["age"]
+    assert [item["name"] for item in body["columns"]] == ["age"]
+
+
+def test_panel_mice_returns_and_audits_methods_text():
+    sid = _seed("mi_methods")
+    r = client.post("/api/survival_advanced/mice", json={
+        "session_id": sid,
+        "columns": ["age", "sex"],
+        "n_imputations": 1,
+        "max_iter": 7,
+        "random_state": 123,
+        "mechanism": "MAR",
+        "new_columns": True,
+    })
+    assert r.status_code == 200, r.text
+    methods = r.json()["methods_text"]
+    assert "predictive mean matching" in methods.lower()
+    assert "7 iterations" in methods
+    assert "random seed 123" in methods
+    assert "age as age_imp" in methods
+
+    audit = store.get_audit(sid)
+    mice_entries = [entry for entry in audit if entry["action"] == "mice"]
+    assert mice_entries
+    assert mice_entries[-1]["params"]["methods_text"] == methods
+
+    docx = client.post("/api/pub_export/method_appendix", json={
+        "session_id": sid,
+        "title": "Test Methods",
+    })
+    assert docx.status_code == 200, docx.text
+    document = Document(io.BytesIO(docx.content))
+    text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+    assert methods in text

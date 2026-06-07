@@ -575,11 +575,17 @@ def method_appendix_docx(req: MethodAppendixRequest):
 
     # Bucket by action code, count occurrences.
     counts: Dict[str, int] = {}
+    method_details: Dict[str, List[str]] = {}
     seeds: List[int] = []
     for entry in audit:
         action = str(entry.get("action", ""))
         counts[action] = counts.get(action, 0) + 1
         params = entry.get("params") or {}
+        methods_text = params.get("methods_text") if isinstance(params, dict) else None
+        if isinstance(methods_text, str) and methods_text.strip():
+            details = method_details.setdefault(action, [])
+            if methods_text.strip() not in details:
+                details.append(methods_text.strip())
         seed = params.get("random_state") if isinstance(params, dict) else None
         if seed is not None and isinstance(seed, (int, float)):
             seeds.append(int(seed))
@@ -629,8 +635,16 @@ def method_appendix_docx(req: MethodAppendixRequest):
         df = store.get(req.session_id)
         if df is not None:
             n_rows, n_cols = df.shape
+            selected_df = store.get_filtered(req.session_id)
+            selection_text = ""
+            if selected_df is not None and len(selected_df) != n_rows:
+                selection_text = (
+                    f" A prespecified case selection was applied, and all analyses were restricted "
+                    f"to {len(selected_df)} of {n_rows} observations."
+                )
             doc.add_paragraph(
-                f"The dataset comprised {n_rows} observations across {n_cols} variables. Missing values "
+                f"The dataset comprised {n_rows} observations across {n_cols} variables."
+                f"{selection_text} Missing values "
                 f"were handled by listwise deletion unless an explicit imputation strategy (median or "
                 f"multivariate imputation by chained equations) was selected for that analysis."
             )
@@ -642,6 +656,14 @@ def method_appendix_docx(req: MethodAppendixRequest):
     used_actions = [a for a in counts.keys() if a and a not in excluded]
     seen_methods = set()
     for action in used_actions:
+        custom_details = method_details.get(action, [])
+        if custom_details:
+            for detail in custom_details:
+                if detail in seen_methods:
+                    continue
+                seen_methods.add(detail)
+                doc.add_paragraph(detail, style="List Bullet")
+            continue
         human = _ACTION_HUMAN.get(action)
         if not human:
             continue  # skip unknown / non-analytic actions

@@ -127,6 +127,7 @@ def test_select_cases_numeric(client, df):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["total"] == len(df)
+    assert body["applied"] is True
     assert 0 <= body["selected"] <= len(df)
     # cross-check against the data
     expected = int((df["AGE"] > 60).sum())
@@ -194,6 +195,27 @@ def test_save_and_load_session(client, df):
     assert body["rows"] == len(df)
     assert {c["name"] for c in body["columns"]} == set(df.columns)
     assert "session_id" in body
+
+
+def test_save_and_load_session_preserves_case_filter(client, df):
+    sid = _new_session(df, "saveload_filter")
+    conditions = [{"column": "AGE", "operator": "gt", "value": 50, "join": "AND"}]
+    selected = client.post(
+        f"/api/sessions/{sid}/select_cases",
+        json={"conditions": conditions},
+    )
+    assert selected.status_code == 200, selected.text
+
+    saved = client.get(f"/api/sessions/{sid}/save_session")
+    assert saved.status_code == 200, saved.text
+
+    files = {"file": ("session.json", io.BytesIO(saved.content), "application/json")}
+    loaded = client.post("/api/sessions/load_session", files=files)
+    assert loaded.status_code == 200, loaded.text
+    case_filter = loaded.json()["case_filter"]
+    assert case_filter["conditions"] == conditions
+    assert case_filter["selected"] == int((df["AGE"] > 50).sum())
+    assert case_filter["total"] == len(df)
 
 
 def test_load_session_invalid_json(client):

@@ -46,6 +46,7 @@ export interface Session {
   rows: number;
   columns: ColMeta[];
   preview: Record<string, unknown>[];
+  case_filter?: CaseFilter | null;
 }
 
 export type PaletteName = "indigo" | "clinical" | "nature" | "grayscale" | "warm" | "jama";
@@ -218,7 +219,7 @@ export const useStore = create<AppState>((set) => ({
       session: s,
       activeTab: "data",
       table1Result: null,
-      caseFilter: null,
+      caseFilter: s.case_filter ?? null,
       panelCache: {},
       undoDepth: 0,
       redoDepth: 0,
@@ -228,7 +229,11 @@ export const useStore = create<AppState>((set) => ({
     };
   }),
   setActiveTab: (t) => set({ activeTab: t }),
-  setCaseFilter: (f) => set({ caseFilter: f }),
+  setCaseFilter: (f) => set({
+    caseFilter: f,
+    table1Result: null,
+    panelCache: {},
+  }),
   toggleGrid: () => set((state) => {
     const next = !state.showGrid;
     localStorage.setItem("showGrid", String(next));

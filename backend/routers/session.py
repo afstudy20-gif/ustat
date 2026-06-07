@@ -258,6 +258,7 @@ async def export_dataset(
 
 class SelectCasesRequest(BaseModel):
     conditions: list  # [{column, operator, value, join}]
+    apply: bool = True
 
 
 @router.post("/{session_id}/select_cases")
@@ -265,10 +266,16 @@ def select_cases(session_id: str, body: SelectCasesRequest):
     df = store.get(session_id)
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    store.save_filter(session_id, body.conditions)
     from services.store import _apply_conditions
     df_filtered = _apply_conditions(df, body.conditions)
-    return {"selected": len(df_filtered), "total": len(df)}
+    if body.apply:
+        store.save_filter(session_id, body.conditions)
+        store.log_action(session_id, "case_filter", {
+            "conditions": body.conditions,
+            "selected": len(df_filtered),
+            "total": len(df),
+        })
+    return {"selected": len(df_filtered), "total": len(df), "applied": body.apply}
 
 
 @router.delete("/{session_id}/select_cases")
@@ -277,6 +284,7 @@ def clear_cases(session_id: str):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     store.clear_filter(session_id)
+    store.log_action(session_id, "case_filter_cleared")
     return {"selected": len(df), "total": len(df)}
 
 
@@ -470,6 +478,11 @@ async def load_session(file: UploadFile = File(...)):
         "rows": len(df),
         "columns": columns,
         "preview": preview,
+        "case_filter": {
+            "conditions": case_filter,
+            "selected": len(store.get_filtered(new_session_id)),
+            "total": len(df),
+        } if case_filter else None,
     }
 
 

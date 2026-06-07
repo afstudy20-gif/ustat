@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from conftest import make_session
+from services import store
 
 SEED = 4242
 BASE = "/api/compute"
@@ -512,6 +513,25 @@ def test_paste_cells_bad_column(client, synth):
     r = client.post(f"{BASE}/{sid}/paste_cells",
                     json={"start_row": 0, "start_col": "NOPE", "tsv": "1"})
     assert r.status_code == 400, r.text
+
+
+def test_paste_cells_explicit_visible_targets(client, synth):
+    sid = _fresh(synth, "paste_cells_targets")
+    before = store.get(sid).copy()
+    r = client.post(f"{BASE}/{sid}/paste_cells", json={
+        "start_row": 0,
+        "start_col": "AGE",
+        "row_indices": [2, 0],
+        "target_columns": ["LDL", "AGE"],
+        "tsv": "111\t51\n222\t52",
+    })
+    assert r.status_code == 200, r.text
+    after = store.get(sid)
+    assert after.at[2, "LDL"] == 111
+    assert after.at[2, "AGE"] == 51
+    assert after.at[0, "LDL"] == 222
+    assert after.at[0, "AGE"] == 52
+    assert after.at[1, "LDL"] == before.at[1, "LDL"]
 
 
 def test_unique_values(client, synth):

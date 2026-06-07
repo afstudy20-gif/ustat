@@ -661,6 +661,35 @@ def fit_mice(req):
         + "For inference, prefer the model panels' pooled MICE (Rubin's rules)."
     )
 
+    methods_text = (
+        f"Missing values in {', '.join(cols_with_missing)} were handled using a single completed "
+        f"dataset under an assumed {mech_label} missing-data mechanism. "
+    )
+    if num_targets:
+        methods_text += (
+            f"Numeric variables ({', '.join(num_targets)}) were imputed by chained equations "
+            f"with predictive mean matching (PMM; {req.max_iter} iterations; random seed "
+            f"{req.random_state}); PMM selected observed donor values with similar model-based "
+            "predictions. "
+        )
+    if cat_targets:
+        methods_text += (
+            f"Categorical variables ({', '.join(cat_targets)}) were imputed using the most "
+            "frequent observed category. "
+        )
+    if new_column_map:
+        methods_text += (
+            "The original variables were retained and the completed values were stored in new "
+            "variables: "
+            + ", ".join(f"{src} as {dst}" for src, dst in new_column_map.items())
+            + ". "
+        )
+    methods_text += (
+        f"In total, {total_imputed} missing values were imputed. This procedure produced a single "
+        "completed dataset and therefore does not incorporate between-imputation uncertainty; "
+        "pooled multiple imputation with Rubin's rules should be used for variance-correct inference."
+    )
+
     export_rows = [["Column", "Method", "N Imputed", "Mean / Mode", "Min", "Max"]]
     for s in col_summaries:
         center = s.get("mode_imputed") if s.get("method") == "mode" else s.get("mean_imputed")
@@ -676,6 +705,19 @@ def fit_mice(req):
         f"# pooled <- pool(fit)"
     )
 
+    store.log_action(req.session_id, "mice", {
+        "columns": cols_with_missing,
+        "numeric_columns": num_targets,
+        "categorical_columns": cat_targets,
+        "new_column_map": new_column_map,
+        "total_imputed": total_imputed,
+        "max_iter": req.max_iter,
+        "random_state": req.random_state,
+        "mechanism": mech_label,
+        "single_imputation": True,
+        "methods_text": methods_text,
+    })
+
     return {
         "test": "MICE Multiple Imputation",
         "n_total": len(df),
@@ -687,6 +729,7 @@ def fit_mice(req):
         "preserved_originals": bool(new_column_map),
         "assumptions": assumptions,
         "result_text": result_text,
+        "methods_text": methods_text,
         "export_rows": export_rows,
         "r_code": r_code,
     }

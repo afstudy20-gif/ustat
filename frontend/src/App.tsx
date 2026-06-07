@@ -550,6 +550,9 @@ function SessionNamePill() {
 
 export default function App() {
   const { session, activeTab, setActiveTab, clearSession, showGrid, toggleGrid, caseFilter, setCaseFilter, originalSession, setOriginalSession, setSession } = useStore();
+  const caseFilterKey = caseFilter
+    ? JSON.stringify([caseFilter.conditions, caseFilter.selected, caseFilter.total])
+    : "all";
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
@@ -695,7 +698,7 @@ export default function App() {
 
           {caseFilter && caseFilter.conditions && caseFilter.conditions.length > 0 && (
             <div className="flex items-center gap-1 bg-amber-50 border border-amber-300 text-amber-700 font-semibold rounded-lg px-2 py-1 text-[10px] animate-pulse flex-shrink-0" title="All active analyses are automatically filtered by this subset.">
-              🧹 Filter Active ({caseFilter.selected.toLocaleString()})
+              🧹 Select Cases Active ({caseFilter.selected.toLocaleString()})
             </div>
           )}
 
@@ -920,7 +923,7 @@ export default function App() {
 
       {/* Content */}
       <main className="flex-1 overflow-hidden flex flex-col">
-        <ErrorBoundary key={activeTab}>
+        <ErrorBoundary key={`${activeTab}:${caseFilterKey}`}>
           {activeTab === "data"        && <div className="flex-1 p-4 overflow-hidden flex flex-col" style={{minHeight:0}}><DataTable /></div>}
           {activeTab === "summary"     && <SummaryCombo />}
           {activeTab === "table1"      && <Table1Panel />}

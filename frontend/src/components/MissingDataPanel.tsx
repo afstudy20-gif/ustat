@@ -60,6 +60,7 @@ export default function MissingDataPanel() {
   // Diagnostics state
   const [diag, setDiag] = useState<DiagResult | null>(null);
   const [mcar, setMcar] = useState<any>(null);
+  const [mcarNote, setMcarNote] = useState<string | null>(null);
   const [compare, setCompare] = useState<any>(null);
 
   if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
@@ -70,8 +71,16 @@ export default function MissingDataPanel() {
     useStore.setState((s) => ({ dataVersion: s.dataVersion + 1 }));
   };
 
-  const toggle = (name: string) =>
+  const clearDiagnostics = () => {
+    setDiag(null);
+    setMcar(null);
+    setMcarNote(null);
+  };
+
+  const toggle = (name: string) => {
+    clearDiagnostics();
     setSelected((p) => (p.includes(name) ? p.filter((c) => c !== name) : [...p, name]));
+  };
 
   const sortedMissingInfo = [...missingInfo].sort((a, b) => {
     if (missingSort === "name-asc" || missingSort === "name-desc") {
@@ -81,6 +90,15 @@ export default function MissingDataPanel() {
     const order = a.pct - b.pct || a.name.localeCompare(b.name, "tr", { numeric: true, sensitivity: "base" });
     return missingSort === "missing-asc" ? order : -order;
   });
+
+  const toggleNameSort = () =>
+    setMissingSort((current) => current === "name-asc" ? "name-desc" : "name-asc");
+
+  const toggleMissingSort = () =>
+    setMissingSort((current) => current === "missing-asc" ? "missing-desc" : "missing-asc");
+
+  const sortArrow = (asc: MissingSort, desc: MissingSort) =>
+    missingSort === asc ? "↑" : missingSort === desc ? "↓" : "↕";
 
   const nextColumnName = (source: string, method: QuickMethod): string => {
     const base = `${source}_${QUICK_SUFFIX[method]}`;
@@ -109,17 +127,26 @@ export default function MissingDataPanel() {
   };
 
   const runDiagnostics = async () => {
-    setBusy("diag"); setErr(null); setDiag(null); setMcar(null);
+    if (selected.length === 0) { setErr("Select at least one column to analyze"); return; }
+    const selectedNumeric = selected.filter((name) => missingInfo.some((m) => m.name === name && m.isNum));
+    setBusy("diag"); setErr(null); setDiag(null); setMcar(null); setMcarNote(null);
     try {
+      const diagRequest = runMissingDiagnostics(sid, selected);
+      const mcarRequest = selectedNumeric.length >= 2
+        ? runMCARTest({ session_id: sid, columns: selectedNumeric })
+        : null;
       const [d, m] = await Promise.allSettled([
-        runMissingDiagnostics(sid),
-        // No `columns` → Little's test runs across all numeric variables (it
-        // needs ≥2 to assess missingness patterns).
-        runMCARTest({ session_id: sid }),
+        diagRequest,
+        ...(mcarRequest ? [mcarRequest] : []),
       ]);
       if (d.status === "fulfilled") setDiag(d.value.data);
-      if (m.status === "fulfilled") setMcar(m.value.data);
-      if (d.status === "rejected" && m.status === "rejected") setErr(errText(d.reason));
+      else setErr(errText(d.reason));
+      if (mcarRequest) {
+        if (m?.status === "fulfilled") setMcar(m.value.data);
+        else if (m?.status === "rejected") setMcarNote(`Little's MCAR test could not be calculated: ${errText(m.reason)}`);
+      } else {
+        setMcarNote("Little's MCAR test requires at least two selected numeric variables. The dependence analysis below is limited to the selected variable(s).");
+      }
     } finally {
       setBusy(null);
     }
@@ -193,7 +220,10 @@ export default function MissingDataPanel() {
                   <option value="name-desc">Name: Z to A</option>
                 </select>
               </label>
-              <button onClick={() => setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name))}
+              <button onClick={() => {
+                clearDiagnostics();
+                setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name));
+              }}
                 className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
                 {selected.length === missingInfo.length ? "Clear all" : "Select all"}
               </button>
@@ -211,10 +241,37 @@ export default function MissingDataPanel() {
             <thead>
               <tr className="text-left text-gray-400 border-b border-gray-100">
                 <th className="px-3 py-2 w-8"></th>
-                <th className="px-3 py-2">Variable</th>
+                <th className="px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={toggleNameSort}
+                    className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                    title="Sort by variable name"
+                  >
+                    Variable <span aria-hidden="true">{sortArrow("name-asc", "name-desc")}</span>
+                  </button>
+                </th>
                 <th className="px-3 py-2">Type</th>
-                <th className="px-3 py-2 text-right">Missing</th>
-                <th className="px-3 py-2 w-28">%</th>
+                <th className="px-3 py-2 text-right">
+                  <button
+                    type="button"
+                    onClick={toggleMissingSort}
+                    className="inline-flex items-center justify-end gap-1 hover:text-indigo-600 transition-colors"
+                    title="Sort by missing percentage"
+                  >
+                    Missing <span aria-hidden="true">{sortArrow("missing-asc", "missing-desc")}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 w-28">
+                  <button
+                    type="button"
+                    onClick={toggleMissingSort}
+                    className="inline-flex items-center gap-1 hover:text-indigo-600 transition-colors"
+                    title="Sort by missing percentage"
+                  >
+                    % <span aria-hidden="true">{sortArrow("missing-asc", "missing-desc")}</span>
+                  </button>
+                </th>
                 <th className="px-3 py-2 text-right">Quick impute</th>
               </tr>
             </thead>
@@ -259,9 +316,9 @@ export default function MissingDataPanel() {
                 <h3 className="text-sm font-semibold text-gray-800">Missing Mechanism</h3>
                 <p className="text-[11px] text-gray-400 mt-0.5">Determines which imputation is valid. Analyze, or set it manually.</p>
               </div>
-              <button onClick={runDiagnostics} disabled={busy === "diag"}
+              <button onClick={runDiagnostics} disabled={busy === "diag" || selected.length === 0}
                 className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
-                {busy === "diag" ? "Analyzing…" : "Analyze missingness"}
+                {busy === "diag" ? "Analyzing…" : `Analyze missingness${selected.length ? ` (${selected.length})` : ""}`}
               </button>
             </div>
             <div className="px-5 py-4 space-y-3">
@@ -307,6 +364,11 @@ export default function MissingDataPanel() {
                   )}
                 </div>
               )}
+              {mcarNote && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-[11px] text-gray-600">
+                  {mcarNote}
+                </div>
+              )}
               {miceMechanism === "MNAR" && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">
                   ⚠️ MNAR: MICE assumes MAR and may bias results. For &gt;40–50% missing, use a dedicated MNAR sensitivity analysis (pattern-mixture / selection model).
@@ -347,6 +409,20 @@ export default function MissingDataPanel() {
 
               {miceResult?.result_text && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-800">{miceResult.result_text}</div>
+              )}
+              {miceResult?.methods_text && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+                  <div className="flex items-center justify-between gap-3 mb-1.5">
+                    <p className="text-xs font-semibold text-indigo-800">Methods</p>
+                    <button
+                      onClick={() => navigator.clipboard.writeText(miceResult.methods_text)}
+                      className="text-[10px] px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-white transition-colors"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p className="text-xs text-indigo-800 leading-relaxed">{miceResult.methods_text}</p>
+                </div>
               )}
               {miceResult?.export_rows?.length > 1 && (
                 <>

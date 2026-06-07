@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 def _get_df(session_id: str) -> pd.DataFrame:
-    df = store.get(session_id)
+    df = store.get_filtered(session_id)
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return df
@@ -454,4 +454,3 @@ def subgroup_bar(req: SubgroupBarRequest):
             f"proportions). Error bars show {_err_label}."
         )
     }
-

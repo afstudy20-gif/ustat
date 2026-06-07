@@ -152,7 +152,8 @@ export const runCronbach     = (data: object) => api.post("/api/reliability/cron
 export const runMissingPattern = (data: object) => api.post("/api/missing_data/pattern", data);
 export const runMCARTest     = (data: object) => api.post("/api/missing_data/mcar_test", data);
 export const runImputationCompare = (data: object) => api.post("/api/missing_data/imputation_compare", data);
-export const runMissingDiagnostics = (sessionId: string) => api.post(`/api/compute/${sessionId}/missing_diagnostics`, {});
+export const runMissingDiagnostics = (sessionId: string, columns?: string[]) =>
+  api.post(`/api/compute/${sessionId}/missing_diagnostics`, { columns });
 export const fillBlanks = (sessionId: string, column: string, value: string, newColumn?: string) =>
   api.post(`/api/compute/${sessionId}/fill_blanks`, {
     column,
@@ -224,8 +225,8 @@ export const getFigureCaption = (data: object) => api.post("/api/pub_export/figu
 // Nomogram
 export const buildNomogram = (data: object) => api.post("/api/nomogram/build", data);
 
-export const selectCases = (sessionId: string, conditions: object[]) =>
-  api.post(`/api/sessions/${sessionId}/select_cases`, { conditions });
+export const selectCases = (sessionId: string, conditions: object[], apply = true) =>
+  api.post(`/api/sessions/${sessionId}/select_cases`, { conditions, apply });
 export const clearCases  = (sessionId: string) =>
   api.delete(`/api/sessions/${sessionId}/select_cases`);
 

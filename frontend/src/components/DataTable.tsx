@@ -100,6 +100,12 @@ export default function DataTable() {
   // Multi-cell selection
   const [selectedCells, setSelectedCells] = useState<Set<string>>(new Set());
   const [selAnchor, setSelAnchor] = useState<{ row: number; col: string } | null>(null);
+  const [selFocus, setSelFocus] = useState<{ row: number; col: string } | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const dragSelectingRef = useRef(false);
+  const dragAnchorRef = useRef<{ row: number; col: string } | null>(null);
+  const dragAdditiveRef = useRef(false);
+  const dragBaseSelectionRef = useRef<Set<string>>(new Set());
 
   // Right-click context menu (cells)
   const [cellCtx, setCellCtx] = useState<{ x: number; y: number; row: number; col: string } | null>(null);
@@ -110,77 +116,18 @@ export default function DataTable() {
   const rowCtxRef = useRef<HTMLDivElement>(null);
 
   const inputRef   = useRef<HTMLInputElement>(null);
+  const committingCellsRef = useRef<Set<string>>(new Set());
 
   // Paste notification
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
-
-  // Ctrl+Z / Ctrl+Y / Ctrl+V / Delete / Backspace
-  useEffect(() => {
-    const handler = async (e: KeyboardEvent) => {
-      // Delete / Backspace clears selected cells (no modifier needed)
-      if ((e.key === "Delete" || e.key === "Backspace") && !editCell && !renameCol && selectedCells.size > 0) {
-        e.preventDefault();
-        clearSelectedCells();
-        return;
-      }
-      // Escape clears selection
-      if (e.key === "Escape" && selectedCells.size > 0 && !editCell) {
-        setSelectedCells(new Set());
-        return;
-      }
-      const mod = e.metaKey || e.ctrlKey;
-      if (!mod) return;
-      // Don't capture when editing a cell or input
-      if (editCell || renameCol) return;
-      if (e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-      if (e.key === "z" && e.shiftKey)  { e.preventDefault(); redo(); }
-      if (e.key === "y")                { e.preventDefault(); redo(); }
-      // Ctrl+C — copy selected cells
-      if (e.key === "c" && selectedCells.size > 0) {
-        e.preventDefault();
-        copyCells();
-        return;
-      }
-      // Ctrl+V — paste from clipboard
-      if (e.key === "v" && session) {
-        e.preventDefault();
-        try {
-          const text = await navigator.clipboard.readText();
-          if (!text.trim()) return;
-
-          // If we have a cell selection anchor, paste cells at that position
-          if (selAnchor) {
-            await pasteCellsAt(selAnchor.row, selAnchor.col, text);
-            setSelectedCells(new Set());
-            setPasteMsg("Cells pasted");
-            setTimeout(() => setPasteMsg(null), 3000);
-            return;
-          }
-
-          // Otherwise append rows (old behavior)
-          const res = await api.post(`/api/compute/${session.session_id}/paste`, {
-            tsv: text, has_header: true, mode: "append",
-          });
-          const refresh = await api.get(`/api/stats/${session.session_id}/refresh`);
-          useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
-          setPasteMsg(`${res.data.n_pasted} rows pasted`);
-          setTimeout(() => setPasteMsg(null), 3000);
-        } catch (err: any) {
-          setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
-          setTimeout(() => setPasteMsg(null), 4000);
-        }
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [undo, redo, editCell, renameCol, session, selectedCells]);
 
   useEffect(() => {
     if (editCell) setTimeout(() => inputRef.current?.focus(), 0);
   }, [editCell]);
 
   useEffect(() => {
-    setSortCol(null); setFilters({}); setShowMissingOnly(false); setSelectedCells(new Set()); setSelAnchor(null);
+    setSortCol(null); setFilters({}); setShowMissingOnly(false); setSelectedCells(new Set());
+    setSelAnchor(null); setSelFocus(null);
   }, [session?.session_id]);
 
   if (!session) return null;
@@ -342,34 +289,129 @@ export default function DataTable() {
   // ── Cell selection helpers ──────────────────────────────────────────────────
   const cellKey = (row: number, col: string) => `${row}:${col}`;
 
-  const selectCell = (row: number, col: string, e: React.MouseEvent) => {
-    if (e.shiftKey && selAnchor) {
-      // Range selection from anchor to current (works with or without Ctrl)
-      const colNames = columns.map((c) => c.name);
-      const c1 = colNames.indexOf(selAnchor.col);
-      const c2 = colNames.indexOf(col);
-      const rMin = Math.min(selAnchor.row, row);
-      const rMax = Math.max(selAnchor.row, row);
-      const cMin = Math.min(c1, c2);
-      const cMax = Math.max(c1, c2);
-      const next = new Set<string>();
-      for (let r = rMin; r <= rMax; r++) {
-        for (let c = cMin; c <= cMax; c++) {
-          next.add(cellKey(r, colNames[c]));
-        }
+  type CellPosition = { row: number; col: string };
+
+  const visibleRowIds = () => displayRows.map((row) => row._idx as number);
+
+  const rangeKeys = (anchor: CellPosition, focus: CellPosition): Set<string> => {
+    const rowIds = visibleRowIds();
+    const colNames = columns.map((c) => c.name);
+    const r1 = rowIds.indexOf(anchor.row);
+    const r2 = rowIds.indexOf(focus.row);
+    const c1 = colNames.indexOf(anchor.col);
+    const c2 = colNames.indexOf(focus.col);
+    const next = new Set<string>();
+    if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return next;
+    for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+      for (let c = Math.min(c1, c2); c <= Math.max(c1, c2); c++) {
+        next.add(cellKey(rowIds[r], colNames[c]));
       }
-      setSelectedCells(next);
-      // Don't move anchor — allows extending from same anchor
-    } else if (e.ctrlKey || e.metaKey) {
-      // Ctrl+click: toggle single cell and set anchor
+    }
+    return next;
+  };
+
+  const selectRange = (anchor: CellPosition, focus: CellPosition, additive = false) => {
+    const range = rangeKeys(anchor, focus);
+    setSelectedCells((prev) => additive ? new Set([...prev, ...range]) : range);
+    setSelAnchor(anchor);
+    setSelFocus(focus);
+  };
+
+  const selectSingleCell = (row: number, col: string) => {
+    const pos = { row, col };
+    setSelectedCells(new Set([cellKey(row, col)]));
+    setSelAnchor(pos);
+    setSelFocus(pos);
+  };
+
+  const beginCellSelection = (row: number, col: string, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    gridRef.current?.focus({ preventScroll: true });
+    const mod = e.ctrlKey || e.metaKey;
+    const pos = { row, col };
+    dragBaseSelectionRef.current = new Set(selectedCells);
+
+    if (e.shiftKey) {
+      const anchor = selAnchor ?? pos;
+      selectRange(anchor, pos, mod && selAnchor !== null);
+      dragAnchorRef.current = anchor;
+      dragAdditiveRef.current = mod && selAnchor !== null;
+    } else if (mod) {
       setSelectedCells((prev) => {
         const next = new Set(prev);
-        const k = cellKey(row, col);
-        if (next.has(k)) next.delete(k); else next.add(k);
+        const key = cellKey(row, col);
+        if (next.has(key)) next.delete(key); else next.add(key);
         return next;
       });
-      setSelAnchor({ row, col });
+      setSelAnchor(pos);
+      setSelFocus(pos);
+      dragAnchorRef.current = null;
+      dragSelectingRef.current = false;
+      return;
+    } else {
+      selectSingleCell(row, col);
+      dragAnchorRef.current = pos;
+      dragAdditiveRef.current = false;
     }
+    dragSelectingRef.current = true;
+  };
+
+  const extendMouseSelection = (row: number, col: string, e: React.MouseEvent) => {
+    if (!dragSelectingRef.current || e.buttons !== 1 || !dragAnchorRef.current) {
+      if (e.buttons !== 1) dragSelectingRef.current = false;
+      return;
+    }
+    const focus = { row, col };
+    const range = rangeKeys(dragAnchorRef.current, focus);
+    setSelectedCells(
+      dragAdditiveRef.current
+        ? new Set([...dragBaseSelectionRef.current, ...range])
+        : range
+    );
+    setSelFocus(focus);
+  };
+
+  const selectVisibleRow = (row: number, additive: boolean) => {
+    const keys = columns.map((c) => cellKey(row, c.name));
+    setSelectedCells((prev) => additive ? new Set([...prev, ...keys]) : new Set(keys));
+    const anchor = { row, col: columns[0]?.name ?? "" };
+    const focus = { row, col: columns[columns.length - 1]?.name ?? "" };
+    setSelAnchor(anchor);
+    setSelFocus(focus);
+    gridRef.current?.focus({ preventScroll: true });
+  };
+
+  const selectVisibleColumn = (col: string, additive: boolean) => {
+    const rows = visibleRowIds();
+    const keys = rows.map((row) => cellKey(row, col));
+    setSelectedCells((prev) => additive ? new Set([...prev, ...keys]) : new Set(keys));
+    if (rows.length > 0) {
+      setSelAnchor({ row: rows[0], col });
+      setSelFocus({ row: rows[rows.length - 1], col });
+    }
+    gridRef.current?.focus({ preventScroll: true });
+  };
+
+  const moveSelectionFocus = (rowDelta: number, colDelta: number, extend: boolean, toEdge: boolean) => {
+    if (!selFocus || columns.length === 0 || displayRows.length === 0) return;
+    const rows = visibleRowIds();
+    const currentRow = Math.max(0, rows.indexOf(selFocus.row));
+    const currentCol = Math.max(0, columns.findIndex((c) => c.name === selFocus.col));
+    const nextRow = toEdge
+      ? (rowDelta < 0 ? 0 : rowDelta > 0 ? rows.length - 1 : currentRow)
+      : Math.max(0, Math.min(rows.length - 1, currentRow + rowDelta));
+    const nextCol = toEdge
+      ? (colDelta < 0 ? 0 : colDelta > 0 ? columns.length - 1 : currentCol)
+      : Math.max(0, Math.min(columns.length - 1, currentCol + colDelta));
+    const next = { row: rows[nextRow], col: columns[nextCol].name };
+    if (extend) selectRange(selAnchor ?? selFocus, next);
+    else selectSingleCell(next.row, next.col);
+    requestAnimationFrame(() => {
+      gridRef.current
+        ?.querySelector<HTMLElement>(`[data-grid-row="${next.row}"][data-grid-col="${nextCol}"]`)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
   };
 
   const clearSelectedCells = async () => {
@@ -383,41 +425,82 @@ export default function DataTable() {
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
       useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
       setSelectedCells(new Set());
+      setSelAnchor(null);
+      setSelFocus(null);
     } catch { /* ignore */ }
   };
 
   // ── Clipboard for cell copy/paste ──────────────────────────────────────────
   const [copiedCells, setCopiedCells] = useState<{ tsv: string; rows: number; cols: number } | null>(null);
 
-  const copyCells = () => {
-    if (!session || selectedCells.size === 0) return;
+  const selectedCellsTsv = (): { tsv: string; rows: number; cols: number } | null => {
+    if (!session || selectedCells.size === 0) return null;
     const cells = Array.from(selectedCells).map((k) => {
       const [r, ...cParts] = k.split(":");
       return { row: Number(r), col: cParts.join(":") };
     });
-    const rows = [...new Set(cells.map((c) => c.row))].sort((a, b) => a - b);
+    const visibleOrder = visibleRowIds();
+    const rows = [...new Set(cells.map((c) => c.row))].sort(
+      (a, b) => visibleOrder.indexOf(a) - visibleOrder.indexOf(b)
+    );
     const cols = [...new Set(cells.map((c) => c.col))];
     const colOrder = columns.map((c) => c.name);
     cols.sort((a, b) => colOrder.indexOf(a) - colOrder.indexOf(b));
     const tsv = rows.map((r) =>
       cols.map((c) => {
+        if (!selectedCells.has(cellKey(r, c))) return "";
         const val = preview[r]?.[c];
         return val === null || val === undefined ? "" : String(val);
       }).join("\t")
     ).join("\n");
-    setCopiedCells({ tsv, rows: rows.length, cols: cols.length });
-    navigator.clipboard.writeText(tsv).catch(() => {});
+    return { tsv, rows: rows.length, cols: cols.length };
+  };
+
+  const copyCells = async (): Promise<boolean> => {
+    const copied = selectedCellsTsv();
+    if (!copied) return false;
+    try {
+      await navigator.clipboard.writeText(copied.tsv);
+      setCopiedCells(copied);
+      setPasteMsg(`${copied.rows}×${copied.cols} cells copied`);
+      setTimeout(() => setPasteMsg(null), 2500);
+      return true;
+    } catch {
+      setPasteMsg("Clipboard access was denied");
+      setTimeout(() => setPasteMsg(null), 3000);
+      return false;
+    }
+  };
+
+  const cutCells = async () => {
+    if (await copyCells()) {
+      await clearSelectedCells();
+      setPasteMsg("Cells cut to clipboard");
+      setTimeout(() => setPasteMsg(null), 2500);
+    }
   };
 
   const pasteCellsAt = async (startRow: number, startCol: string, tsv: string) => {
     if (!session) return;
     try {
-      await api.post(`/api/compute/${session.session_id}/paste_cells`, {
-        start_row: startRow, start_col: startCol, tsv,
+      const rowOrder = visibleRowIds();
+      const rowPos = rowOrder.indexOf(startRow);
+      const colPos = columns.findIndex((c) => c.name === startCol);
+      const res = await api.post(`/api/compute/${session.session_id}/paste_cells`, {
+        start_row: startRow,
+        start_col: startCol,
+        row_indices: rowPos >= 0 ? rowOrder.slice(rowPos) : undefined,
+        target_columns: colPos >= 0 ? columns.slice(colPos).map((c) => c.name) : undefined,
+        tsv,
       });
-      const res = await api.get(`/api/stats/${session.session_id}/refresh`);
-      useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
-    } catch { /* ignore */ }
+      const refresh = await api.get(`/api/stats/${session.session_id}/refresh`);
+      useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
+      setPasteMsg(`${res.data.pasted} cells pasted`);
+      setTimeout(() => setPasteMsg(null), 2500);
+    } catch (err: any) {
+      setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
+      setTimeout(() => setPasteMsg(null), 3500);
+    }
   };
 
   const duplicateColumn = async (colName: string) => {
@@ -582,24 +665,44 @@ export default function DataTable() {
     updateColumnKind(colName, next);
   };
 
-  const startEdit = (rowIdx: number, col: string) => {
+  const startEdit = (rowIdx: number, col: string, initialValue?: string) => {
     const val = preview[rowIdx]?.[col];
+    selectSingleCell(rowIdx, col);
     setEditCell({ rowIdx, col });
-    setEditValue(val === null || val === undefined ? "" : String(val));
+    setEditValue(initialValue ?? (val === null || val === undefined ? "" : String(val)));
   };
 
-  const commitEdit = async () => {
-    if (!editCell || saving) return;
+  const commitEdit = async (restoreGridFocus = false) => {
+    if (!editCell) return;
 
     const { rowIdx, col } = editCell;
+    const commitKey = cellKey(rowIdx, col);
+    if (committingCellsRef.current.has(commitKey)) return;
+    committingCellsRef.current.add(commitKey);
     setEditCell(null);
+    if (restoreGridFocus) {
+      requestAnimationFrame(() => gridRef.current?.focus({ preventScroll: true }));
+    }
 
     const original = preview[rowIdx]?.[col];
     const rawVal   = editValue.trim();
     const newVal   = rawVal === "" ? null : rawVal;
 
-    if (String(original ?? "") === String(newVal ?? "")) return;
+    if (String(original ?? "") === String(newVal ?? "")) {
+      committingCellsRef.current.delete(commitKey);
+      return;
+    }
 
+    const colKind = columns.find((c) => c.name === col)?.kind;
+    const parsedNumber = rawVal === "" ? null : Number(rawVal);
+    const optimisticValue =
+      colKind === "numeric" && parsedNumber !== null && Number.isFinite(parsedNumber)
+        ? parsedNumber
+        : newVal;
+
+    // Show the edit immediately; the backend response below normalizes the
+    // value to the column dtype. Revert only when persistence fails.
+    updatePreviewCell(rowIdx, col, optimisticValue);
     setSaving(true);
     try {
       const res = await api.patch(`/api/sessions/${session.session_id}/cell`, {
@@ -610,16 +713,141 @@ export default function DataTable() {
       updatePreviewCell(rowIdx, col, res.data.value);
       bumpUndo();
     } catch {
-      // On error silently revert
+      updatePreviewCell(rowIdx, col, original);
+      setPasteMsg("Cell update failed; the previous value was restored");
+      setTimeout(() => setPasteMsg(null), 3500);
     } finally {
+      committingCellsRef.current.delete(commitKey);
       setSaving(false);
+    }
+  };
+
+  const handleGridKeyDown = async (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (
+      editCell || renameCol ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      target instanceof HTMLButtonElement ||
+      target instanceof HTMLAnchorElement ||
+      target.isContentEditable
+    ) return;
+
+    const mod = e.metaKey || e.ctrlKey;
+
+    if (mod && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo(); else undo();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "a") {
+      e.preventDefault();
+      const all = new Set<string>();
+      for (const row of visibleRowIds()) {
+        for (const col of columns) all.add(cellKey(row, col.name));
+      }
+      setSelectedCells(all);
+      if (displayRows.length && columns.length) {
+        setSelAnchor({ row: displayRows[0]._idx as number, col: columns[0].name });
+        setSelFocus({
+          row: displayRows[displayRows.length - 1]._idx as number,
+          col: columns[columns.length - 1].name,
+        });
+      }
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "c" && selectedCells.size > 0) {
+      e.preventDefault();
+      await copyCells();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "x" && selectedCells.size > 0) {
+      e.preventDefault();
+      await cutCells();
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "v" && session) {
+      e.preventDefault();
+      try {
+        const text = await navigator.clipboard.readText();
+        if (!text.trim()) return;
+        const destination = selAnchor ?? selFocus;
+        if (destination) {
+          await pasteCellsAt(destination.row, destination.col, text);
+          return;
+        }
+        const res = await api.post(`/api/compute/${session.session_id}/paste`, {
+          tsv: text, has_header: true, mode: "append",
+        });
+        const refresh = await api.get(`/api/stats/${session.session_id}/refresh`);
+        useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
+        setPasteMsg(`${res.data.n_pasted} rows pasted`);
+        setTimeout(() => setPasteMsg(null), 3000);
+      } catch (err: any) {
+        setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
+        setTimeout(() => setPasteMsg(null), 4000);
+      }
+      return;
+    }
+
+    if ((e.key === "Delete" || e.key === "Backspace") && selectedCells.size > 0) {
+      e.preventDefault();
+      await clearSelectedCells();
+      return;
+    }
+    if (e.key === "Escape" && selectedCells.size > 0) {
+      e.preventDefault();
+      setSelectedCells(new Set());
+      setSelAnchor(null);
+      setSelFocus(null);
+      return;
+    }
+
+    const directions: Record<string, [number, number]> = {
+      ArrowUp: [-1, 0],
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+    };
+    if (e.key in directions && selFocus) {
+      e.preventDefault();
+      const [rowDelta, colDelta] = directions[e.key];
+      moveSelectionFocus(rowDelta, colDelta, e.shiftKey, mod);
+      return;
+    }
+    if (e.key === "Tab" && selFocus) {
+      e.preventDefault();
+      moveSelectionFocus(0, e.shiftKey ? -1 : 1, false, false);
+      return;
+    }
+    if ((e.key === "Enter" || e.key === "F2") && selFocus) {
+      e.preventDefault();
+      startEdit(selFocus.row, selFocus.col);
+      return;
+    }
+    if (!mod && !e.altKey && e.key.length === 1 && selFocus) {
+      e.preventDefault();
+      startEdit(selFocus.row, selFocus.col, e.key);
     }
   };
 
   const activeFilters = Object.values(filters).filter(Boolean).length;
 
   return (
-    <div className="flex flex-col gap-2 h-full" style={{ minHeight: 0 }}>
+    <div
+      ref={gridRef}
+      tabIndex={0}
+      onKeyDown={handleGridKeyDown}
+      onMouseUp={() => { dragSelectingRef.current = false; }}
+      className="flex flex-col gap-2 h-full focus:outline-none"
+      style={{ minHeight: 0 }}
+    >
       {showSelectCases && session && (
         <SelectCasesModal
           columns={columns}
@@ -773,7 +1001,7 @@ export default function DataTable() {
                 ? "bg-violet-100 text-violet-700 border-violet-400"
                 : "text-gray-500 border-gray-300 hover:text-gray-700 hover:border-gray-400"}`}
           >
-            ⊂ Cases
+            ⊂ Select Cases
             {caseFilter && (
               <span className="bg-violet-600 text-white text-[9px] font-bold rounded-full px-1.5 py-0.5">
                 {caseFilter.selected.toLocaleString()}
@@ -822,7 +1050,24 @@ export default function DataTable() {
                   <th
                     key={col.name}
                     draggable={draggable}
+                    onMouseDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        selectVisibleColumn(col.name, true);
+                      }
+                    }}
+                    onClickCapture={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
                     onDragStart={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                        e.preventDefault();
+                        return;
+                      }
                       if (!draggable) { e.preventDefault(); return; }
                       setDragIdx(colIdx);
                       e.dataTransfer.effectAllowed = "move";
@@ -854,6 +1099,7 @@ export default function DataTable() {
                       ${dragIdx === colIdx ? "opacity-40" : ""}
                       ${isDragOver ? "border-l-2 border-l-indigo-500" : ""}`}
                     style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
+                    title="Ctrl/Cmd+Shift+click selects the visible column"
                   >
                     <div className="flex items-center gap-1 justify-between">
                       <div className="flex items-center gap-1.5 min-w-0">
@@ -957,8 +1203,14 @@ export default function DataTable() {
                   <td
                     className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
                     style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
+                    onMouseDown={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
+                        e.preventDefault();
+                        selectVisibleRow(origIdx, true);
+                      }
+                    }}
                     onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
-                    title={`Original row #${origIdx + 1} in the dataset`}
+                    title={`Original row #${origIdx + 1} in the dataset · Ctrl/Cmd+Shift+click selects the row`}
                   >
                     {visualIdx + 1}
                   </td>
@@ -973,17 +1225,16 @@ export default function DataTable() {
                     return (
                       <td
                         key={col.name}
-                        onClick={(e) => {
-                          if (isEditing) return;
-                          if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                            // Multi-select mode — don't open editor
-                            selectCell(origIdx, col.name, e);
-                          } else {
-                            // Normal click: clear selection, open editor
-                            setSelectedCells(new Set());
-                            setSelAnchor(null);
-                            startEdit(origIdx, col.name);
-                          }
+                        data-grid-row={origIdx}
+                        data-grid-col={colIdx}
+                        onMouseDown={(e) => {
+                          if (!isEditing) beginCellSelection(origIdx, col.name, e);
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isEditing) extendMouseSelection(origIdx, col.name, e);
+                        }}
+                        onDoubleClick={() => {
+                          if (!isEditing) startEdit(origIdx, col.name);
                         }}
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -991,7 +1242,9 @@ export default function DataTable() {
                           if (!selectedCells.has(cellKey(origIdx, col.name))) {
                             setSelectedCells(new Set([cellKey(origIdx, col.name)]));
                             setSelAnchor({ row: origIdx, col: col.name });
+                            setSelFocus({ row: origIdx, col: col.name });
                           }
+                          gridRef.current?.focus({ preventScroll: true });
                           setCellCtx({ x: e.clientX, y: e.clientY, row: origIdx, col: col.name });
                         }}
                         className={`border-r border-gray-200 font-mono text-xs transition-colors
@@ -1012,10 +1265,22 @@ export default function DataTable() {
                             value={editValue}
                             onChange={(e) => setEditValue(e.target.value)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter")  commitEdit();
-                              if (e.key === "Escape") setEditCell(null);
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(1, 0, false, false);
+                              }
+                              if (e.key === "Tab") {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(0, e.shiftKey ? -1 : 1, false, false);
+                              }
+                              if (e.key === "Escape") {
+                                setEditCell(null);
+                                requestAnimationFrame(() => gridRef.current?.focus({ preventScroll: true }));
+                              }
                             }}
-                            onBlur={commitEdit}
+                            onBlur={() => { void commitEdit(false); }}
                           />
                         ) : isNull ? (
                           <span className="text-amber-400 italic text-[10px] font-medium">null</span>
@@ -1053,7 +1318,7 @@ export default function DataTable() {
         <span>·</span>
         <span>Double-click <span className="text-gray-500">header</span> to rename · Right-click to delete</span>
         <span>·</span>
-        <span>Click <span className="text-gray-500">cell</span> to edit · Ctrl+click to select · Shift+click for range · Delete to clear</span>
+        <span>Click to select · Double-click / Enter to edit · Drag or Shift+arrows for range · Ctrl/Cmd+C/X/V</span>
       </div>
 
       {/* ── Right-click context menu ── */}
@@ -1259,6 +1524,10 @@ export default function DataTable() {
           <button onClick={() => { copyCells(); setCellCtx(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             📋 Copy {selectedCells.size > 1 ? `${selectedCells.size} cells` : "cell"}
+          </button>
+          <button onClick={() => { void cutCells(); setCellCtx(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ✂ Cut {selectedCells.size > 1 ? `${selectedCells.size} cells` : "cell"}
           </button>
           <button onClick={async () => {
             setCellCtx(null);

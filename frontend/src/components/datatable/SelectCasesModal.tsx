@@ -92,7 +92,7 @@ export function SelectCasesModal({
   const handlePreview = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await selectCases(sessionId, conditions);
+      const res = await selectCases(sessionId, conditions, false);
       setPreview(res.data);
     } catch { setError("Preview failed"); }
     finally { setBusy(false); }
@@ -101,7 +101,7 @@ export function SelectCasesModal({
   const handleApply = async () => {
     setBusy(true); setError(null);
     try {
-      const res = await selectCases(sessionId, conditions);
+      const res = await selectCases(sessionId, conditions, true);
       onApply(conditions, res.data.selected, res.data.total);
     } catch { setError("Apply failed"); }
     finally { setBusy(false); }
@@ -328,4 +328,3 @@ export function SelectCasesModal({
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
-

@@ -1046,21 +1046,32 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
 
 # ── 6b. Missing-data diagnostics (MCAR vs MAR heuristic) ────────────────────────
 
+class MissingDiagnosticsRequest(BaseModel):
+    columns: Optional[List[str]] = None
+
+
 @router.post("/{session_id}/missing_diagnostics")
-def missing_diagnostics(session_id: str):
+def missing_diagnostics(session_id: str, req: Optional[MissingDiagnosticsRequest] = None):
     """Heuristic MCAR-vs-MAR hint (no AI). For each column with missing values,
     test whether its missingness indicator is associated with the OTHER numeric
     columns (Welch t-test of each other column, missing vs observed rows). Any
     association → the data depend on observed values → consistent with MAR, so
     MICE is appropriate; none → consistent with MCAR."""
-    df = _get_df(session_id)
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
     from scipy import stats as _stats
+
+    target_cols = req.columns if req and req.columns else list(df.columns)
+    missing_cols = [c for c in target_cols if c not in df.columns]
+    if missing_cols:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing_cols}")
 
     n = len(df)
     num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].notna().any()]
     columns = []
     any_mar = False
-    for c in df.columns:
+    for c in target_cols:
         miss = df[c].isna() | (df[c].astype(str).str.strip() == "")
         n_miss = int(miss.sum())
         if n_miss == 0:
@@ -1092,20 +1103,27 @@ def missing_diagnostics(session_id: str):
         })
 
     if not columns:
-        overall = "No missing values detected."
+        overall = "No missing values detected in the selected variables."
         recommendation = ""
     elif any_mar:
-        overall = ("At least one variable's missingness is associated with other observed "
+        overall = ("At least one selected variable's missingness is associated with other observed "
                    "variables — consistent with MAR (not MCAR).")
         recommendation = ("MAR → MICE (multiple imputation) is the appropriate choice. Mean/median "
                           "or listwise deletion can bias results when the missing fraction is non-trivial.")
     else:
-        overall = ("No association detected between missingness and the observed numeric variables "
+        overall = ("For the selected variables, no association was detected between missingness and "
+                   "the observed numeric variables "
                    "— consistent with MCAR.")
         recommendation = ("MCAR → listwise deletion is unbiased; MICE is still valid and more "
                           "efficient (keeps the full sample).")
 
-    return {"columns": columns, "overall_hint": overall, "recommendation": recommendation, "any_mar": any_mar}
+    return {
+        "columns": columns,
+        "analyzed_columns": target_cols,
+        "overall_hint": overall,
+        "recommendation": recommendation,
+        "any_mar": any_mar,
+    }
 
 
 # ── 7. Delete rows ──────────────────────────────────────────────────────────
@@ -1286,37 +1304,59 @@ def duplicate_column(session_id: str, req: DuplicateColumnRequest):
 # ── 13. Paste cells (copy-paste within the grid) ─────────────────────────────
 
 class PasteCellsRequest(BaseModel):
-    start_row: int
-    start_col: str
+    start_row: Optional[int] = None
+    start_col: Optional[str] = None
     tsv: str  # tab-separated values grid
+    # Optional explicit targets preserve the visible grid order when the
+    # frontend is sorted or filtered.
+    row_indices: Optional[List[int]] = None
+    target_columns: Optional[List[str]] = None
 
 
 @router.post("/{session_id}/paste_cells")
 def paste_cells(session_id: str, req: PasteCellsRequest):
     """Paste a TSV grid of values starting at a given cell position."""
     df = _get_df(session_id)
-    if req.start_col not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Column '{req.start_col}' not found")
-
-    lines = req.tsv.strip().split("\n")
-    if not lines:
-        return {"pasted": 0}
-
     col_list = list(df.columns)
-    start_ci = col_list.index(req.start_col)
+
+    if req.target_columns:
+        invalid_cols = [c for c in req.target_columns if c not in df.columns]
+        if invalid_cols:
+            raise HTTPException(status_code=400, detail=f"Columns not found: {invalid_cols}")
+        target_cols = req.target_columns
+    else:
+        if req.start_col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{req.start_col}' not found")
+        start_ci = col_list.index(req.start_col)
+        target_cols = col_list[start_ci:]
+
+    if req.row_indices is not None:
+        invalid_rows = [r for r in req.row_indices if r < 0 or r >= len(df)]
+        if invalid_rows:
+            raise HTTPException(status_code=400, detail=f"Row indices out of range: {invalid_rows}")
+        target_rows = req.row_indices
+    else:
+        if req.start_row is None or req.start_row < 0:
+            raise HTTPException(status_code=400, detail="A valid start_row is required")
+        target_rows = list(range(req.start_row, len(df)))
+
+    text = req.tsv.replace("\r\n", "\n").replace("\r", "\n").rstrip("\n")
+    if text == "":
+        return {"pasted": 0}
+    lines = text.split("\n")
+
     df = df.copy()
     pasted = 0
 
     for dr, line in enumerate(lines):
-        ri = req.start_row + dr
-        if ri >= len(df):
+        if dr >= len(target_rows):
             break
+        ri = target_rows[dr]
         vals = line.split("\t")
         for dc, val in enumerate(vals):
-            ci = start_ci + dc
-            if ci >= len(col_list):
+            if dc >= len(target_cols):
                 break
-            col_name = col_list[ci]
+            col_name = target_cols[dc]
             # Coerce value
             v: Any = val.strip()
             if v == "" or v.lower() == "null":
@@ -1334,6 +1374,7 @@ def paste_cells(session_id: str, req: PasteCellsRequest):
             pasted += 1
 
     store.save(session_id, df)
+    store.log_action(session_id, "paste_cells", {"n_pasted": pasted})
     return {"pasted": pasted}
 
 
