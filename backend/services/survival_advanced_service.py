@@ -1202,6 +1202,60 @@ def fit_causal_sensitivity(req):
 # ── 4. Landmark Analysis ────────────────────────────────────────────────────
 
 
+def _landmark_cox_mi(df_needed, needed, req, n_imputations: int = 10):
+    """Landmark Cox on m multiply-imputed datasets, pooled (Rubin, log-HR).
+    Returns (cox_results_list, mi_note) — same row shape as the single-fit path,
+    with a per-coefficient FMI added. None if no dataset converged."""
+    import math as _math
+    from lifelines import CoxPHFitter
+    from services.missing_data import mice_multiple, pool_rubin_terms
+
+    preds = list(req.predictors)
+    cat_cols = preds + ([req.group_col] if req.group_col and req.group_col not in preds else [])
+    cox_cols = [req.duration_col, req.event_col] + preds
+    if req.group_col and req.group_col not in preds:
+        cox_cols.append(req.group_col)
+
+    imp = mice_multiple(df_needed, needed, n_imputations=n_imputations)
+    per: list = []
+    for dfi in imp.imputed_datasets:
+        w = dfi.copy()
+        w[req.duration_col] = pd.to_numeric(w[req.duration_col], errors="coerce")
+        w = w[w[req.duration_col] >= req.landmark_time].copy()
+        if len(w) < 10:
+            continue
+        w[req.duration_col] = w[req.duration_col] - req.landmark_time
+        cdf = w[[c for c in cox_cols if c in w.columns]].copy()
+        for c in cat_cols:
+            if c in cdf.columns and cdf[c].dtype == object:
+                cdf[c] = pd.Categorical(cdf[c]).codes
+        cdf = cdf.dropna()
+        try:
+            cph = CoxPHFitter()
+            cph.fit(cdf, duration_col=req.duration_col, event_col=req.event_col)
+        except Exception:
+            continue
+        terms = {str(var): (float(row["coef"]), float(row["se(coef)"]))
+                 for var, row in cph.summary.iterrows()}
+        if terms:
+            per.append(terms)
+    if not per:
+        return None, None
+
+    pooled = pool_rubin_terms(per)
+    out = [{
+        "variable": var,
+        "HR": round(_math.exp(pv["coef"]), 4),
+        "ci_low": round(_math.exp(pv["ci_low"]), 4),
+        "ci_high": round(_math.exp(pv["ci_high"]), 4),
+        "p": round(pv["p"], 6) if pv["p"] is not None else None,
+        "fmi": pv["fmi"],
+    } for var, pv in pooled.items()]
+    note = (f"Cox HRs pooled across {len(per)} chained-PMM imputations "
+            "(Rubin's rules, log-HR scale).")
+    return out, note
+
+
 def fit_landmark(req):
     df = _get_df(req.session_id)
 
@@ -1296,7 +1350,11 @@ def fit_landmark(req):
 
     # Cox regression if predictors given
     cox_results = None
-    if req.predictors:
+    cox_mi_note = None
+    if req.predictors and (getattr(req, "imputation", None) or "listwise") == "mice":
+        # Proper multiple imputation: pool the landmark Cox over m datasets.
+        cox_results, cox_mi_note = _landmark_cox_mi(df[needed], needed, req)
+    if req.predictors and cox_results is None:
         try:
             cox_cols = [req.duration_col, req.event_col] + req.predictors
             if req.group_col and req.group_col not in req.predictors:
@@ -1388,6 +1446,7 @@ def fit_landmark(req):
         "km_summaries": km_summaries,
         "logrank_p": logrank_p,
         "cox_results": cox_results,
+        "cox_mi_note": cox_mi_note,
         "plot": plot,
         "assumptions": assumptions,
         "result_text": result_text,

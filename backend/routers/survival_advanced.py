@@ -104,6 +104,7 @@ class LandmarkRequest(BaseModel):
     landmark_time: float
     group_col: Optional[str] = None
     predictors: Optional[List[str]] = None
+    imputation: Optional[str] = "listwise"
 
 
 @router.post("/landmark")

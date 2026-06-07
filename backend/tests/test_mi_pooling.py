@@ -50,3 +50,23 @@ def test_fine_gray_mice_is_pooled():
     assert "x" in by and by["x"]["shr"] > 0 and by["x"]["shr_low"] is not None
     # x carried the missingness → higher fraction of missing information than grp.
     assert by["x"]["fmi"] > by["grp"]["fmi"]
+
+
+def test_landmark_cox_mice_is_pooled():
+    rng = np.random.default_rng(5)
+    n = 400
+    x = rng.normal(0, 1, n)
+    t = rng.exponential(np.exp(-0.5 * x) * 6).clip(0.1, 30)
+    ev = (t < rng.exponential(15, n)).astype(int)
+    df = pd.DataFrame({"time": t, "event": ev, "x": x, "grp": rng.integers(0, 2, n)})
+    df.loc[rng.choice(n, 60, replace=False), "x"] = np.nan
+    store.save("lm_mi", df)
+    client = TestClient(app)
+    base = {"session_id": "lm_mi", "duration_col": "time", "event_col": "event",
+            "landmark_time": 2.0, "predictors": ["x", "grp"]}
+    r = client.post("/api/survival_advanced/landmark", json={**base, "imputation": "mice"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["cox_mi_note"] and "pooled" in j["cox_mi_note"].lower()
+    by = {c["variable"]: c for c in j["cox_results"]}
+    assert by["x"]["HR"] > 1 and by["x"]["fmi"] > by["grp"]["fmi"]
