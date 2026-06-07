@@ -517,8 +517,15 @@ def fit_mice(req):
     if missing_cols:
         raise HTTPException(status_code=400, detail=f"Columns not found: {missing_cols}")
 
-    # Check there are actually missing values
-    cols_with_missing = [c for c in req.columns if df[c].isna().sum() > 0]
+    def _missing_mask(series):
+        mask = series.isna()
+        if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+            mask = mask | series.astype(str).str.strip().eq("")
+        return mask
+
+    # Check there are actually missing values, including blank text cells.
+    missing_masks = {c: _missing_mask(df[c]) for c in req.columns}
+    cols_with_missing = [c for c in req.columns if missing_masks[c].any()]
     if not cols_with_missing:
         raise HTTPException(status_code=422, detail="No missing values in selected columns")
 
@@ -536,7 +543,9 @@ def fit_mice(req):
     cat_targets = [c for c in cols_with_missing if c not in num_targets]
 
     df_work = df.copy()
-    pre_missing = {c: int(df[c].isna().sum()) for c in cols_with_missing}
+    for c in cols_with_missing:
+        df_work.loc[missing_masks[c], c] = np.nan
+    pre_missing = {c: int(missing_masks[c].sum()) for c in cols_with_missing}
     col_summaries: list = []
 
     # ── Numeric targets via MICE ──
@@ -570,7 +579,7 @@ def fit_mice(req):
             for t in num_targets:
                 df_work[t] = subset_filled[t]
         for c in num_targets:
-            imputed_vals = pd.to_numeric(df_work.loc[df[c].isna(), c], errors="coerce")
+            imputed_vals = pd.to_numeric(df_work.loc[missing_masks[c], c], errors="coerce")
             col_summaries.append({
                 "column": c, "method": "PMM", "n_imputed": pre_missing[c],
                 "mean_imputed": _safe(round(float(imputed_vals.mean()), 4)) if len(imputed_vals) > 0 else None,
@@ -590,6 +599,23 @@ def fit_mice(req):
             "mode_imputed": _safe(fill_val), "mean_imputed": None, "min_imputed": None, "max_imputed": None,
         })
 
+    # Keep originals + write imputed values to new "<col>_imp" columns.
+    new_column_map: dict = {}
+    if getattr(req, "new_columns", False):
+        for s in col_summaries:
+            c = s["column"]
+            newname = f"{c}_imp"
+            k, base = 2, newname
+            while newname in df_work.columns:
+                newname = f"{base}_{k}"
+                k += 1
+            source_pos = list(df_work.columns).index(c)
+            df_work.insert(source_pos + 1, newname, df_work[c].copy())
+            df_work[c] = df[c]              # restore the original column
+            new_column_map[c] = newname
+            s["source_column"] = c
+            s["column"] = newname
+
     store.save(req.session_id, df_work)
 
     total_imputed = sum(s["n_imputed"] for s in col_summaries)
@@ -607,9 +633,13 @@ def fit_mice(req):
                    f"equations, {req.max_iter} iterations); "
                    f"{len(cat_targets)} categorical column(s) via most-frequent (mode)."},
         {"name": "Single completed dataset", "met": True,
-         "detail": "The session is filled with one PMM-completed dataset (single imputation). "
-                   "For variance-correct inference use the model panels' MICE option "
-                   "(m datasets pooled by Rubin's rules)."},
+         "detail": (
+             "Original columns are preserved and one PMM-completed column is created for each selected variable. "
+             if getattr(req, "new_columns", False)
+             else "The session is filled with one PMM-completed dataset (single imputation). "
+         )
+                   + "For variance-correct inference use the model panels' MICE option "
+                   + "(m datasets pooled by Rubin's rules)."},
     ]
 
     method_bits = []
@@ -617,12 +647,18 @@ def fit_mice(req):
         method_bits.append(f"{len(num_targets)} numeric variable(s) via Predictive Mean Matching ({req.max_iter} iterations)")
     if cat_targets:
         method_bits.append(f"{len(cat_targets)} categorical variable(s) via most-frequent value")
+    preserved_text = (
+        "Original columns were preserved; completed values were written to "
+        + ", ".join(f"{src} → {dst}" for src, dst in new_column_map.items()) + ". "
+        if new_column_map else ""
+    )
     result_text = (
         f"Single imputation was performed assuming a {mech_label} mechanism: "
         + "; ".join(method_bits) + ". "
-        f"{total_imputed} missing values were imputed across "
-        f"{len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}. "
-        "For inference, prefer the model panels' pooled MICE (Rubin's rules)."
+        + f"{total_imputed} missing values were imputed across "
+        + f"{len(cols_with_missing)} variable(s): {', '.join(cols_with_missing)}. "
+        + preserved_text
+        + "For inference, prefer the model panels' pooled MICE (Rubin's rules)."
     )
 
     export_rows = [["Column", "Method", "N Imputed", "Mean / Mode", "Min", "Max"]]
@@ -647,6 +683,8 @@ def fit_mice(req):
         "columns": col_summaries,
         "n_imputations": req.n_imputations,
         "max_iter": req.max_iter,
+        "new_column_map": new_column_map,
+        "preserved_originals": bool(new_column_map),
         "assumptions": assumptions,
         "result_text": result_text,
         "export_rows": export_rows,
@@ -2475,5 +2513,3 @@ def fit_shared_frailty(req):
         }
     result["test"] = f"Shared {dist_label} Frailty Cox Model"
     return result
-
-

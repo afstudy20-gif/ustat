@@ -57,3 +57,41 @@ def test_column_fill_mice_on_numeric():
     assert r.status_code == 200, r.text
     assert r.json()["n_filled"] == 8
     assert store.get(sid)["age"].isna().sum() == 0
+
+
+def test_column_fill_to_new_column_preserves_original():
+    sid = _seed("mi_col_copy")
+    before = store.get(sid)["age"].copy()
+    r = client.post(f"/api/compute/{sid}/fill_blanks", json={
+        "column": "age", "value": "__mice__", "new_column": "age_imp",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["column"] == "age_imp"
+    assert r.json()["source_column"] == "age"
+    assert r.json()["new_column"] is True
+    df = store.get(sid)
+    assert df["age"].equals(before)
+    assert df["age_imp"].isna().sum() == 0
+    assert list(df.columns).index("age_imp") == list(df.columns).index("age") + 1
+
+
+def test_panel_mice_new_columns_preserves_originals():
+    sid = _seed("mi_panel_copy")
+    before_age = store.get(sid)["age"].copy()
+    before_sex = store.get(sid)["sex"].copy()
+    r = client.post("/api/survival_advanced/mice", json={
+        "session_id": sid,
+        "columns": ["age", "sex"],
+        "n_imputations": 1,
+        "max_iter": 5,
+        "new_columns": True,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["preserved_originals"] is True
+    assert body["new_column_map"] == {"age": "age_imp", "sex": "sex_imp"}
+    df = store.get(sid)
+    assert df["age"].equals(before_age)
+    assert df["sex"].equals(before_sex)
+    assert df["age_imp"].isna().sum() == 0
+    assert df["sex_imp"].isna().sum() == 0

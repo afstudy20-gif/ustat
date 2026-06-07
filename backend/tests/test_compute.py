@@ -403,6 +403,13 @@ def test_fill_blanks_column_not_found(client, synth):
     assert r.status_code == 404, r.text
 
 
+def test_fill_blanks_new_column_must_not_overwrite(client, synth):
+    sid = _fresh(synth, "fill_duplicate_target")
+    r = client.post(f"{BASE}/{sid}/fill_blanks",
+                    json={"column": "LDL", "value": "__mean__", "new_column": "AGE"})
+    assert r.status_code == 422, r.text
+
+
 def test_delete_rows(client, synth):
     sid = _fresh(synth, "delrows")
     r = client.post(f"{BASE}/{sid}/delete_rows",

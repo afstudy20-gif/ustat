@@ -153,7 +153,12 @@ export const runMissingPattern = (data: object) => api.post("/api/missing_data/p
 export const runMCARTest     = (data: object) => api.post("/api/missing_data/mcar_test", data);
 export const runImputationCompare = (data: object) => api.post("/api/missing_data/imputation_compare", data);
 export const runMissingDiagnostics = (sessionId: string) => api.post(`/api/compute/${sessionId}/missing_diagnostics`, {});
-export const fillBlanks = (sessionId: string, column: string, value: string) => api.post(`/api/compute/${sessionId}/fill_blanks`, { column, value });
+export const fillBlanks = (sessionId: string, column: string, value: string, newColumn?: string) =>
+  api.post(`/api/compute/${sessionId}/fill_blanks`, {
+    column,
+    value,
+    ...(newColumn ? { new_column: newColumn } : {}),
+  });
 
 // Diagnostics
 export const runLinearDiagFull = (data: object) => api.post("/api/diagnostics/linear_full", data);

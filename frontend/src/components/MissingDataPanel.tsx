@@ -7,6 +7,15 @@ import { CleaningTab } from "./CleaningTab";
 
 interface DiagCol { name: string; n_missing: number; pct: number; kind: string; is_numeric: boolean; depends_on: string[]; likely: string }
 interface DiagResult { columns: DiagCol[]; overall_hint: string; recommendation: string; any_mar: boolean }
+type MissingSort = "missing-desc" | "missing-asc" | "name-asc" | "name-desc";
+type QuickMethod = "__mean__" | "__median__" | "__mode__" | "__mice__";
+
+const QUICK_SUFFIX: Record<QuickMethod, string> = {
+  __mean__: "mean",
+  __median__: "median",
+  __mode__: "mode",
+  __mice__: "imp",
+};
 
 const errText = (e: unknown): string =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Request failed";
@@ -34,11 +43,11 @@ export default function MissingDataPanel() {
         pct: preview.length > 0 ? (nMiss / preview.length) * 100 : 0,
       };
     })
-    .filter((m) => m.nMiss > 0)
-    .sort((a, b) => b.nMiss - a.nMiss);
+    .filter((m) => m.nMiss > 0);
 
   // Selection + MICE state
   const [selected, setSelected] = useState<string[]>([]);
+  const [missingSort, setMissingSort] = useState<MissingSort>("missing-desc");
   const [miceIter, setMiceIter] = useState(20);
   const [miceSeed, setMiceSeed] = useState(42);
   const [miceMechanism, setMiceMechanism] = useState<"unknown" | "MCAR" | "MAR" | "MNAR">("unknown");
@@ -46,6 +55,7 @@ export default function MissingDataPanel() {
   const [miceLoading, setMiceLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // per-row action in flight
   const [err, setErr] = useState<string | null>(null);
+  const [mutationNotice, setMutationNotice] = useState<string | null>(null);
 
   // Diagnostics state
   const [diag, setDiag] = useState<DiagResult | null>(null);
@@ -63,12 +73,34 @@ export default function MissingDataPanel() {
   const toggle = (name: string) =>
     setSelected((p) => (p.includes(name) ? p.filter((c) => c !== name) : [...p, name]));
 
+  const sortedMissingInfo = [...missingInfo].sort((a, b) => {
+    if (missingSort === "name-asc" || missingSort === "name-desc") {
+      const order = a.name.localeCompare(b.name, "tr", { numeric: true, sensitivity: "base" });
+      return missingSort === "name-asc" ? order : -order;
+    }
+    const order = a.pct - b.pct || a.name.localeCompare(b.name, "tr", { numeric: true, sensitivity: "base" });
+    return missingSort === "missing-asc" ? order : -order;
+  });
+
+  const nextColumnName = (source: string, method: QuickMethod): string => {
+    const base = `${source}_${QUICK_SUFFIX[method]}`;
+    const existing = new Set(columns.map((c) => c.name));
+    let candidate = base;
+    let index = 2;
+    while (existing.has(candidate)) candidate = `${base}_${index++}`;
+    return candidate;
+  };
+
   // Per-row quick imputation (acts immediately on one column).
-  const quickFill = async (col: string, method: "__mean__" | "__median__" | "__mode__" | "__mice__") => {
-    setBusy(`${col}:${method}`); setErr(null);
+  const quickFill = async (col: string, method: QuickMethod) => {
+    setBusy(`${col}:${method}`); setErr(null); setMutationNotice(null);
     try {
-      await fillBlanks(sid, col, method);
+      const newColumn = nextColumnName(col, method);
+      const response = await fillBlanks(sid, col, method, newColumn);
       await refresh();
+      setMutationNotice(
+        `${col} korundu; ${response.data.column} oluşturuldu ve ${response.data.n_filled} eksik değer tamamlandı.`
+      );
     } catch (e: unknown) {
       setErr(errText(e));
     } finally {
@@ -108,11 +140,12 @@ export default function MissingDataPanel() {
 
   const handleMICE = async () => {
     if (selected.length === 0) { setErr("Select columns to impute"); return; }
-    setMiceLoading(true); setErr(null); setMiceResult(null);
+    setMiceLoading(true); setErr(null); setMutationNotice(null); setMiceResult(null);
     try {
       const res = await runMICE({
         session_id: sid, columns: selected, n_imputations: 1,
         max_iter: miceIter, random_state: miceSeed, mechanism: miceMechanism,
+        new_columns: true,
       });
       setMiceResult(res.data);
       await refresh();
@@ -125,7 +158,7 @@ export default function MissingDataPanel() {
 
   const pctClass = (pct: number) =>
     pct > 30 ? "bg-red-100 text-red-600" : pct > 10 ? "bg-amber-100 text-amber-600" : "bg-gray-100 text-gray-500";
-  const QuickBtn = ({ col, method, label, show }: { col: string; method: "__mean__" | "__median__" | "__mode__" | "__mice__"; label: string; show: boolean }) =>
+  const QuickBtn = ({ col, method, label, show }: { col: string; method: QuickMethod; label: string; show: boolean }) =>
     !show ? null : (
       <button
         onClick={() => quickFill(col, method)}
@@ -139,6 +172,7 @@ export default function MissingDataPanel() {
   return (
     <div className="space-y-5 max-w-4xl mx-auto p-4">
       {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">{err}</div>}
+      {mutationNotice && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700">{mutationNotice}</div>}
 
       {/* ── Overview — list ── */}
       <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -148,10 +182,22 @@ export default function MissingDataPanel() {
             <p className="text-[11px] text-gray-400 mt-0.5">Tick rows for MICE / comparison, or impute a single column inline.</p>
           </div>
           {missingInfo.length > 0 && (
-            <button onClick={() => setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name))}
-              className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
-              {selected.length === missingInfo.length ? "Clear all" : "Select all"}
-            </button>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                <span>Sort</span>
+                <select value={missingSort} onChange={(e) => setMissingSort(e.target.value as MissingSort)}
+                  className="border border-gray-300 rounded px-2 py-1 bg-white text-[10px] text-gray-600">
+                  <option value="missing-desc">Missing %: high to low</option>
+                  <option value="missing-asc">Missing %: low to high</option>
+                  <option value="name-asc">Name: A to Z</option>
+                  <option value="name-desc">Name: Z to A</option>
+                </select>
+              </label>
+              <button onClick={() => setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name))}
+                className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
+                {selected.length === missingInfo.length ? "Clear all" : "Select all"}
+              </button>
+            </div>
           )}
         </div>
         {missingInfo.length === 0 ? (
@@ -173,7 +219,7 @@ export default function MissingDataPanel() {
               </tr>
             </thead>
             <tbody>
-              {missingInfo.map((m) => (
+              {sortedMissingInfo.map((m) => (
                 <tr key={m.name} className={`border-b border-gray-50 ${selected.includes(m.name) ? "bg-indigo-50/40" : "hover:bg-gray-50"}`}>
                   <td className="px-3 py-1.5">
                     <input type="checkbox" checked={selected.includes(m.name)} onChange={() => toggle(m.name)} className="accent-indigo-500" />
@@ -274,7 +320,7 @@ export default function MissingDataPanel() {
             <div className="px-5 py-3.5 bg-indigo-50 border-b border-indigo-100">
               <h3 className="text-sm font-semibold text-indigo-800">PMM Imputation (selected columns)</h3>
               <p className="text-[11px] text-indigo-400 mt-0.5">
-                Fills the session with one Predictive-Mean-Matching completed dataset (single imputation). For variance-correct inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
+                Keeps each original column and creates a new imputed column. For variance-correct inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
               </p>
             </div>
             <div className="px-5 py-4 space-y-4">

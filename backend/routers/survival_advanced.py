@@ -23,6 +23,9 @@ class MICERequest(BaseModel):
     max_iter: int = 10
     random_state: int = 42
     mechanism: str = "unknown"  # unknown, MCAR, MAR, MNAR
+    # When true, keep the original columns and write imputed values to new
+    # "<col>_imp" columns instead of filling in place.
+    new_columns: bool = False
 
 
 @router.post("/mice")

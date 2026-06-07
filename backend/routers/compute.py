@@ -927,6 +927,9 @@ def delete_column(session_id: str, col_name: str):
 class FillBlanksRequest(BaseModel):
     column: str
     value: str  # fill value (will be cast to match column dtype)
+    # When set, the original column is left untouched and the filled result is
+    # written to this NEW column (the original is copied first, then imputed).
+    new_column: Optional[str] = None
 
 
 @router.post("/{session_id}/fill_blanks")
@@ -936,7 +939,15 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         raise HTTPException(status_code=404, detail=f"Column '{req.column}' not found")
 
     df = df.copy()
-    col = df[req.column]
+    # Write into a new column when requested (keeps the original intact); the
+    # rest of the routine operates on `target`.
+    target = _validate_col_name(req.new_column) if req.new_column else req.column
+    if req.new_column:
+        if target in df.columns:
+            raise HTTPException(status_code=422, detail=f"Column '{target}' already exists")
+        source_pos = list(df.columns).index(req.column)
+        df.insert(source_pos + 1, target, df[req.column].copy())
+    col = df[target]
     n_before = int(col.isna().sum() + (col.astype(str).str.strip() == "").sum())
 
     method_label = req.value
@@ -946,21 +957,21 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         num_col = pd.to_numeric(col, errors="coerce")
         fill_val = float(num_col.mean())
         method_label = f"mean ({fill_val:.2f})"
-        df[req.column] = num_col.fillna(fill_val)
+        df[target] = num_col.fillna(fill_val)
     elif req.value == "__median__":
         num_col = pd.to_numeric(col, errors="coerce")
         fill_val = float(num_col.median())
         method_label = f"median ({fill_val:.2f})"
-        df[req.column] = num_col.fillna(fill_val)
+        df[target] = num_col.fillna(fill_val)
     elif req.value == "__mode__":
         observed = col.dropna()
         observed = observed[observed.astype(str).str.strip() != ""]
         if observed.empty:
             raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no values to impute from.")
         fill_val = observed.mode().iloc[0]
-        df[req.column] = col.fillna(fill_val)
+        df[target] = col.fillna(fill_val)
         if col.dtype == object:
-            df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+            df.loc[df[target].astype(str).str.strip() == "", target] = fill_val
         method_label = f"most frequent ({fill_val})"
     elif req.value == "__mice__":
         coerced = pd.to_numeric(col, errors="coerce")
@@ -975,9 +986,9 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
             if mode.empty:
                 raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no values to impute from.")
             fill_val = mode.mode().iloc[0]
-            df[req.column] = col.fillna(fill_val)
+            df[target] = col.fillna(fill_val)
             if col.dtype == object:
-                df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+                df.loc[df[target].astype(str).str.strip() == "", target] = fill_val
             method_label = f"most frequent ({fill_val})"
         else:
             # Numeric → MICE using the other numeric feature columns that have
@@ -986,26 +997,26 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
             from sklearn.experimental import enable_iterative_imputer  # noqa
             from sklearn.impute import IterativeImputer
             work = df.copy()
-            work[req.column] = coerced
+            work[target] = coerced
             feat_cols = [c for c in work.select_dtypes(include="number").columns if work[c].notna().any()]
-            if req.column not in feat_cols:
-                feat_cols = [req.column, *feat_cols]
-            if len(feat_cols) >= 2 and work[req.column].notna().any():
+            if target not in feat_cols:
+                feat_cols = [target, *feat_cols]
+            if len(feat_cols) >= 2 and work[target].notna().any():
                 try:
                     imp = IterativeImputer(max_iter=10, random_state=42)
                     out = pd.DataFrame(imp.fit_transform(work[feat_cols]), columns=feat_cols, index=work.index)
-                    df[req.column] = out[req.column]
+                    df[target] = out[target]
                     method_label = "MICE (multiple imputation)"
                 except Exception:
                     med = coerced.median()
-                    df[req.column] = coerced.fillna(med)
+                    df[target] = coerced.fillna(med)
                     method_label = f"median fallback ({med:.2f})" if pd.notna(med) else "median fallback"
             else:
                 # Too few numeric features for chained equations → median.
                 med = coerced.median()
                 if pd.isna(med):
                     raise HTTPException(status_code=422, detail=f"Column '{req.column}' has no numeric values to impute from.")
-                df[req.column] = coerced.fillna(med)
+                df[target] = coerced.fillna(med)
                 method_label = f"median fallback ({med:.2f})"
     else:
         # Custom value — try numeric cast first
@@ -1016,16 +1027,21 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         except (ValueError, TypeError):
             fill_val = req.value
 
-        df[req.column] = col.fillna(fill_val)
+        df[target] = col.fillna(fill_val)
         if col.dtype == object:
-            df.loc[df[req.column].astype(str).str.strip() == "", req.column] = fill_val
+            df.loc[df[target].astype(str).str.strip() == "", target] = fill_val
 
-    n_after = int(df[req.column].isna().sum())
+    n_after = int(df[target].isna().sum())
     n_filled = n_before - n_after
 
     store.save(session_id, df)
-    store.log_action(session_id, "fill_blanks", {"column": req.column, "method": method_label, "n_filled": n_filled})
-    return {"column": req.column, "fill_value": method_label, "n_filled": n_filled}
+    store.log_action(session_id, "fill_blanks",
+                     {"column": req.column, "target": target, "method": method_label, "n_filled": n_filled})
+    result = _build_result(df, target)
+    result.update({"column": target, "source_column": req.column,
+                   "fill_value": method_label, "n_filled": n_filled,
+                   "new_column": bool(req.new_column)})
+    return result
 
 
 # ── 6b. Missing-data diagnostics (MCAR vs MAR heuristic) ────────────────────────

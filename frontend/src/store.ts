@@ -201,6 +201,7 @@ export const useStore = create<AppState>((set) => ({
   plotTheme: loadTheme(),
   table1Result: null,
   caseFilter: null,
+  dataVersion: 0,
   sessionHistory: [],
   logAction: (action, params) => set((state) => ({ sessionHistory: [...state.sessionHistory, { action, params }] })),
   clearHistory: () => set({ sessionHistory: [] }),
