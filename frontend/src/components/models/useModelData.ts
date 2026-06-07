@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { getSparklines } from "../../api";
-import type { Session } from "../../store";
+import { isNumericKind, type Session } from "../../store";
 
 export interface ModelData {
   numCols: string[];
@@ -16,7 +16,7 @@ export interface ModelData {
 /** Derived column metadata + async sparklines for the Models panel.
  * Extracted from ModelsPanel so the panel owns flow/UI, not data shaping. */
 export function useModelData(session: Session | null): ModelData {
-  const numCols = session ? session.columns.filter((c) => c.kind === "numeric").map((c) => c.name) : [];
+  const numCols = session ? session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name) : [];
   const allCols = session ? session.columns.map((c) => c.name) : [];
 
   const binaryCols = useMemo(() => {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import Plot from "../PlotComponent";
-import { useStore } from "../store";
+import { useStore, isCategoricalKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runSubgroupBar, getUniqueValues } from "../api";
 import PlotExporter from "./PlotExporter";
@@ -13,7 +13,7 @@ export default function SubgroupBarPanel() {
 
   if (!session) return null;
 
-  const catCols = session.columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const catCols = session.columns.filter((c) => isCategoricalKind(c.kind)).map((c) => c.name);
   const allCols = session.columns.map((c) => c.name);
 
   // States

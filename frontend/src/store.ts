@@ -1,9 +1,14 @@
 import { create } from "zustand";
 
+export type ColKind = "numeric" | "categorical" | "ordinal" | "text" | "date";
+
 export interface ColMeta {
   name: string;
   dtype: string;
-  kind: "numeric" | "categorical" | "text" | "date";
+  /** Measurement kind. `ordinal` = ordered categorical (numeric-coded): it is
+   *  eligible both where numeric and where categorical columns are, and lets
+   *  order-aware tests (Spearman, trend, Jonckheere, ordinal logistic) detect it. */
+  kind: ColKind;
   label?: string;
   description?: string;
   units?: string;
@@ -19,6 +24,21 @@ export interface ColMeta {
 /** Columns eligible for analysis (not flagged "exclude from analysis"). */
 export const analysisCols = (cols: ColMeta[]): ColMeta[] =>
   cols.filter((c) => !c.analysis_excluded);
+
+/** Ordinal counts as quantitative — usable wherever a numeric column is. */
+export const isNumericKind = (k: ColKind): boolean => k === "numeric" || k === "ordinal";
+
+/** Ordinal counts as categorical too — usable wherever a categorical column is. */
+export const isCategoricalKind = (k: ColKind): boolean => k === "categorical" || k === "ordinal";
+
+/** Human-readable kind label (SPSS-flavoured). */
+export const KIND_LABEL: Record<ColKind, string> = {
+  numeric: "Numeric",
+  categorical: "Categorical",
+  ordinal: "Ordered Categorical",
+  text: "Text",
+  date: "Date",
+};
 
 export interface Session {
   session_id: string;

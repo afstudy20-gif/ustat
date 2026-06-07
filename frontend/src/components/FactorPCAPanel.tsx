@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runFactorPCA } from "../api";
 import TitledPlot from "./TitledPlot";
@@ -16,7 +16,7 @@ export default function FactorPCAPanel() {
   const biplotRef = useRef<any>(null);
 
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   // States
   const [items, setItems] = useState<string[]>([]);

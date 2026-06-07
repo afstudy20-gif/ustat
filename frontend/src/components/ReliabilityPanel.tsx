@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { runCronbach } from "../api";
 import ResultExporter from "./ResultExporter";
 
 export default function ReliabilityPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   const [items, setItems] = useState<string[]>([]);
   const [result, setResult] = useState<any>(null);

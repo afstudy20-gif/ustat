@@ -15,7 +15,7 @@
  */
 
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { runDCA } from "../api";
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
@@ -55,9 +55,9 @@ export default function DecisionCurvePanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const numericCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numericCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
   // Binary outcome can be a 0/1 numeric or a 2-level categorical column.
-  const binaryCols = columns.filter((c) => c.kind === "categorical" || c.kind === "numeric").map((c) => c.name);
+  const binaryCols = columns.filter((c) => isCategoricalKind(c.kind) || isNumericKind(c.kind)).map((c) => c.name);
   const dcaPlotRef = useRef<any>(null);
 
   const canRun = sid && (

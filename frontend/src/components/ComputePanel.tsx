@@ -9,7 +9,7 @@
  */
 
 import { useState, useRef, useEffect } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import type { ColMeta } from "../store";
 import {
   computeFormula,
@@ -1200,7 +1200,7 @@ export default function ComputePanel() {
   };
 
   const allCols = session.columns;
-  const numCols = allCols.filter((c) => c.kind === "numeric");
+  const numCols = allCols.filter((c) => isNumericKind(c.kind));
   const computedCols = allCols.filter((c) => computedNames.includes(c.name));
   const sid = session.session_id;
 

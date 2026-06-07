@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { runMICE } from "../api";
 import ResultExporter from "./ResultExporter";
 import api from "../api";
@@ -8,7 +8,7 @@ import { CleaningTab } from "./CleaningTab";
 export default function MissingDataPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
-  const numCols = columns.filter((c) => c.kind === "numeric");
+  const numCols = columns.filter((c) => isNumericKind(c.kind));
   const sid = session?.session_id ?? "";
 
   // Missing column detection

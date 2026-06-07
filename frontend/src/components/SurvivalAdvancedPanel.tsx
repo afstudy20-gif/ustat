@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
-import { useStore, analysisCols } from "../store";
+import { useStore, analysisCols, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti, runCoxModelSpecs } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
@@ -271,11 +271,18 @@ const SURV_METHODS: { id: SurvMethod; title: string; desc: string }[] = [
   { id: "evalue",      title: "E-value",             desc: "Unmeasured confounding" },
 ];
 
+/** Ordinal (ordered categorical) is eligible wherever numeric OR categorical is. */
+function kindMatches(kinds: string[] | undefined, kind: string): boolean {
+  if (!kinds) return true;
+  if (kinds.includes(kind)) return true;
+  return kind === "ordinal" && (kinds.includes("numeric") || kinds.includes("categorical"));
+}
+
 function VarSelect({ label, value, onChange, columns, kinds }: {
   label: string; value: string; onChange: (v: string) => void;
   columns: { name: string; kind: string }[]; kinds?: string[];
 }) {
-  const filtered = kinds ? columns.filter((c) => kinds.includes(c.kind)) : columns;
+  const filtered = kinds ? columns.filter((c) => kindMatches(kinds, c.kind)) : columns;
   return (
     <label className="flex flex-col gap-1">
       <span className="text-xs text-gray-500 font-medium">{label}</span>
@@ -293,7 +300,7 @@ function MultiSelect({ label, columns, selected, onChange, kinds, excludeNames }
   selected: string[]; onChange: (v: string[]) => void;
   kinds?: string[]; excludeNames?: string[];
 }) {
-  const filtered = (kinds ? columns.filter((c) => kinds.includes(c.kind)) : columns)
+  const filtered = (kinds ? columns.filter((c) => kindMatches(kinds, c.kind)) : columns)
     .filter((c) => !(excludeNames ?? []).includes(c.name));
   const toggle = (name: string) =>
     onChange(selected.includes(name) ? selected.filter((c) => c !== name) : [...selected, name]);
@@ -1477,7 +1484,7 @@ export default function SurvivalAdvancedPanel() {
             <button
               disabled={kmScanLoading}
               onClick={async () => {
-                const catCols = pickCols.filter((c) => c.kind === "categorical").map((c) => c.name);
+                const catCols = pickCols.filter((c) => isCategoricalKind(c.kind)).map((c) => c.name);
                 if (catCols.length === 0) return;
                 setKmScanLoading(true);
                 const results: any[] = [];

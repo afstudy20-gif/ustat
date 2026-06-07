@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runArima, runDecompose, runStationarity } from "../api";
 import { Tip } from "./Tip";
@@ -21,7 +21,7 @@ export default function TimeSeriesPanel() {
 
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
-  const numCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   const [mode, setMode] = useState<Mode>("arima");
   const [valueCol, setValueCol] = useState(numCols[0] ?? "");

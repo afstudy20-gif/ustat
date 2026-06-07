@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { runNonInferiority, getUniqueValues } from "../api";
 import { Tip } from "./Tip";
 import ResultExporter from "./ResultExporter";
@@ -8,7 +8,7 @@ export default function NonInferiorityPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
-  const numCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   const [outcomeType, setOutcomeType] = useState<"binary" | "continuous">("binary");
   const [outcomeCol, setOutcomeCol] = useState("");

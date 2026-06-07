@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
 import TitledPlot from "./TitledPlot";
@@ -15,8 +15,8 @@ export default function BayesianPanel() {
   const plotRef = useRef<any>(null);
 
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 
 
   // States

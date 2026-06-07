@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import Plot from "../PlotComponent";
 import TitledPlot from "./TitledPlot";
 import PlotExporter from "./PlotExporter";
-import { useStore, PALETTES } from "../store";
+import { useStore, PALETTES, isNumericKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
@@ -1148,7 +1148,7 @@ export default function CorrelationPanel() {
   if (!session) return null;
 
   const numColumns = session.columns
-    .filter((c) => c.kind === "numeric" && !c.analysis_excluded)
+    .filter((c) => isNumericKind(c.kind) && !c.analysis_excluded)
     .map((c) => c.name);
   const allColumns = session.columns
     .filter((c) => !c.analysis_excluded)

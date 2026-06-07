@@ -183,9 +183,10 @@ export default function DataDictionaryPanel() {
                     <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
                       col.kind === "numeric" ? "bg-blue-100 text-blue-700" :
                       col.kind === "categorical" ? "bg-orange-100 text-orange-700" :
+                      col.kind === "ordinal" ? "bg-teal-100 text-teal-700" :
                       col.kind === "date" ? "bg-purple-100 text-purple-700" :
                       "bg-gray-100 text-gray-500"
-                    }`}>{col.kind === "numeric" ? "num" : col.kind === "categorical" ? "cat" : col.kind === "date" ? "date" : "txt"}</span>
+                    }`}>{col.kind === "numeric" ? "num" : col.kind === "categorical" ? "cat" : col.kind === "ordinal" ? "ord" : col.kind === "date" ? "date" : "txt"}</span>
                   </td>
                   <td className="px-1 py-1">
                     <input className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-indigo-400 rounded px-2 py-0.5 text-xs focus:outline-none"

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
-import { useStore, PALETTES } from "../store";
+import { useStore, PALETTES, isNumericKind } from "../store";
 import { runROC, runROCCompare, runROCMultiCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
@@ -161,7 +161,7 @@ export default function ROCPanel() {
   const showGrid = useStore((s) => s.showGrid);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const allCols = session.columns.filter((c) => !c.analysis_excluded).map((c) => c.name);
 
   // Binary columns (≤ 2 unique non-null values, both ∈ {0, 1}) — ROC outcome

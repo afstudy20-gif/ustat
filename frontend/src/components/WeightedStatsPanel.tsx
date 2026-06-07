@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { runWeightedDescriptive } from "../api";
 import { Tip } from "./Tip";
 import ResultExporter from "./ResultExporter";
@@ -8,8 +8,8 @@ export default function WeightedStatsPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
-  const numCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
-  const catCols = columns.filter((c) => c.kind === "categorical").map((c) => c.name);
+  const numCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
+  const catCols = columns.filter((c) => isCategoricalKind(c.kind)).map((c) => c.name);
 
   const [weightCol, setWeightCol] = useState("");
   const [valueCols, setValueCols] = useState<string[]>([]);

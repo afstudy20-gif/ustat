@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runRandomForest, runGradientBoosting } from "../api";
 import { Tip } from "./Tip";
@@ -26,7 +26,7 @@ export default function MLPanel() {
 
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
-  const numCols = columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   const [model, setModel] = useState<ModelKind>("random_forest");
   const [task, setTask] = useState<Task>("auto");

@@ -219,8 +219,8 @@ async def export_dataset(
 
             if kind == "date":
                 variable_measure[col] = "scale"
-            elif kind in ("categorical", "text"):
-                variable_measure[col] = "nominal"
+            elif kind in ("categorical", "text", "ordinal"):
+                variable_measure[col] = "ordinal" if kind == "ordinal" else "nominal"
                 if pd.api.types.is_numeric_dtype(df_sav[col]):
                     if user_labels:
                         # Use custom value labels: convert keys to float for SPSS
@@ -597,7 +597,7 @@ async def name_suggestions(session_id: str):
 
 class KindOverrideRequest(BaseModel):
     column: str
-    kind: str  # "numeric" | "categorical" | "text" | "date" | "boolean"
+    kind: str  # "numeric" | "categorical" | "ordinal" | "text" | "date" | "boolean"
 
 
 @router.post("/{session_id}/kind")
@@ -608,7 +608,7 @@ async def set_column_kind(session_id: str, body: KindOverrideRequest):
         raise HTTPException(status_code=404, detail="Session not found")
     if body.column not in df.columns:
         raise HTTPException(status_code=404, detail=f"Column '{body.column}' not in session")
-    if body.kind not in ("numeric", "categorical", "text", "date", "boolean"):
+    if body.kind not in ("numeric", "categorical", "ordinal", "text", "date", "boolean"):
         raise HTTPException(status_code=422, detail=f"Invalid kind '{body.kind}'")
 
     store.save_kind_overrides(session_id, {body.column: body.kind})

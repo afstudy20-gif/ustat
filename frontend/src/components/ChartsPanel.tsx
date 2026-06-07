@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
@@ -12,8 +12,8 @@ export default function ChartsPanel() {
   const td       = useTraceDefaults();
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 
   const [chartType, setChartType] = usePersistedPanelState<string>("charts", "chartType", "histogram");
   const [x, setX] = usePersistedPanelState<string>("charts", "x", numCols[0] ?? "");

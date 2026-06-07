@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra, runMancova } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -259,8 +259,8 @@ export default function HypothesisPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 
   const [test, setTest] = usePersistedPanelState<string>("hypothesis", "test", "ttest_1sample");
   const [col, setCol] = usePersistedPanelState<string>("hypothesis", "col", numCols[0] ?? "");

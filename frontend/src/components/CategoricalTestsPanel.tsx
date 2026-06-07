@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel, runCochranArmitage } from "../api";
 // ResultExporter available via ResultCard pattern
@@ -90,8 +90,8 @@ function ResultCard({ result }: { result: any }) {
 export default function CategoricalTestsPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind === "categorical" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const binCols = [...catCols, ...numCols]; // binary cols could be either
 
   const [test, setTest] = usePersistedPanelState<string>("categorical_tests", "test", "binomial");

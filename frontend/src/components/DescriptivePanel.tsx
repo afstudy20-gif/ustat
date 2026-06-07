@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useStore, PALETTES } from "../store";
+import { useStore, PALETTES, isNumericKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePalette } from "../plotStyle";
 import api from "../api";
@@ -985,8 +985,8 @@ export default function DescriptivePanel() {
 
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name);
-  const catCols = session.columns.filter((c) => c.kind !== "numeric" && !c.analysis_excluded).map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
+  const catCols = session.columns.filter((c) => !isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 
   const filtered = session.columns.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase())

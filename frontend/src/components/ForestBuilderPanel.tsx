@@ -2,7 +2,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import ThreeCol from "./ThreeCol";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -143,7 +143,7 @@ export default function ForestBuilderPanel() {
   const [mapExtra, setMapExtra] = useState("");
 
   const allCols = useMemo(() => session?.columns?.map((c) => c.name) ?? [], [session]);
-  const numCols = useMemo(() => session?.columns?.filter((c) => c.kind === "numeric").map((c) => c.name) ?? [], [session]);
+  const numCols = useMemo(() => session?.columns?.filter((c) => isNumericKind(c.kind)).map((c) => c.name) ?? [], [session]);
 
   useEffect(() => {
     if (!session || !session.columns) return;
@@ -159,28 +159,28 @@ export default function ForestBuilderPanel() {
     // Auto-map Est
     const estCol = cols.find((c) => {
       const n = c.name.toLowerCase();
-      return c.kind === "numeric" && (n === "est" || n === "hr" || n === "or" || n === "rr" || n === "estimate" || n === "coef" || n === "mean" || n === "beta");
-    })?.name || cols.find((c) => c.kind === "numeric")?.name || "";
+      return isNumericKind(c.kind) && (n === "est" || n === "hr" || n === "or" || n === "rr" || n === "estimate" || n === "coef" || n === "mean" || n === "beta");
+    })?.name || cols.find((c) => isNumericKind(c.kind))?.name || "";
     setMapEst(estCol);
 
     // Auto-map CI Low
     const ciLowCol = cols.find((c) => {
       const n = c.name.toLowerCase();
-      return c.kind === "numeric" && (n.includes("low") || n.includes("lower") || n.includes("min") || n === "ci_l" || n === "cilow");
+      return isNumericKind(c.kind) && (n.includes("low") || n.includes("lower") || n.includes("min") || n === "ci_l" || n === "cilow");
     })?.name || "";
     setMapCiLow(ciLowCol);
 
     // Auto-map CI High
     const ciHighCol = cols.find((c) => {
       const n = c.name.toLowerCase();
-      return c.kind === "numeric" && (n.includes("high") || n.includes("upper") || n.includes("max") || n === "ci_h" || n === "cihigh");
+      return isNumericKind(c.kind) && (n.includes("high") || n.includes("upper") || n.includes("max") || n === "ci_h" || n === "cihigh");
     })?.name || "";
     setMapCiHigh(ciHighCol);
 
     // Auto-map p-value
     const pCol = cols.find((c) => {
       const n = c.name.toLowerCase();
-      return c.kind === "numeric" && (n === "p" || n === "p_val" || n === "pval" || n === "pvalue" || n.includes("sig"));
+      return isNumericKind(c.kind) && (n === "p" || n === "p_val" || n === "pval" || n === "pvalue" || n.includes("sig"));
     })?.name || "";
     setMapP(pCol);
 

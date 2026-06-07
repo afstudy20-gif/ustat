@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { runPairedTTest, runWilcoxonSR, runFriedman, runRMAnova, runMixedAnova } from "../api";
 import ResultExporter from "./ResultExporter";
 
@@ -200,7 +200,7 @@ export default function RepeatedMeasuresPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
 
-  const numCols = session.columns.filter((c) => c.kind === "numeric").map((c) => c.name);
+  const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
   const allCols = session.columns.map((c) => c.name);
 
   const [test, setTest] = useState<string>("paired_ttest");

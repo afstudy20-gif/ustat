@@ -1,7 +1,7 @@
 import { useState, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import TitledPlot from "./TitledPlot";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { runRCS, runCoxRCS } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import ResultExporter from "./ResultExporter";
@@ -243,7 +243,7 @@ export default function RCSPanel() {
   // Columns flagged "exclude from analysis" (e.g. NAME, row-id) never appear
   // in any picker, including covariates.
   const numCols = useMemo(
-    () => session.columns.filter((c) => c.kind === "numeric" && !c.analysis_excluded).map((c) => c.name),
+    () => session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name),
     [session.columns],
   );
   const binaryCols = useMemo(

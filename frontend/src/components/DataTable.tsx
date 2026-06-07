@@ -8,17 +8,18 @@ import DataDictionaryPanel from "./DataDictionaryPanel";
 
 // ── Kind cycling ───────────────────────────────────────────────────────────────
 
-const KIND_CYCLE: ColMeta["kind"][] = ["numeric", "categorical", "text", "date"];
+const KIND_CYCLE: ColMeta["kind"][] = ["numeric", "categorical", "ordinal", "text", "date"];
 
 const KIND_STYLE: Record<string, string> = {
   numeric:     "bg-blue-100 text-blue-700 border-blue-300 hover:bg-blue-200",
   categorical: "bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-200",
+  ordinal:     "bg-teal-100 text-teal-700 border-teal-300 hover:bg-teal-200",
   text:        "bg-gray-100 text-gray-500 border-gray-300 hover:bg-gray-200",
   date:        "bg-purple-100 text-purple-700 border-purple-300 hover:bg-purple-200",
 };
 
 const KIND_LABEL: Record<string, string> = {
-  numeric: "num", categorical: "cat", text: "txt", date: "date",
+  numeric: "num", categorical: "cat", ordinal: "ord", text: "txt", date: "date",
 };
 
 import { SelectCasesModal } from "./datatable/SelectCasesModal";

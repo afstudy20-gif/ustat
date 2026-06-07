@@ -7,7 +7,7 @@
  * + All charts respect the global plot theme (usePlotLayout / usePalette)
  */
 import { useState, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import {
   runPolynomial, runLMM, runGamma, runNegBinom, runLinearDiag, runMelt, refreshSession,
@@ -854,7 +854,7 @@ export default function VisualModelPanel() {
   const session = useStore(s => s.session);
   if (!session) return null;
 
-  const numCols = session.columns.filter(c => c.kind === "numeric").map(c => c.name);
+  const numCols = session.columns.filter(c => isNumericKind(c.kind)).map(c => c.name);
   const allCols = session.columns.map(c => c.name);
   const sid = session.session_id;
 
