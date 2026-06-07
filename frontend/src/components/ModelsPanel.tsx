@@ -4,7 +4,7 @@ import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
-import { PALETTES } from "../store";
+import { PALETTES, type ColMeta } from "../store";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { CoefTable, ORTable, ForestPlot, PredictionPanel, CoefDetailPanel, ModelSummaryTable } from "./models/resultViews";
 import CoxHRTable from "./models/CoxHRTable";
@@ -116,6 +116,9 @@ export default function ModelsPanel() {
   // HR Table (Cox uni/parsimonious/full): subset of predictors that enter the
   // parsimonious (middle) model column.
   const [parsimonious, setParsimonious] = usePersistedPanelState<string[]>("models", "parsimonious", []);
+  // HR Table: per-predictor reference level (value code) for categorical
+  // predictors. Default (omitted) = lowest code. e.g. LDL-C ref = ">130".
+  const [references, setReferences] = usePersistedPanelState<Record<string, string>>("models", "references", {});
   // Pairwise interaction terms applied to linear / logistic / Cox / poisson.
   // Stored as [colA, colB]; rendered as a small picker below the predictor list.
   const [glmInteractions, setGlmInteractions] = usePersistedPanelState<Array<[string, string]>>("models", "glmInteractions", []);
@@ -160,7 +163,14 @@ export default function ModelsPanel() {
       else if (model === "firth_ortable") res = await runLogisticTable({ session_id: sid, outcome, predictors, scale_factors: sf, selection, imputation, use_firth: true });
       else if (model === "poisson") res = await runPoisson({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE });
       else if (model === "km") res = await runKM({ session_id: sid, duration_col: durationCol, event_col: eventCol, group_col: groupCol || undefined, stratify_col: stratifyCol || undefined, imputation });
-      else if (model === "hrtable") res = await runCoxUniMulti({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, parsimonious: parsimonious.filter((p) => predictors.includes(p)) });
+      else if (model === "hrtable") {
+        const refs = Object.fromEntries(Object.entries(references).filter(([col]) => predictors.includes(col)));
+        res = await runCoxUniMulti({
+          session_id: sid, duration_col: durationCol, event_col: eventCol, predictors,
+          parsimonious: parsimonious.filter((p) => predictors.includes(p)),
+          references: Object.keys(refs).length ? refs : undefined,
+        });
+      }
       else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation, interactions });
       setResult(res.data);
     } catch (e: any) {
@@ -201,6 +211,11 @@ export default function ModelsPanel() {
   const toggleParsimonious = (col: string) => {
     setParsimonious(parsimonious.includes(col) ? parsimonious.filter((c) => c !== col) : [...parsimonious, col]);
   };
+  const setReference = (col: string, code: string) => {
+    setReferences({ ...references, [col]: code });
+  };
+  // Column lookup for HR Table reference pickers (value labels per level).
+  const colByName: Record<string, ColMeta> = Object.fromEntries(session.columns.map((c) => [c.name, c]));
 
   return (
     <div className="flex gap-4">
@@ -265,7 +280,7 @@ export default function ModelsPanel() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-xs text-gray-400">Predictors</label>
-                  <button onClick={() => { setPredictors([]); setParsimonious([]); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
+                  <button onClick={() => { setPredictors([]); setParsimonious([]); setReferences({}); setResult(null); }} className="text-[10px] px-1.5 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-red-50 hover:text-red-500 hover:border-red-300 transition-colors">Clear all</button>
                 </div>
                 <div className="mb-2 text-[10px] text-indigo-600 bg-indigo-50 border border-indigo-200 rounded px-2 py-1 leading-snug">
                   Tick a predictor to include it. The <strong>★</strong> box marks which predictors
@@ -285,32 +300,56 @@ export default function ModelsPanel() {
                     .map((c) => {
                       const checked = predictors.includes(c);
                       const spk = sparklines[c];
+                      // Categorical predictors expose value labels → offer a
+                      // reference-level picker (e.g. LDL-C ref = ">130").
+                      const vl = colByName[c]?.value_labels;
+                      const levels = vl
+                        ? Object.keys(vl).sort((a, b) => (Number(a) || 0) - (Number(b) || 0))
+                        : [];
+                      const showRef = checked && levels.length >= 2;
                       return (
-                        <div key={c} className="flex items-center gap-2 text-sm">
-                          <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                            <input type="checkbox" checked={checked} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
-                            <span className="text-gray-700 truncate flex-1">{c}</span>
-                            {(missingCounts[c] ?? 0) > 0 && (
-                              <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200 flex-shrink-0"
-                                title={`${missingCounts[c]} missing values`}>
-                                {missingCounts[c]}✕
-                              </span>
-                            )}
-                            {spk && <SparklineMini data={spk.data} type={spk.type} />}
-                          </label>
-                          <label
-                            className={`flex items-center gap-0.5 text-[10px] flex-shrink-0 ${checked ? "cursor-pointer text-amber-600" : "opacity-30"}`}
-                            title="Include in the parsimonious model column"
-                          >
-                            <input
-                              type="checkbox"
-                              disabled={!checked}
-                              checked={checked && parsimonious.includes(c)}
-                              onChange={() => toggleParsimonious(c)}
-                              className="accent-amber-500"
-                            />
-                            ★
-                          </label>
+                        <div key={c} className="space-y-0.5">
+                          <div className="flex items-center gap-2 text-sm">
+                            <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                              <input type="checkbox" checked={checked} onChange={() => togglePredictor(c)} className="accent-indigo-500" />
+                              <span className="text-gray-700 truncate flex-1">{c}</span>
+                              {(missingCounts[c] ?? 0) > 0 && (
+                                <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-amber-100 text-amber-600 border border-amber-200 flex-shrink-0"
+                                  title={`${missingCounts[c]} missing values`}>
+                                  {missingCounts[c]}✕
+                                </span>
+                              )}
+                              {spk && <SparklineMini data={spk.data} type={spk.type} />}
+                            </label>
+                            <label
+                              className={`flex items-center gap-0.5 text-[10px] flex-shrink-0 ${checked ? "cursor-pointer text-amber-600" : "opacity-30"}`}
+                              title="Include in the parsimonious model column"
+                            >
+                              <input
+                                type="checkbox"
+                                disabled={!checked}
+                                checked={checked && parsimonious.includes(c)}
+                                onChange={() => toggleParsimonious(c)}
+                                className="accent-amber-500"
+                              />
+                              ★
+                            </label>
+                          </div>
+                          {showRef && (
+                            <div className="flex items-center gap-1 ml-5">
+                              <span className="text-gray-400 text-[10px] flex-shrink-0">ref:</span>
+                              <select
+                                value={references[c] ?? levels[0]}
+                                onChange={(e) => setReference(c, e.target.value)}
+                                className="select text-[11px] py-0.5 flex-1 min-w-0"
+                                title="Reference category — every other level is compared against this one"
+                              >
+                                {levels.map((code) => (
+                                  <option key={code} value={code}>{vl?.[code] ?? code}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
