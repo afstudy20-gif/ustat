@@ -111,6 +111,10 @@ export default function CategoricalTestsPanel() {
   const isTwoProp = test === "two_prop";
   const isCA = test === "cochran_armitage";
   const needsNull = test === "binomial" || test === "one_prop";
+  // Ordinal exposure + binary outcome → Cochran-Armitage tests a dose-response
+  // trend that a plain proportion/χ² test ignores.
+  const ordinalNames = new Set(session.columns.filter((c) => c.kind === "ordinal").map((c) => c.name));
+  const suggestTrend = !isCA && [col, col2, groupCol].some((v) => ordinalNames.has(v));
 
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
@@ -147,6 +151,17 @@ export default function CategoricalTestsPanel() {
             </div>
           ))}
         </div>
+        {suggestTrend && (
+          <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1.5 leading-snug flex items-start gap-1.5">
+            <span className="flex-1">
+              Ordinal variable selected — for an ordered exposure vs a binary outcome,
+              <strong> Cochran-Armitage trend</strong> tests dose-response that χ²/proportion tests miss.
+            </span>
+            <button onClick={() => { setTest("cochran_armitage"); setResult(null); }} className="flex-shrink-0 underline hover:text-teal-900">
+              Use trend
+            </button>
+          </div>
+        )}
         {g && (
           <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
             <p className="text-[10px] font-bold text-indigo-900 uppercase">When to use</p>

@@ -294,6 +294,10 @@ export default function HypothesisPanel() {
   const isAncova = test === "ancova";
   const isMancova = test === "mancova";
   const isTwoWay = test === "two_way";
+  // Ordinal grouping → an ordered-alternative trend test (Jonckheere) is more
+  // powerful than Kruskal/ANOVA which ignore the group ordering.
+  const groupIsOrdinal = session.columns.some((c) => c.name === groupCol && c.kind === "ordinal");
+  const suggestJonckheere = groupIsOrdinal && (test === "kruskal" || test === "anova");
 
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
@@ -387,6 +391,17 @@ export default function HypothesisPanel() {
               <select className="select w-full" value={groupCol} onChange={(e) => setGroupCol(e.target.value)}>
                 {catCols.map((c) => <option key={c}>{c}</option>)}
               </select>
+              {suggestJonckheere && (
+                <div className="mt-1 text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1.5 leading-snug flex items-start gap-1.5">
+                  <span className="flex-1">
+                    Ordinal group — for ordered groups, <strong>Jonckheere-Terpstra</strong> tests a
+                    monotonic trend (Kruskal-Wallis only tests "any difference").
+                  </span>
+                  <button onClick={() => { setTest("jonckheere"); setResult(null); }} className="flex-shrink-0 underline hover:text-teal-900">
+                    Use Jonckheere
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

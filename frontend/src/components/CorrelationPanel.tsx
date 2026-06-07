@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import TitledPlot from "./TitledPlot";
 import PlotExporter from "./PlotExporter";
@@ -83,6 +83,14 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
   const [vars, setVars] = usePersistedPanelState<string[]>("correlation_pairwise", "vars", columns.slice(0, Math.min(4, columns.length)));
   const [varFilter, setVarFilter] = useState("");
   const [method, setMethod] = usePersistedPanelState<string>("correlation_pairwise", "method", "auto");
+  // Detect ordinal variables among the selection → Spearman is the right
+  // measure for ordered data (Pearson assumes interval scale).
+  const sessionCols = useStore((s) => s.session?.columns);
+  const ordinalNames = useMemo(
+    () => new Set((sessionCols ?? []).filter((c) => c.kind === "ordinal").map((c) => c.name)),
+    [sessionCols],
+  );
+  const hasOrdinalSelected = vars.some((v) => ordinalNames.has(v));
   const [results, setResults] = useState<PairResult[]>([]);
   const [activeIdx, setActiveIdx] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -183,6 +191,18 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
           </label>
         ))}
       </div>
+
+      {hasOrdinalSelected && method !== "spearman" && (
+        <div className="text-[10px] text-teal-700 bg-teal-50 border border-teal-200 rounded px-2 py-1.5 leading-snug flex items-start gap-1.5">
+          <span className="flex-1">
+            Ordinal (ordered categorical) variable selected — <strong>Spearman ρ</strong> is
+            recommended for ordered data; Pearson assumes an interval scale.
+          </span>
+          <button onClick={() => setMethod("spearman")} className="flex-shrink-0 underline hover:text-teal-900">
+            Use Spearman
+          </button>
+        </div>
+      )}
 
       <button className="btn-primary w-full mt-2" onClick={run} disabled={loading || vars.length < 2}>
         {loading ? "Computing…" : `Compute ${nPairs > 1 ? `${nPairs} Pairs` : "Pair"}`}
