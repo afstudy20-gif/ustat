@@ -332,6 +332,82 @@ async def table_docx(req: TableDocxRequest):
     )
 
 
+# ── Generic styled-table DOCX export ────────────────────────────────────────
+
+class StyledTableRequest(BaseModel):
+    title: Optional[str] = None
+    caption: Optional[str] = None
+    columns: List[str]
+    rows: List[List[str]]
+    filename: Optional[str] = None
+
+
+def _style_cell(cell, *, bold: bool = False, left: bool = False, size: int = 10):
+    for paragraph in cell.paragraphs:
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT if left else WD_ALIGN_PARAGRAPH.CENTER
+        for run in paragraph.runs:
+            run.bold = bold
+            run.font.size = Pt(size)
+            run.font.name = "Times New Roman"
+
+
+@router.post("/styled_table")
+async def styled_table(req: StyledTableRequest):
+    """Render an arbitrary table (columns + rows) as a publication-styled Word
+    document. Backs the generic 'Export table → Word' action across panels."""
+    if not HAS_DOCX:
+        raise HTTPException(
+            status_code=501,
+            detail="python-docx is not installed. Run: pip install python-docx",
+        )
+    if not req.columns:
+        raise HTTPException(status_code=422, detail="No columns supplied.")
+
+    doc = Document()
+
+    if req.title:
+        title = doc.add_paragraph()
+        title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        run = title.add_run(req.title)
+        run.bold = True
+        run.font.size = Pt(12)
+        run.font.name = "Times New Roman"
+
+    n_cols = len(req.columns)
+    table = doc.add_table(rows=1, cols=n_cols)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.style = "Table Grid"
+
+    hdr = table.rows[0]
+    for i, text in enumerate(req.columns):
+        hdr.cells[i].text = str(text)
+        _style_cell(hdr.cells[i], bold=True, left=(i == 0))
+
+    for row in req.rows:
+        cells = table.add_row().cells
+        for i in range(n_cols):
+            text = row[i] if i < len(row) else ""
+            cells[i].text = "" if text is None else str(text)
+            _style_cell(cells[i], left=(i == 0))
+
+    if req.caption:
+        cap = doc.add_paragraph()
+        cap_run = cap.add_run(req.caption)
+        cap_run.font.size = Pt(9)
+        cap_run.font.name = "Times New Roman"
+        cap_run.italic = True
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    fname = (req.filename or "table").replace('"', "") + ".docx"
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 # ── Figure Caption Generator ────────────────────────────────────────────────
 
 class FigureCaptionRequest(BaseModel):

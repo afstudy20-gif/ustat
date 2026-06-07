@@ -1,6 +1,12 @@
 import ResultExporter from "../ResultExporter";
+import { StyledTableExporter } from "../StyledTableExporter";
+import type { StyledTableData } from "../../lib/styledTable";
 import { fmtP } from "../../lib/format";
 import { adjustP, MiniNormalSVG, SigBar } from "./shared";
+
+/** Publication p-value: "p<0.001" / "p=0.03". */
+const fmtPubP = (p: number | null | undefined): string =>
+  p == null || !isFinite(p) ? "" : p < 0.001 ? "p<0.001" : `p=${p < 0.1 ? p.toFixed(3) : p.toFixed(2)}`;
 
 export function CoefTable({
   coefs, hrMode = false, allColumns = [], selectedIdx = null, onSelect, nullHyp = "eq",
@@ -53,11 +59,33 @@ export function CoefTable({
   });
   const coefTitle = isPoisson ? "Poisson_Coefficients" : isLogistic ? "Logistic_Coefficients" : hrMode ? "Cox_Coefficients" : "Linear_Coefficients";
 
+  // ── Publication-styled export (effect + 95% CI + p in one cell) ───────────
+  const effLabel = isPoisson ? "IRR" : isLogistic ? "OR" : hrMode ? "HR" : "Estimate";
+  const effCell = (c: any): string => {
+    const [v, lo, hi] = isPoisson
+      ? [c.irr, c.irr_ci_low, c.irr_ci_high]
+      : isLogistic
+        ? [c.odds_ratio, c.or_ci_low, c.or_ci_high]
+        : hrMode
+          ? [c.hr, c.hr_ci_low, c.hr_ci_high]
+          : [c.estimate, c.ci_low, c.ci_high];
+    if (v == null) return "—";
+    const ci = lo != null && hi != null ? ` (${lo.toFixed(2)}–${hi.toFixed(2)})` : "";
+    return `${v.toFixed(2)}${ci}`;
+  };
+  const styledExport = (): StyledTableData => ({
+    title: coefTitle.replace(/_/g, " "),
+    columns: ["Variable", `${effLabel} (95% CI)`, "p"],
+    rows: coefs.map((c: any) => [c.variable, effCell(c), fmtPubP(c.p)]),
+    filename: coefTitle,
+  });
+
   // ── Poisson table ────────────────────────────────────────────────────────
   if (isPoisson) {
     return (
       <div>
         <div className="flex justify-end mb-1">
+          <StyledTableExporter data={styledExport} />
           <ResultExporter title={coefTitle} headers={coefExportHeaders} rows={coefExportRows} />
         </div>
       <div className="overflow-auto rounded border border-gray-200 mt-3">
@@ -107,6 +135,7 @@ export function CoefTable({
     return (
       <div>
         <div className="flex justify-end mb-1">
+          <StyledTableExporter data={styledExport} />
           <ResultExporter title={coefTitle} headers={coefExportHeaders} rows={coefExportRows} />
         </div>
       <div className="overflow-auto rounded border border-gray-200 mt-3">
@@ -227,11 +256,29 @@ export function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
     r.multi_p?.toFixed(6) ?? "",
   ]);
 
+  // Publication-styled export: OR (95% CI), p merged per model.
+  const orCell = (or: number | null, lo: number | null, hi: number | null, p: number | null): string =>
+    or == null ? "—" : `${fmtOR(or, lo, hi)}${p != null ? `, ${fmtPubP(p)}` : ""}`;
+  const styledExport = (): StyledTableData => ({
+    title: `Univariate & multivariate logistic regression — ${outcome}`,
+    caption: `Outcome: ${outcome}. OR = odds ratio; CI = confidence interval.`,
+    columns: ["Variable", "Univariable OR (95% CI), p", "Multivariable OR (95% CI), p"],
+    rows: rows.map((r: any) => [
+      r.variable,
+      orCell(r.uni_or, r.uni_ci_low, r.uni_ci_high, r.uni_p),
+      orCell(r.multi_or, r.multi_ci_low, r.multi_ci_high, r.multi_p),
+    ]),
+    filename: `OR_Table_${outcome}`,
+  });
+
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
         <p className="text-xs text-gray-400">Outcome: <span className="text-gray-700 font-mono">{outcome}</span></p>
-        <ResultExporter title={`OR_Table_${outcome}`} headers={orExportHeaders} rows={orExportRows} />
+        <div className="flex items-center gap-1.5">
+          <StyledTableExporter data={styledExport} />
+          <ResultExporter title={`OR_Table_${outcome}`} headers={orExportHeaders} rows={orExportRows} />
+        </div>
       </div>
       {selectionMethod && selectionMethod !== "All variables (Enter)" && (
         <div className="flex items-center gap-2 mb-2 px-2 py-1.5 rounded bg-gray-100 border border-gray-300">

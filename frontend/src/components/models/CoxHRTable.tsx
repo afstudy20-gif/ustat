@@ -1,4 +1,6 @@
 import type { ColMeta } from "../../store";
+import { StyledTableExporter } from "../StyledTableExporter";
+import type { StyledTableData } from "../../lib/styledTable";
 
 /** One Cox term's HR statistics for a single model column. */
 interface HRStat {
@@ -80,23 +82,26 @@ export default function CoxHRTable({
 }: CoxHRTableProps) {
   const byName = Object.fromEntries(columns.map((c) => [c.name, c]));
 
-  const copyTSV = () => {
-    const header = ["Variable", ...COLS.map((c) => c.head)].join("\t");
-    const body = rows
-      .map((r) => [rowLabel(r, byName), ...COLS.map((c) => fmtCell(r[c.key]))].join("\t"))
-      .join("\n");
-    navigator.clipboard.writeText(`${header}\n${body}`);
-  };
+  const caption =
+    `Cox proportional-hazards regression for ${eventCol} over ${durationCol}. ` +
+    `Fully adjusted model: n=${n}, ${nEvents} events` +
+    (nPars > 0 ? ` · Parsimonious model: n=${nPars}, ${nEventsPars} events` : "") +
+    `. Univariable = each predictor fitted alone. Parsimonious = the selected subset fitted ` +
+    `together. Fully adjusted = all predictors fitted together. HR = hazard ratio; ` +
+    `CI = confidence interval. A blank (—) cell means the predictor was not in that model.`;
+
+  const exportData = (): StyledTableData => ({
+    title: "Cox proportional-hazards regression (univariable, parsimonious, fully adjusted)",
+    caption,
+    columns: ["Variable", ...COLS.map((c) => c.head)],
+    rows: rows.map((r) => [rowLabel(r, byName), ...COLS.map((c) => fmtCell(r[c.key]))]),
+    filename: "cox_hr_table",
+  });
 
   return (
     <div>
       <div className="flex items-center justify-end mb-2">
-        <button
-          onClick={copyTSV}
-          className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
-        >
-          Copy table
-        </button>
+        <StyledTableExporter data={exportData} />
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs border-collapse">
