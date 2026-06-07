@@ -11,6 +11,9 @@ interface DiagResult { columns: DiagCol[]; overall_hint: string; recommendation:
 const errText = (e: unknown): string =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Request failed";
 
+const fmtP = (p: number): string =>
+  !isFinite(p) ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
+
 export default function MissingDataPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
@@ -239,7 +242,7 @@ export default function MissingDataPanel() {
                 <div className="space-y-2">
                   {mcar && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-800">
-                      <span className="font-semibold">Little's MCAR test:</span> χ²={mcar.statistic}, df={mcar.df}, p={mcar.p}.{" "}
+                      <span className="font-semibold">Little's MCAR test:</span> χ²={Number(mcar.statistic).toFixed(2)}, df={mcar.df}, p={fmtP(Number(mcar.p))}.{" "}
                       {mcar.significant
                         ? "p < 0.05 → MCAR rejected; data are likely MAR (or MNAR). MICE is appropriate."
                         : "p ≥ 0.05 → consistent with MCAR; listwise deletion is unbiased (MICE still fine)."}
