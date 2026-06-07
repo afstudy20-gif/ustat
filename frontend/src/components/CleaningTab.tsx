@@ -75,8 +75,12 @@ export function CleaningTab({
   };
 
   return (
-    <div className="space-y-4 max-w-lg">
-      <div className="panel space-y-4">
+    <div className="border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-3.5 bg-gray-50 border-b border-gray-100">
+        <h3 className="text-sm font-semibold text-gray-800">Data Cleaning</h3>
+        <p className="text-[11px] text-gray-400 mt-0.5">Listwise deletion · outlier removal · find &amp; replace</p>
+      </div>
+      <div className="px-5 py-4 space-y-4">
         <div className="space-y-1">
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Cleaning Operation</label>
           <div className="flex gap-2">
@@ -109,17 +113,21 @@ export function CleaningTab({
           <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
             Select Variables
           </label>
-          <select
-            multiple
-            className="select w-full h-36 font-mono text-xs"
-            value={selectedCols}
-            onChange={(e) => setSelectedCols(Array.from(e.target.selectedOptions, (o) => o.value))}
-          >
-            {(cleanMode === "outliers" ? numCols : columns).map((c) => (
-              <option key={c.name}>{c.name}</option>
-            ))}
-          </select>
-          <p className="text-[10px] text-gray-400">Hold Ctrl/Cmd to select multiple.</p>
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-gray-200 divide-y divide-gray-50">
+            {(cleanMode === "outliers" ? numCols : columns).map((c) => {
+              const checked = selectedCols.includes(c.name);
+              return (
+                <label key={c.name} className={`flex items-center gap-2 px-2.5 py-1 text-xs cursor-pointer ${checked ? "bg-indigo-50/50" : "hover:bg-gray-50"}`}>
+                  <input type="checkbox" checked={checked}
+                    onChange={() => setSelectedCols((p) => p.includes(c.name) ? p.filter((x) => x !== c.name) : [...p, c.name])}
+                    className="accent-indigo-500" />
+                  <span className="text-gray-700 truncate flex-1">{c.name}</span>
+                  <span className="text-[9px] text-gray-400">{c.kind}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="text-[10px] text-gray-400">{selectedCols.length} selected</p>
         </div>
 
         {/* Dynamic controls based on operation */}
