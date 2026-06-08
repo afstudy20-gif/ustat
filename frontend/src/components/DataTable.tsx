@@ -1,4 +1,5 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import type { CSSProperties, RefObject } from "react";
 import { BookOpen, X } from "lucide-react";
 import { useStore } from "../store";
 import type { ColMeta } from "../store";
@@ -27,6 +28,90 @@ import { ValueLabelsModal } from "./datatable/ValueLabelsModal";
 import { FindReplaceModal } from "./datatable/FindReplaceModal";
 import { ParseDatesModal } from "./datatable/ParseDatesModal";
 type SortDir = "asc" | "desc";
+
+type ContextMenuAnchor = { x: number; y: number };
+
+const CONTEXT_MENU_MARGIN = 8;
+
+function useViewportContextMenuStyle(
+  anchor: ContextMenuAnchor | null,
+  menuRef: RefObject<HTMLDivElement | null>,
+  fallbackWidth: number,
+): CSSProperties {
+  const [position, setPosition] = useState({
+    left: CONTEXT_MENU_MARGIN,
+    top: CONTEXT_MENU_MARGIN,
+    maxHeight: 0,
+  });
+
+  useLayoutEffect(() => {
+    if (!anchor) return;
+
+    const updatePosition = () => {
+      const menu = menuRef.current;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const maxHeight = Math.max(0, viewportHeight - CONTEXT_MENU_MARGIN * 2);
+      const menuWidth = menu?.offsetWidth || fallbackWidth;
+      const menuHeight = Math.min(
+        menu?.scrollHeight || menu?.offsetHeight || maxHeight,
+        maxHeight,
+      );
+
+      const preferredLeft =
+        anchor.x + menuWidth <= viewportWidth - CONTEXT_MENU_MARGIN
+          ? anchor.x
+          : anchor.x - menuWidth;
+      const left = Math.max(
+        CONTEXT_MENU_MARGIN,
+        Math.min(preferredLeft, viewportWidth - menuWidth - CONTEXT_MENU_MARGIN),
+      );
+
+      const spaceBelow = viewportHeight - CONTEXT_MENU_MARGIN - anchor.y;
+      const spaceAbove = anchor.y - CONTEXT_MENU_MARGIN;
+      let top: number;
+      if (menuHeight <= spaceBelow) {
+        top = anchor.y;
+      } else if (menuHeight <= spaceAbove) {
+        top = anchor.y - menuHeight;
+      } else {
+        top = CONTEXT_MENU_MARGIN;
+      }
+
+      setPosition((current) =>
+        current.left === left &&
+        current.top === top &&
+        current.maxHeight === maxHeight
+          ? current
+          : { left, top, maxHeight },
+      );
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+
+    const resizeObserver = new ResizeObserver(updatePosition);
+    const mutationObserver = new MutationObserver(updatePosition);
+    if (menuRef.current) {
+      resizeObserver.observe(menuRef.current);
+      mutationObserver.observe(menuRef.current, { childList: true, subtree: true });
+    }
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+    };
+  }, [anchor, fallbackWidth, menuRef]);
+
+  return {
+    ...position,
+    maxWidth: `calc(100vw - ${CONTEXT_MENU_MARGIN * 2}px)`,
+    overflowY: "auto",
+    overscrollBehavior: "contain",
+    scrollbarGutter: "stable",
+  };
+}
 
 export default function DataTable() {
   const session          = useStore((s) => s.session);
@@ -114,6 +199,9 @@ export default function DataTable() {
   // Right-click context menu (rows)
   const [rowCtx, setRowCtx] = useState<{ x: number; y: number; idx: number } | null>(null);
   const rowCtxRef = useRef<HTMLDivElement>(null);
+  const columnMenuStyle = useViewportContextMenuStyle(ctxMenu, ctxRef, 192);
+  const cellMenuStyle = useViewportContextMenuStyle(cellCtx, cellCtxRef, 192);
+  const rowMenuStyle = useViewportContextMenuStyle(rowCtx, rowCtxRef, 176);
 
   const inputRef   = useRef<HTMLInputElement>(null);
   const committingCellsRef = useRef<Set<string>>(new Set());
@@ -1325,14 +1413,9 @@ export default function DataTable() {
       {ctxMenu && (
         <div ref={ctxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
-          style={{
-            // Clamp to viewport so the menu never spills past the right
-            // edge or below the bottom (e.g. when the user right-clicks
-            // the last column or last row of the data table).
-            left: Math.min(ctxMenu.x, window.innerWidth - 200),
-            top: Math.min(ctxMenu.y, window.innerHeight - 420),
-          }}>
-          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
+          style={columnMenuStyle}
+          role="menu">
+          <div className="sticky top-0 z-10 bg-white px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
             {ctxMenu.col}
             {(missingCounts[ctxMenu.col] ?? 0) > 0 && (
               <span className="ml-1 text-amber-500">({missingCounts[ctxMenu.col]} missing)</span>
@@ -1508,11 +1591,9 @@ export default function DataTable() {
       {cellCtx && (
         <div ref={cellCtxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-48"
-          style={{
-            left: Math.min(cellCtx.x, window.innerWidth - 200),
-            top: Math.min(cellCtx.y, window.innerHeight - 200),
-          }}>
-          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
+          style={cellMenuStyle}
+          role="menu">
+          <div className="sticky top-0 z-10 bg-white px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100 truncate">
             {selectedCells.size > 1
               ? `${selectedCells.size} cells selected`
               : `Row ${cellCtx.row + 1}, ${cellCtx.col}`}
@@ -1546,11 +1627,9 @@ export default function DataTable() {
       {rowCtx && (
         <div ref={rowCtxRef}
           className="fixed z-50 bg-white border border-gray-200 rounded-xl shadow-xl py-1 w-44"
-          style={{
-            left: Math.min(rowCtx.x, window.innerWidth - 184),
-            top: Math.min(rowCtx.y, window.innerHeight - 220),
-          }}>
-          <div className="px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100">Row {rowCtx.idx + 1}</div>
+          style={rowMenuStyle}
+          role="menu">
+          <div className="sticky top-0 z-10 bg-white px-3 py-1.5 text-xs text-gray-400 font-medium border-b border-gray-100">Row {rowCtx.idx + 1}</div>
           <button onClick={() => copyRow(rowCtx.idx)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             📋 Copy row

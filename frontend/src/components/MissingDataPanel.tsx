@@ -28,6 +28,7 @@ export default function MissingDataPanel() {
   const columns = session?.columns ?? [];
   const numCols = columns.filter((c) => isNumericKind(c.kind));
   const sid = session?.session_id ?? "";
+  const [activeSubTab, setActiveSubTab] = useState<"overview" | "cleaning">("overview");
 
   const preview = session?.preview ?? [];
   const missingInfo = columns
@@ -197,47 +198,77 @@ export default function MissingDataPanel() {
     );
 
   return (
-    <div className="space-y-5 max-w-4xl mx-auto p-4">
-      {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">{err}</div>}
-      {mutationNotice && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700">{mutationNotice}</div>}
+    <div className="max-w-4xl mx-auto p-4">
+      <div
+        className="mb-5 flex items-center gap-1 border-b border-gray-200"
+        role="tablist"
+        aria-label="Missing data sections"
+      >
+        {([
+          ["overview", "Missing Data Overview"],
+          ["cleaning", "Data Cleaning"],
+        ] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab === id}
+            onClick={() => setActiveSubTab(id)}
+            className={`relative px-4 py-2.5 text-sm font-medium transition-colors ${
+              activeSubTab === id
+                ? "text-indigo-700"
+                : "text-gray-500 hover:text-gray-800"
+            }`}
+          >
+            {label}
+            {activeSubTab === id && (
+              <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-indigo-600" />
+            )}
+          </button>
+        ))}
+      </div>
 
-      {/* ── Overview — list ── */}
-      <div className="border border-gray-200 rounded-xl overflow-hidden">
-        <div className="px-5 py-3.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-800">Missing Data Overview</h3>
-            <p className="text-[11px] text-gray-400 mt-0.5">Tick rows for MICE / comparison, or impute a single column inline.</p>
-          </div>
-          {missingInfo.length > 0 && (
-            <div className="flex items-center gap-2">
-              <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
-                <span>Sort</span>
-                <select value={missingSort} onChange={(e) => setMissingSort(e.target.value as MissingSort)}
-                  className="border border-gray-300 rounded px-2 py-1 bg-white text-[10px] text-gray-600">
-                  <option value="missing-desc">Missing %: high to low</option>
-                  <option value="missing-asc">Missing %: low to high</option>
-                  <option value="name-asc">Name: A to Z</option>
-                  <option value="name-desc">Name: Z to A</option>
-                </select>
-              </label>
-              <button onClick={() => {
-                clearDiagnostics();
-                setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name));
-              }}
-                className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
-                {selected.length === missingInfo.length ? "Clear all" : "Select all"}
-              </button>
+      <div className={activeSubTab === "overview" ? "space-y-5" : "hidden"} role="tabpanel">
+        {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">{err}</div>}
+        {mutationNotice && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700">{mutationNotice}</div>}
+
+        {/* ── Overview — list ── */}
+        <div className="border border-gray-200 rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-gray-800">Missing Data Overview</h3>
+              <p className="text-[11px] text-gray-400 mt-0.5">Tick rows for MICE / comparison, or impute a single column inline.</p>
             </div>
-          )}
-        </div>
-        {missingInfo.length === 0 ? (
-          <div className="px-5 py-4">
-            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">
-              ✅ No missing values detected in any column.
-            </div>
+            {missingInfo.length > 0 && (
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                  <span>Sort</span>
+                  <select value={missingSort} onChange={(e) => setMissingSort(e.target.value as MissingSort)}
+                    className="border border-gray-300 rounded px-2 py-1 bg-white text-[10px] text-gray-600">
+                    <option value="missing-desc">Missing %: high to low</option>
+                    <option value="missing-asc">Missing %: low to high</option>
+                    <option value="name-asc">Name: A to Z</option>
+                    <option value="name-desc">Name: Z to A</option>
+                  </select>
+                </label>
+                <button onClick={() => {
+                  clearDiagnostics();
+                  setSelected(selected.length === missingInfo.length ? [] : missingInfo.map((m) => m.name));
+                }}
+                  className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-gray-100">
+                  {selected.length === missingInfo.length ? "Clear all" : "Select all"}
+                </button>
+              </div>
+            )}
           </div>
-        ) : (
-          <table className="w-full text-xs">
+          {missingInfo.length === 0 ? (
+            <div className="px-5 py-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-700">
+                ✅ No missing values detected in any column.
+              </div>
+            </div>
+          ) : (
+            <table className="w-full text-xs">
             <thead>
               <tr className="text-left text-gray-400 border-b border-gray-100">
                 <th className="px-3 py-2 w-8"></th>
@@ -303,12 +334,12 @@ export default function MissingDataPanel() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        )}
-      </div>
+            </table>
+          )}
+        </div>
 
-      {missingInfo.length > 0 && (
-        <>
+        {missingInfo.length > 0 && (
+          <>
           {/* ── Mechanism + diagnostics ── */}
           <div className="border border-gray-200 rounded-xl overflow-hidden">
             <div className="px-5 py-3.5 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
@@ -465,11 +496,13 @@ export default function MissingDataPanel() {
               )}
             </div>
           </div>
-        </>
-      )}
+          </>
+        )}
+      </div>
 
-      {/* ── Cleaning ── */}
-      <CleaningTab sessionId={sid} columns={columns} numCols={numCols} />
+      <div className={activeSubTab === "cleaning" ? "" : "hidden"} role="tabpanel">
+        <CleaningTab sessionId={sid} columns={columns} numCols={numCols} />
+      </div>
     </div>
   );
 }
