@@ -2,7 +2,8 @@
 
 
 def _p_str(p: float) -> str:
-    return "<0.001" if p < 0.001 else f"{p:.3f}"
+    from services.number_format import format_p
+    return format_p(p)
 
 
 def _es_str(es: dict) -> str:

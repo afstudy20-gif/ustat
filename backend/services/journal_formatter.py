@@ -187,11 +187,8 @@ def _fmt_p(p) -> str:
         pv = float(s)
     except (ValueError, TypeError):
         return s
-    if pv < 0.001:
-        return "<0.001"
-    if pv < 0.01:
-        return f"{pv:.3f}"
-    return f"{pv:.2f}"
+    from services.number_format import format_p
+    return format_p(pv)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

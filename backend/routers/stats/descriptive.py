@@ -360,8 +360,8 @@ class Table1Request(BaseModel):
 
 
 def _fmt_p(p: float) -> str:
-    if p < 0.001: return "<0.001"
-    return f"{p:.3f}"
+    from services.number_format import format_p
+    return format_p(p)
 
 
 _STAT_LABELS: dict[str, str] = {

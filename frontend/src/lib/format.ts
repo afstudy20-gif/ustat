@@ -9,10 +9,12 @@
  */
 
 /**
- * Display p-value with 3 decimal places.
- *   • null / NaN  → "—"
- *   • < 0.001     → "<0.001"
- *   • otherwise   → 3-decimal fixed (0.0293 → "0.029")
+ * Canonical p-value display (journal-standard, matches the backend `format_p`).
+ * Single source of truth: every panel and export should call this (or
+ * `fmtPubP`) and never hand-roll `.toFixed` on a p-value.
+ *   • null / NaN   → "—"
+ *   • p < 0.001    → "<0.001"   (never "0.000")
+ *   • otherwise    → exact 3 decimals (0.035 → "0.035", 0.043 → "0.043")
  */
 export function fmtP(p: number | null | undefined): string {
   if (p == null) return "—";
@@ -20,6 +22,18 @@ export function fmtP(p: number | null | undefined): string {
   if (!Number.isFinite(n)) return "—";
   if (n < 0.001) return "<0.001";
   return n.toFixed(3);
+}
+
+/**
+ * Prefixed variant for publication tables / figure labels: "p<0.001" / "p=0.035".
+ * Same precision as `fmtP`.
+ */
+export function fmtPubP(p: number | null | undefined): string {
+  if (p == null) return "—";
+  const n = typeof p === "number" ? p : parseFloat(p as any);
+  if (!Number.isFinite(n)) return "—";
+  if (n < 0.001) return "p<0.001";
+  return `p=${n.toFixed(3)}`;
 }
 
 /**

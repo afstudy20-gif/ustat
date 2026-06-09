@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services import store
 from services.stat_utils import sorted_groups
+from services.number_format import format_p
 
 try:
     from docx import Document
@@ -139,7 +140,7 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
                             else:
                                 _, p_t = scipy_stats.kruskal(*arrs)
                                 test_name = "Kruskal\u2013Wallis"
-                        p_str = "<0.001" if p_t < 0.001 else f"{p_t:.3f}"
+                        p_str = format_p(p_t)
                     except Exception:
                         p_str = "N/A"
 
@@ -180,7 +181,7 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
                         test_name = "Fisher"
                     else:
                         test_name = "Chi-square"
-                    p_str = "<0.001" if p_chi < 0.001 else f"{p_chi:.3f}"
+                    p_str = format_p(p_chi)
                 except Exception:
                     p_str = "N/A"
 
