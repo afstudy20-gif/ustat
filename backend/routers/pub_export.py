@@ -62,12 +62,19 @@ def _set_cell_border(cell, **kwargs):
 
 
 def _run_table1_analysis(req: TableDocxRequest) -> dict:
-    """Run the Table 1 analysis (mirrors stats.table1 logic)."""
+    """Run the Table 1 analysis. Reuses the SAME normality chooser and
+    column-aware decimal precision as the live /api/stats/table1 endpoint so the
+    DOCX export never disagrees with the on-screen table (previously this was a
+    stale duplicate: plain Shapiro + hardcoded 2 decimals)."""
     from scipy import stats as scipy_stats
+    from routers.stats.descriptive import (
+        _normality_test, _col_decimals, _resolve_decimals_override,
+    )
 
     df = _get_df(req.session_id)
     rows = []
     sel_stats = req.selected_stats if req.selected_stats else ["auto"]
+    decimals_override = _resolve_decimals_override(req.session_id, None)
 
     groups = None
     group_labels = []
@@ -96,20 +103,19 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
 
         if is_num:
             s_all = s.dropna().astype(float)
-            n = len(s_all)
-            normal = True
-            if 3 <= n <= 2000:
-                _, p_norm = scipy_stats.shapiro(s_all[:5000])
-                normal = p_norm > 0.05
-            elif n > 2000:
-                skewness = float(scipy_stats.skew(s_all))
-                normal = abs(skewness) <= 1.5
+            # Column-aware decimals \u2014 SAME precision for mean/median/Q1/Q3 so the
+            # IQR bounds never get a different rounding than the median.
+            d = _col_decimals(df, var, decimals_override, fallback=2)
+            # Canonical normality chooser (Shapiro n<50 / Lilliefors-KS 50\u20132000 /
+            # CLT-skew n>2000); identical to the on-screen Table 1.
+            p_norm, _norm_test = _normality_test(s_all)
+            normal = p_norm >= 0.05
 
             if normal:
-                overall = f"{_f(s_all.mean())} \u00b1 {_f(s_all.std())}"
+                overall = f"{_f(s_all.mean(), d)} \u00b1 {_f(s_all.std(), d)}"
             else:
                 q1, q3 = s_all.quantile(0.25), s_all.quantile(0.75)
-                overall = f"{_f(s_all.median())} [{_f(q1)}\u2013{_f(q3)}]"
+                overall = f"{_f(s_all.median(), d)} [{_f(q1, d)}\u2013{_f(q3, d)}]"
 
             grp_vals = {}
             test_name = None
@@ -120,10 +126,10 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
                     gs = df[df[req.group_column] == g][var].dropna().astype(float)
                     arrs.append(gs)
                     if normal:
-                        grp_vals[gl] = f"{_f(gs.mean())} \u00b1 {_f(gs.std())}"
+                        grp_vals[gl] = f"{_f(gs.mean(), d)} \u00b1 {_f(gs.std(), d)}"
                     else:
                         gq1, gq3 = gs.quantile(0.25), gs.quantile(0.75)
-                        grp_vals[gl] = f"{_f(gs.median())} [{_f(gq1)}\u2013{_f(gq3)}]"
+                        grp_vals[gl] = f"{_f(gs.median(), d)} [{_f(gq1, d)}\u2013{_f(gq3, d)}]"
                 if len(arrs) >= 2:
                     try:
                         if len(groups) == 2:

@@ -114,7 +114,7 @@ def descriptive(session_id: str, column: Optional[str] = None):
             "kurtosis": float(scipy_stats.kurtosis(s)),
             "normality_p": float(p_norm),
             "normality_test": norm_test,
-            "normal": bool(p_norm > 0.05),
+            "normal": bool(p_norm >= 0.05),
             # Suggested decimal places for displaying sample-valued stats
             # (mean, median, quartiles, min/max). Honours user overrides
             # and auto-detects integer-valued columns.
@@ -144,7 +144,7 @@ def frequency(session_id: str, column: Optional[str] = None):
             categories.append({
                 "value": str(k) if pd.notna(k) else "Missing",
                 "count": int(v),
-                "pct": round(v / total * 100, 2),
+                "pct": round(v / total * 100, 1),
             })
         results[col] = {
             "n": int(s.count()),
@@ -324,8 +324,8 @@ def column_summary(session_id: str, column: str, kind: Optional[str] = None):
             "qq": qq,
             "normality_p": float(p_norm),
             "normality_test": norm_test_name,
-            "normal": bool(p_norm > 0.05),
-            "normality_label": "Normally distributed" if p_norm > 0.05 else "Non-normal distribution",
+            "normal": bool(p_norm >= 0.05),
+            "normality_label": "Normally distributed" if p_norm >= 0.05 else "Non-normal distribution",
         }
 
     else:
@@ -673,7 +673,7 @@ def table1(req: Table1Request):
         if is_num:
             s_all = s.dropna().astype(float)
             p_norm, norm_test_name = _normality_test(s_all)
-            normal_overall = p_norm > 0.05
+            normal_overall = p_norm >= 0.05
 
             group_series: dict[str, pd.Series] = {}
             group_arrs: list[pd.Series] = []
@@ -692,7 +692,7 @@ def table1(req: Table1Request):
                         per_group_norm[gl] = {
                             "p": round(float(pg), 4),
                             "test": pg_name,
-                            "normal": bool(pg > 0.05),
+                            "normal": bool(pg >= 0.05),
                             "n": int(len(arr)),
                         }
                     else:
