@@ -146,7 +146,7 @@ export default function DataTable() {
   // Frozen (pinned-left) columns. `#` row-number column is always pinned.
   // `frozenCount` = number of leading data columns to freeze.
   const [frozenCount, setFrozenCount] = useState(0);
-  const HASH_COL_W = 40;       // width of `#` column (matches w-10)
+  const HASH_COL_W = 30;       // width of `#` (row-number) column — kept narrow
   const FROZEN_COL_W = 150;    // forced width per frozen data column
   const frozenLeft = (colIdx: number) => HASH_COL_W + colIdx * FROZEN_COL_W;
   const isFrozenCol = (colIdx: number) => colIdx < frozenCount;
@@ -1120,10 +1120,30 @@ export default function DataTable() {
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10">
 
+            {/* Column-number row (1, 2, 3 … above each column) */}
+            <tr className="bg-gray-50 border-b border-gray-100">
+              <th
+                className="py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
+                style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
+              />
+              {columns.map((col, colIdx) => {
+                const frozen = isFrozenCol(colIdx);
+                return (
+                  <th
+                    key={col.name}
+                    className={`py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none ${frozen ? "sticky bg-gray-50 z-20" : ""}`}
+                    style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
+                  >
+                    {colIdx + 1}
+                  </th>
+                );
+              })}
+            </tr>
+
             {/* Column headers */}
             <tr className="bg-gray-50 border-b border-gray-200">
               <th
-                className="px-3 py-2 text-left text-gray-400 text-xs font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
+                className="px-1 py-2 text-center text-gray-400 text-xs font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
                 style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
               >
                 #
@@ -1289,7 +1309,7 @@ export default function DataTable() {
                   className="group border-t border-gray-100 hover:bg-gray-50 transition-colors"
                 >
                   <td
-                    className="px-3 py-1.5 text-gray-300 text-xs border-r border-gray-200 select-none text-right cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
+                    className="px-1 py-1.5 text-gray-300 text-[11px] border-r border-gray-200 select-none text-center cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
                     style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
                     onMouseDown={(e) => {
                       if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
