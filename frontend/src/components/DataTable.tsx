@@ -41,7 +41,10 @@ function useViewportContextMenuStyle(
   const [position, setPosition] = useState({
     left: CONTEXT_MENU_MARGIN,
     top: CONTEXT_MENU_MARGIN,
-    maxHeight: 0,
+    // Start tall, not 0 — a 0 here (or a transient innerHeight=0 in PWA/iframe
+    // contexts) collapses the menu to ~nothing, so it looks like it closes the
+    // instant you try to click an item.
+    maxHeight: 9999,
   });
 
   useLayoutEffect(() => {
@@ -49,9 +52,11 @@ function useViewportContextMenuStyle(
 
     const updatePosition = () => {
       const menu = menuRef.current;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      const maxHeight = Math.max(0, viewportHeight - CONTEXT_MENU_MARGIN * 2);
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 1024;
+      // innerHeight can briefly report 0 in embedded/PWA/iframe contexts; fall
+      // back to the document height and never clamp below a usable minimum.
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 768;
+      const maxHeight = Math.max(200, viewportHeight - CONTEXT_MENU_MARGIN * 2);
       const menuWidth = menu?.offsetWidth || fallbackWidth;
       const menuHeight = Math.min(
         menu?.scrollHeight || menu?.offsetHeight || maxHeight,
