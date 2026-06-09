@@ -437,7 +437,7 @@ _FIGURE_TEMPLATES = {
     },
     "histogram": {
         "caption": "Figure {n}. Distribution of {variable}.",
-        "footnote": "N = {n_obs}. Shapiro\u2013Wilk P = {normality_p}.",
+        "footnote": "N = {n_obs}. Normality test P = {normality_p}.",
     },
     "scatter": {
         "caption": "Figure {n}. Scatter plot of {x_var} vs {y_var}.",

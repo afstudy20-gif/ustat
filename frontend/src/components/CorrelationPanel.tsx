@@ -177,14 +177,14 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
 
       <h3 className="text-sm font-semibold text-gray-700 pt-1 border-t border-gray-100">
         Method
-        <Tip text="Auto: runs Shapiro-Wilk normality test for each pair and picks Pearson if both variables are normal (p > 0.05), or Spearman if either is not. Prevents the common mistake of running Pearson on skewed data." wide />
+        <Tip text="Auto: tests each variable's normality (Shapiro-Wilk for n<50, Lilliefors-corrected KS for 50–2000, skewness/CLT for n>2000) and picks Pearson when both are normal (p ≥ 0.05), or Spearman if either is not. Prevents the common mistake of running Pearson on skewed data." wide />
       </h3>
       <div className="space-y-1.5">
         {(["auto", "pearson", "spearman"] as const).map((m) => (
           <label key={m} className="flex items-center gap-2 cursor-pointer">
             <input type="radio" name="pw-method" value={m} checked={method === m}
               onChange={() => setMethod(m)} className="accent-indigo-500" />
-            <span className="text-xs text-gray-700">{m === "auto" ? "Auto (Shapiro-Wilk)" : m === "pearson" ? "Pearson r" : "Spearman ρ"}</span>
+            <span className="text-xs text-gray-700">{m === "auto" ? "Auto (by normality)" : m === "pearson" ? "Pearson r" : "Spearman ρ"}</span>
           </label>
         ))}
       </div>
@@ -387,8 +387,8 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
           <span>⚡</span>
           <span>
             <strong>Switched to Spearman:</strong>{" "}
-            {active.normality_test === "Lilliefors"
-              ? `Marked skewness (|skew| > 1.5) and Lilliefors p < 0.05 (n = ${active.n}). Distribution is non-normal.`
+            {active.normality_test?.includes("Lilliefors")
+              ? `Lilliefors-corrected KS p < 0.05 (n = ${active.n}). Distribution is non-normal.`
               : `Skewed data detected (${active.normality_test ?? "Shapiro-Wilk"} p < 0.05). Spearman ρ used for robust estimation.`}
           </span>
         </div>

@@ -31,8 +31,9 @@ def methods_ttest_ind(col: str, group_col: str, welch: bool = False) -> str:
         f"Group differences in {col} were compared between levels of {group_col} "
         f"using an independent-samples {variant} t-test. "
         f"Effect size was quantified with Hedges' g and its 95% confidence interval. "
-        f"Normality of each group was assessed with the Shapiro-Wilk test (n \u2264 2000) "
-        f"or the Lilliefors-corrected Kolmogorov-Smirnov test (n > 2000). "
+        f"Normality of each group was assessed with the Shapiro-Wilk test (n < 50), "
+        f"the Lilliefors-corrected Kolmogorov-Smirnov test (50 \u2264 n \u2264 2000), "
+        f"or a skewness/CLT criterion (n > 2000). "
         f"Homogeneity of variances was checked with Levene's test."
     )
 
