@@ -1,12 +1,8 @@
 import ResultExporter from "../ResultExporter";
 import { StyledTableExporter } from "../StyledTableExporter";
 import type { StyledTableData } from "../../lib/styledTable";
-import { fmtP } from "../../lib/format";
+import { fmtP, fmtPubP } from "../../lib/format";
 import { adjustP, MiniNormalSVG, SigBar } from "./shared";
-
-/** Publication p-value: "p<0.001" / "p=0.03". */
-const fmtPubP = (p: number | null | undefined): string =>
-  p == null || !isFinite(p) ? "" : p < 0.001 ? "p<0.001" : `p=${p < 0.1 ? p.toFixed(3) : p.toFixed(2)}`;
 
 export function CoefTable({
   coefs, hrMode = false, allColumns = [], selectedIdx = null, onSelect, nullHyp = "eq",
@@ -52,10 +48,10 @@ export function CoefTable({
         ? ["Variable", "HR", "SE", "z", "p-value", "CI_low", "CI_high"]
         : ["Variable", "Estimate", "SE", "t", "p-value", "CI_low", "CI_high"];
   const coefExportRows = coefs.map((c: any) => {
-    if (isPoisson) return [c.variable, c.log_irr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", c.p < 0.001 ? "<0.001" : c.p?.toFixed(4) ?? "", c.irr?.toFixed(3) ?? "", c.irr_ci_low?.toFixed(3) ?? "", c.irr_ci_high?.toFixed(3) ?? ""];
-    if (isLogistic) return [c.variable, c.log_odds?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", c.p < 0.001 ? "<0.001" : c.p?.toFixed(4) ?? "", c.odds_ratio?.toFixed(3) ?? "", c.or_ci_low?.toFixed(3) ?? "", c.or_ci_high?.toFixed(3) ?? ""];
-    if (hrMode) return [c.variable, c.hr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", (c.t ?? c.z)?.toFixed(3) ?? "", c.p < 0.001 ? "<0.001" : c.p?.toFixed(4) ?? "", c.hr_ci_low?.toFixed(3) ?? "", c.hr_ci_high?.toFixed(3) ?? ""];
-    return [c.variable, c.estimate?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", (c.t ?? c.z)?.toFixed(3) ?? "", c.p < 0.001 ? "<0.001" : c.p?.toFixed(4) ?? "", c.ci_low?.toFixed(3) ?? "", c.ci_high?.toFixed(3) ?? ""];
+    if (isPoisson) return [c.variable, c.log_irr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", fmtP(c.p), c.irr?.toFixed(3) ?? "", c.irr_ci_low?.toFixed(3) ?? "", c.irr_ci_high?.toFixed(3) ?? ""];
+    if (isLogistic) return [c.variable, c.log_odds?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", fmtP(c.p), c.odds_ratio?.toFixed(3) ?? "", c.or_ci_low?.toFixed(3) ?? "", c.or_ci_high?.toFixed(3) ?? ""];
+    if (hrMode) return [c.variable, c.hr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", (c.t ?? c.z)?.toFixed(3) ?? "", fmtP(c.p), c.hr_ci_low?.toFixed(3) ?? "", c.hr_ci_high?.toFixed(3) ?? ""];
+    return [c.variable, c.estimate?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", (c.t ?? c.z)?.toFixed(3) ?? "", fmtP(c.p), c.ci_low?.toFixed(3) ?? "", c.ci_high?.toFixed(3) ?? ""];
   });
   const coefTitle = isPoisson ? "Poisson_Coefficients" : isLogistic ? "Logistic_Coefficients" : hrMode ? "Cox_Coefficients" : "Linear_Coefficients";
 
@@ -249,11 +245,11 @@ export function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
     r.uni_or?.toFixed(4) ?? "",
     r.uni_ci_low?.toFixed(4) ?? "",
     r.uni_ci_high?.toFixed(4) ?? "",
-    r.uni_p?.toFixed(6) ?? "",
+    fmtP(r.uni_p),
     r.multi_or?.toFixed(4) ?? "",
     r.multi_ci_low?.toFixed(4) ?? "",
     r.multi_ci_high?.toFixed(4) ?? "",
-    r.multi_p?.toFixed(6) ?? "",
+    fmtP(r.multi_p),
   ]);
 
   // Publication-styled export: OR (95% CI), p merged per model.

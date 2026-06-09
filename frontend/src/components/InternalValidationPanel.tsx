@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import { runModelValidation, runExternalValidationLogistic } from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 /**
  * Internal & external validation for a user-fitted prediction model.
@@ -426,7 +427,7 @@ function ExternalTab() {
                 <Tile label="Brier" value={fmt(result.calibration?.brier)} />
                 {hl && <Tile label="Hosmer-Lemeshow"
                   value={`χ²=${fmt(hl.chi2, 1)}`}
-                  sub={`p = ${hl.p < 0.001 ? "<0.001" : fmt(hl.p)}`}
+                  sub={`p = ${fmtP(hl.p)}`}
                   tone={hl.p < 0.05 ? "text-amber-600" : "text-emerald-600"} />}
               </div>
             </div>

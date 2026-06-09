@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import { runIV2SLS, runMediation, runTargetTrial, runDiD, runRDD, runDAGAdjustment } from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 type Method = "iv" | "mediation" | "target" | "did" | "rdd" | "dag";
 
@@ -56,7 +57,6 @@ function IVTab() {
       {sub && <div className="text-[11px] text-gray-500 mt-0.5">{sub}</div>}
     </div>
   );
-  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
 
   return (
     <div className="flex gap-4">
@@ -108,18 +108,18 @@ function IVTab() {
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Tile label="IV effect (2SLS)" value={result.iv_estimate.estimate.toFixed(4)}
-                sub={`95% CI ${result.iv_estimate.ci_low.toFixed(3)}–${result.iv_estimate.ci_high.toFixed(3)} · p=${p(result.iv_estimate.p)}`}
+                sub={`95% CI ${result.iv_estimate.ci_low.toFixed(3)}–${result.iv_estimate.ci_high.toFixed(3)} · p=${fmtP(result.iv_estimate.p)}`}
                 tone="text-emerald-600" />
-              <Tile label="Naive OLS" value={result.ols_estimate.estimate.toFixed(4)} sub={`p=${p(result.ols_estimate.p)}`} />
+              <Tile label="Naive OLS" value={result.ols_estimate.estimate.toFixed(4)} sub={`p=${fmtP(result.ols_estimate.p)}`} />
               <Tile label="First-stage F" value={result.first_stage.f_stat.toFixed(1)}
                 sub={result.first_stage.weak_instruments ? "WEAK (<10)" : "adequate (≥10)"}
                 tone={result.first_stage.weak_instruments ? "text-amber-600" : "text-emerald-600"} />
-              <Tile label="Wu-Hausman" value={`p=${p(result.wu_hausman.p)}`}
+              <Tile label="Wu-Hausman" value={`p=${fmtP(result.wu_hausman.p)}`}
                 sub={result.wu_hausman.endogenous ? "endogenous → use IV" : "no strong endogeneity"} />
             </div>
             {result.sargan && (
               <div className="text-xs text-gray-600">
-                Sargan over-identification: χ²={result.sargan.stat} (df={result.sargan.df}), p={p(result.sargan.p)} —
+                Sargan over-identification: χ²={result.sargan.stat} (df={result.sargan.df}), p={fmtP(result.sargan.p)} —
                 {result.sargan.valid ? " instruments jointly valid." : " instrument validity in doubt."}
               </div>
             )}
@@ -163,7 +163,6 @@ function MediationTab() {
       {sub && <div className="text-[11px] text-gray-500 mt-0.5">{sub}</div>}
     </div>
   );
-  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
 
   return (
     <div className="flex gap-4">
@@ -225,7 +224,7 @@ function MediationTab() {
               <Tile label="Total effect" value={result.effects.total.toFixed(4)} />
               <Tile label="Proportion mediated"
                 value={result.effects.proportion_mediated != null ? (result.effects.proportion_mediated * 100).toFixed(1) + "%" : "—"}
-                sub={`Sobel p=${p(result.sobel.p)}`} />
+                sub={`Sobel p=${fmtP(result.sobel.p)}`} />
             </div>
             <div className="text-xs text-gray-500">
               Paths: a (X→M) = {result.paths.a}, b (M→Y) = {result.paths.b}, c′ (direct) = {result.paths.c_prime}.
@@ -394,7 +393,6 @@ function DiDTab() {
     } catch (e: any) { setError(e?.response?.data?.detail ?? "DiD failed."); } finally { setLoading(false); }
   };
   const canRun = sid && new Set([outcome, groupCol, timeCol].filter(Boolean)).size === 3 && !loading;
-  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
   return (
     <div className="flex gap-4">
       <div className="w-72 flex-shrink-0 space-y-4">
@@ -430,7 +428,7 @@ function DiDTab() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">DiD estimate</div>
                 <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.did_estimate > 0 ? "+" : ""}{result.did_estimate}</div>
-                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={p(result.p)}</div></div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={fmtP(result.p)}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Treated change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.treated_change > 0 ? "+" : ""}{result.treated_change}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Control change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.control_change > 0 ? "+" : ""}{result.control_change}</div></div>
             </div>
@@ -462,7 +460,6 @@ function RDDTab() {
     } catch (e: any) { setError(e?.response?.data?.detail ?? "RDD failed."); } finally { setLoading(false); }
   };
   const canRun = sid && outcome && running && outcome !== running && cutoff !== "" && !loading;
-  const p = (v: number) => (v < 0.001 ? "<0.001" : v.toFixed(4));
   return (
     <div className="flex gap-4">
       <div className="w-72 flex-shrink-0 space-y-4">
@@ -497,7 +494,7 @@ function RDDTab() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">LATE at cutoff</div>
                 <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.late > 0 ? "+" : ""}{result.late}</div>
-                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={p(result.p)}</div></div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={fmtP(result.p)}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">±{result.bandwidth}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">N in bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.n_in_bandwidth}</div><div className="text-[11px] text-gray-500 mt-0.5">{result.n_left} below / {result.n_right} above</div></div>
             </div>

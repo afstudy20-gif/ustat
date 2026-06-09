@@ -4,6 +4,7 @@ import { runMICE, runMCARTest, runImputationCompare, runMissingDiagnostics, fill
 import ResultExporter from "./ResultExporter";
 import api from "../api";
 import { CleaningTab } from "./CleaningTab";
+import { fmtP } from "../lib/format";
 
 interface DiagCol { name: string; n_missing: number; pct: number; kind: string; is_numeric: boolean; depends_on: string[]; likely: string }
 interface DiagResult { columns: DiagCol[]; overall_hint: string; recommendation: string; any_mar: boolean }
@@ -19,9 +20,6 @@ const QUICK_SUFFIX: Record<QuickMethod, string> = {
 
 const errText = (e: unknown): string =>
   (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Request failed";
-
-const fmtP = (p: number): string =>
-  !isFinite(p) ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
 
 export default function MissingDataPanel() {
   const session = useStore((s) => s.session);

@@ -696,12 +696,12 @@ export default function RCSPanel() {
                 {result.nonlinearity_p != null && (
                   <span className={`ml-2 rounded px-1.5 py-0.5 border ${result.nonlinearity_p < 0.05 ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-gray-50 text-gray-600 border-gray-200"}`}
                     title={`Joint Wald test on the ${(result.nonlinearity_df ?? "k-2")} non-linear basis columns`}>
-                    non-linearity {result.crude ? "adjusted " : ""}p = {result.nonlinearity_p < 0.001 ? "<0.001" : (result.nonlinearity_p as number).toFixed(3)}
+                    non-linearity {result.crude ? "adjusted " : ""}p = {fmtP(result.nonlinearity_p)}
                   </span>
                 )}
                 {result.crude?.nonlinearity_p != null && (
                   <span className="ml-1 rounded px-1.5 py-0.5 border bg-gray-50 text-gray-500 border-gray-200" title="Non-linearity test from the unadjusted model">
-                    crude p = {result.crude.nonlinearity_p < 0.001 ? "<0.001" : (result.crude.nonlinearity_p as number).toFixed(3)}
+                    crude p = {fmtP(result.crude.nonlinearity_p)}
                   </span>
                 )}
               </div>
@@ -735,7 +735,7 @@ export default function RCSPanel() {
                   <span className="font-semibold uppercase tracking-wider text-[10px] block mb-0.5">
                     Spline × {Array.isArray(result.interaction.covariates) ? result.interaction.covariates.join(" + ") : "covariate"} interaction (LR test)
                   </span>
-                  χ²({result.interaction.df}) = {result.interaction.lr_stat?.toFixed(2)}, p = {result.interaction.p != null ? (result.interaction.p < 0.001 ? "<0.001" : result.interaction.p.toFixed(3)) : "—"}
+                  χ²({result.interaction.df}) = {result.interaction.lr_stat?.toFixed(2)}, p = {fmtP(result.interaction.p)}
                   <span className="block text-[10px] text-gray-500 mt-0.5">
                     {result.interaction.p != null && result.interaction.p < 0.05
                       ? "The dose-response shape differs across levels — consider reporting stratified curves."
@@ -756,7 +756,7 @@ export default function RCSPanel() {
                   nonlinearity_p: number | null;
                 };
                 const nlp = result.nonlinearity_p as number | null | undefined;
-                const nlAdjStr = nlp == null ? null : (nlp < 0.001 ? "<0.001" : nlp.toFixed(2));
+                const nlAdjStr = nlp == null ? null : fmtP(nlp);
 
                 const traces: any[] = [
                   // Adjusted 95% CI band

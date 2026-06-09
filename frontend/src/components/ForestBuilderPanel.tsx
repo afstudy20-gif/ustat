@@ -3,6 +3,7 @@ import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import ThreeCol from "./ThreeCol";
 import { useStore, isNumericKind } from "../store";
+import { fmtPubP } from "../lib/format";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -286,8 +287,6 @@ export default function ForestBuilderPanel() {
   );
 
   // Helpers
-  const fmtP = (p: number | null) =>
-    p == null ? "" : p < 0.001 ? "p<0.001" : `p=${p < 0.01 ? p.toFixed(3) : p.toFixed(2)}`;
   const fmtCI = (r: ForestRowInput) =>
     `${r.est!.toFixed(2)} (${r.ci_low!.toFixed(2)}–${r.ci_high!.toFixed(2)})`;
   const rowColor = (r: ForestRowInput): string => {
@@ -402,7 +401,7 @@ export default function ForestBuilderPanel() {
         line: { color: "#ffffff", width: 0.5 },
       },
       hovertemplate:
-        `<b>${r.label}</b><br>${fmtCI(r)}<br>${fmtP(r.p)}${r.extra ? `<br>${r.extra}` : ""}<extra></extra>`,
+        `<b>${r.label}</b><br>${fmtCI(r)}${r.p != null ? `<br>${fmtPubP(r.p)}` : ""}${r.extra ? `<br>${r.extra}` : ""}<extra></extra>`,
       showlegend: false,
     };
   });
@@ -444,7 +443,7 @@ export default function ForestBuilderPanel() {
       annotations.push({
         xref: "paper", yref: "y", x: TX1, y: yi,
         xanchor: "left", yanchor: "middle",
-        text: `${fmtCI(r)}${r.p != null ? `, ${fmtP(r.p)}` : ""}`,
+        text: `${fmtCI(r)}${r.p != null ? `, ${fmtPubP(r.p)}` : ""}`,
         showarrow: false,
         font: { size: 11, color: c },
       });

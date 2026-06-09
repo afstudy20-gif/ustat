@@ -3,6 +3,12 @@ import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra, runMancova } from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
+
+/** True when a stat-grid key holds a p-value (route through the canonical fmtP). */
+function isPKey(k: string): boolean {
+  return /^p$|^p_?value$|_p$|_p_?value$/.test(k);
+}
 
 const TESTS = [
   { id: "ttest_1sample",  label: "One-sample t-test",     group: "Parametric" },
@@ -90,7 +96,7 @@ function ResultCard({ result }: { result: any }) {
 
   const statEntries = Object.entries(result).filter(([k]) => !skip.includes(k) && typeof result[k] !== "object");
   const exportHeaders = ["Statistic", "Value"];
-  const exportRows = statEntries.map(([k, v]) => [k, fmt(v)]);
+  const exportRows = statEntries.map(([k, v]) => [k, isPKey(k) ? fmtP(v as any) : fmt(v)]);
 
   return (
     <div className="panel space-y-3">
@@ -113,7 +119,7 @@ function ResultCard({ result }: { result: any }) {
           .map(([k, v]) => (
             <div key={k} className="flex justify-between border-b border-gray-100 py-1">
               <span className="text-gray-400">{k}</span>
-              <span className="text-gray-700 font-mono">{fmt(v)}</span>
+              <span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as any) : fmt(v)}</span>
             </div>
           ))}
       </div>
@@ -201,7 +207,7 @@ function ResultCard({ result }: { result: any }) {
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1 font-medium">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
-                    <td className="px-2 py-1 text-right font-mono">{ph.p_adj < 0.001 ? "<0.001" : ph.p_adj?.toFixed(4)}</td>
+                    <td className="px-2 py-1 text-right font-mono">{fmtP(ph.p_adj)}</td>
                     <td className="px-2 py-1 text-right font-mono">
                       {ph.effect_size ? `${ph.effect_size.value?.toFixed(3)} (${ph.effect_size.magnitude})` : ph.rank_diff?.toFixed(2) ?? "—"}
                     </td>

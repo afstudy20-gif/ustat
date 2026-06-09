@@ -3,6 +3,7 @@ import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { runWeightedDescriptive } from "../api";
 import { Tip } from "./Tip";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 export default function WeightedStatsPanel() {
   const session = useStore((s) => s.session);
@@ -149,7 +150,7 @@ export default function WeightedStatsPanel() {
                     [`${result.comparison.group_a}`, result.comparison.w_mean_a],
                     [`${result.comparison.group_b}`, result.comparison.w_mean_b],
                     ["Δ (95% CI)", `${result.comparison.diff} (${result.comparison.ci_low}–${result.comparison.ci_high})`],
-                    ["t-test p", result.comparison.p < 0.001 ? "<0.001" : result.comparison.p.toFixed(3)],
+                    ["t-test p", fmtP(result.comparison.p)],
                   ].map(([k, v]) => (
                     <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                       <p className="text-[9px] text-gray-400">{k}</p>

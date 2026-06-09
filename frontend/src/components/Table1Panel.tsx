@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useStore } from "../store";
 import api from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 // ── Stat definitions ──────────────────────────────────────────────────────────
 
@@ -461,7 +462,7 @@ export default function Table1Panel() {
             i === 0 ? (row.p_value ?? "") : "",
             i === 0 ? (row.test ?? "") : "",
             ...(showSMD ? [i === 0 && row.smd != null ? row.smd.toFixed(3) : ""] : []),
-            i === 0 ? `${row.normality_test} (p=${row.normality_p})` : "",
+            i === 0 ? `${row.normality_test} (p=${fmtP(row.normality_p)})` : "",
           ]);
         });
       } else {
@@ -813,7 +814,7 @@ export default function Table1Panel() {
                                       ? "bg-green-100 text-green-700 border border-green-300"
                                       : "bg-orange-100 text-orange-700 border border-orange-300"}`}
                                   title={Object.entries(row.per_group_normality).map(
-                                    ([g, n]) => `${g}: ${n.normal ? "Normal" : "Non-normal"} (${n.test}, p=${n.p ?? "n/a"}, n=${n.n})`
+                                    ([g, n]) => `${g}: ${n.normal ? "Normal" : "Non-normal"} (${n.test}, p=${fmtP(n.p)}, n=${n.n})`
                                   ).join("\n")}
                                 >
                                   {row.normal ? "All groups normal" : "≥1 group non-normal"}
@@ -827,9 +828,9 @@ export default function Table1Panel() {
                                         key={g}
                                         className={`px-1 rounded text-[8px] font-mono
                                           ${n.normal ? "bg-green-200 text-green-800" : "bg-orange-200 text-orange-800"}`}
-                                        title={`${g}: ${n.test}, p=${n.p ?? "n/a"}, n=${n.n}`}
+                                        title={`${g}: ${n.test}, p=${fmtP(n.p)}, n=${n.n}`}
                                       >
-                                        {g}:{n.p == null ? "n/a" : n.p.toFixed(2)}
+                                        {g}:{fmtP(n.p)}
                                       </span>
                                     ))}
                                   </div>
@@ -842,7 +843,7 @@ export default function Table1Panel() {
                                   {row.normal ? "Normal" : "Non-normal"}
                                   <br />
                                   <span className="text-gray-400 font-normal">
-                                    {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} p={row.normality_p?.toFixed(3)}
+                                    {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} p={fmtP(row.normality_p)}
                                   </span>
                                 </div>
                               )

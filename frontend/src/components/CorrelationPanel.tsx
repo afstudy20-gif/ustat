@@ -14,6 +14,7 @@ import {
   runCohensKappa,
   getRawColumns,
 } from "../api";
+import { fmtP } from "../lib/format";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -26,10 +27,6 @@ const PLOT_BG: Record<string, unknown> = {
 const TABS = ["Pairwise", "Matrix", "ICC", "Cohen's κ"] as const;
 type Tab = (typeof TABS)[number];
 
-function pFmt(p: number) {
-  if (p < 0.001) return "< 0.001";
-  return p.toFixed(3);
-}
 function sig(p: number) {
   return p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-400";
 }
@@ -142,7 +139,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
     res.r.toFixed(4),
     res.ci_low.toFixed(4),
     res.ci_high.toFixed(4),
-    res.p < 0.001 ? "<0.001" : res.p.toFixed(4),
+    fmtP(res.p),
     String(res.n),
     res.method,
     starsFor(res.p),
@@ -230,7 +227,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
                     </span>
                   ) : (
                     <span className={nm.normal ? "text-green-600 font-semibold" : "text-red-500 font-semibold"}>
-                      {nm.p != null ? `p=${pFmt(nm.p)}` : ""} {nm.normal ? "✓" : "✗"}
+                      {nm.p != null ? `p=${fmtP(nm.p)}` : ""} {nm.normal ? "✓" : "✗"}
                     </span>
                   )}
                 </div>
@@ -303,7 +300,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
               y: 0.98,
               xanchor: "right" as const,
               yanchor: "top" as const,
-              text: `${active.label} = ${active.r.toFixed(3)}${starsFor(active.p)}, p = ${pFmt(active.p)}`,
+              text: `${active.label} = ${active.r.toFixed(3)}${starsFor(active.p)}, p = ${fmtP(active.p)}`,
               showarrow: false,
               font: { color: "#374151", size: 12 },
               bgcolor: "rgba(249,250,251,0.9)",
@@ -375,7 +372,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
                       [{res.ci_low.toFixed(2)}, {res.ci_high.toFixed(2)}]
                     </td>
                     <td className={`px-2 py-1 font-mono ${res.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-400"}`}>
-                      {pFmt(res.p)}
+                      {fmtP(res.p)}
                     </td>
                   </tr>
                 );
@@ -424,14 +421,14 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
               95% CI: <span className="text-gray-700 font-mono font-semibold">[{active.ci_low.toFixed(3)}, {active.ci_high.toFixed(3)}]</span>
             </span>
             <span className="text-gray-500">
-              p = <span className={sig(active.p)}>{pFmt(active.p)}</span>
+              p = <span className={sig(active.p)}>{fmtP(active.p)}</span>
             </span>
             <span className="text-gray-400 font-mono">n = {active.n}</span>
           </div>
           <InfoBanner>
             {active.p < 0.05
-              ? `Significant ${active.r > 0 ? "positive" : "negative"} correlation between ${active.var1} and ${active.var2} (${active.label} = ${active.r.toFixed(3)}, p ${pFmt(active.p)}).`
-              : `No statistically significant correlation found between ${active.var1} and ${active.var2} (p = ${pFmt(active.p)}).`}
+              ? `Significant ${active.r > 0 ? "positive" : "negative"} correlation between ${active.var1} and ${active.var2} (${active.label} = ${active.r.toFixed(3)}, p ${fmtP(active.p)}).`
+              : `No statistically significant correlation found between ${active.var1} and ${active.var2} (p = ${fmtP(active.p)}).`}
           </InfoBanner>
           {active.result_text && (
             <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 mt-2">
@@ -857,7 +854,7 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
       data.ci_low.toFixed(4),
       data.ci_high.toFixed(4),
       data.f_stat.toFixed(4),
-      data.f_p < 0.001 ? "<0.001" : data.f_p.toFixed(4),
+      fmtP(data.f_p),
       String(data.n),
       data.interpretation,
     ];
@@ -960,7 +957,7 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
         </p>
         <p className="text-gray-500 flex justify-between">
           <span>Significance (p-value):</span>
-          <span className="font-semibold font-mono text-gray-700">{pFmt(data.f_p)}</span>
+          <span className="font-semibold font-mono text-gray-700">{fmtP(data.f_p)}</span>
         </p>
         <p className="text-gray-500 flex justify-between border-t border-gray-200/60 pt-1 mt-1">
           <span>Agreement Level:</span>

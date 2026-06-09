@@ -5,6 +5,7 @@ import { usePalette } from "../plotStyle";
 import api from "../api";
 import ResultExporter from "./ResultExporter";
 import TitledPlot from "./TitledPlot";
+import { fmtP } from "../lib/format";
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -724,7 +725,7 @@ function ScatterView({
                 annotations: data.regression.r != null ? [{
                   x: 0.03, y: 0.97,
                   xref: "paper" as const, yref: "paper" as const,
-                  text: `r = ${data.regression.r.toFixed(3)}   p ${data.regression.p < 0.001 ? "< 0.001" : "= " + data.regression.p.toFixed(3)}`,
+                  text: `r = ${data.regression.r.toFixed(3)}   p = ${fmtP(data.regression.p)}`,
                   showarrow: false,
                   font: { color: "#374151", size: 11 },
                   bgcolor: "rgba(249,250,251,0.9)",
@@ -1179,7 +1180,7 @@ export default function DescriptivePanel() {
                     )}
                     {summary.type === "numeric" && summary.normality_p != null && (
                       <span className={`text-xs ${summary.normal ? "text-emerald-600" : "text-amber-600"}`}>
-                        · {summary.normal ? "Normal" : "Non-normal"} (p={summary.normality_p.toFixed(3)})
+                        · {summary.normal ? "Normal" : "Non-normal"} (p={fmtP(summary.normality_p)})
                       </span>
                     )}
                   </div>
@@ -1213,8 +1214,7 @@ export default function DescriptivePanel() {
                               ["Kurtosis", summary.kurtosis?.toFixed(4) ?? ""],
                               ["Normality test", summary.normality_test ?? ""],
                               ["Normality p",
-                                summary.normality_p?.toFixed(4) ??
-                                summary.shapiro_p?.toFixed(4) ?? ""],
+                                fmtP(summary.normality_p ?? summary.shapiro_p)],
                             ];
                           })()
                         : (summary.categories ?? []).map((c: any) => [
@@ -1269,7 +1269,7 @@ export default function DescriptivePanel() {
                         const d = colDecimals(selected);
                         const f = (v?: number) =>
                           typeof v === "number" ? v.toFixed(d) : "\u2014";
-                        const pNorm = summary.normality_p?.toFixed(3);
+                        const pNorm = fmtP(summary.normality_p);
                         return summary.normal
                           ? `Normal distribution (${summary.normality_test}, p=${pNorm}) \u2014 report Mean \u00B1 SD (${f(summary.mean)} \u00B1 ${f(summary.std)}).`
                           : `Non-normal (${summary.normality_test}, p=${pNorm}) \u2014 report Median [IQR] (${f(summary.median)} [${f(summary.q1)}\u2013${f(summary.q3)}]).`;

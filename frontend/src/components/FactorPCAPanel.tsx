@@ -4,6 +4,7 @@ import { usePlotLayout, usePalette } from "../plotStyle";
 import { runFactorPCA } from "../api";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 type ActiveResultTab = "suitability" | "loadings" | "scree" | "biplot";
 
@@ -414,7 +415,7 @@ export default function FactorPCAPanel() {
                       <div className="bg-gray-50 p-2 rounded-lg border">
                         <p className="text-[10px] text-gray-400 font-medium">p-value</p>
                         <p className={`font-mono font-semibold text-sm mt-0.5 ${result.suitability.bartlett_p < 0.05 ? "text-indigo-600" : "text-gray-500"}`}>
-                          {result.suitability.bartlett_p < 0.001 ? "<0.001" : result.suitability.bartlett_p.toFixed(4)}
+                          {fmtP(result.suitability.bartlett_p)}
                         </p>
                       </div>
                     </div>

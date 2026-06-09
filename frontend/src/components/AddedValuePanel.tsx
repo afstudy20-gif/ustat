@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore } from "../store";
 import { runAddedValue } from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 /**
  * Added Predictive Value — judge whether a new predictor genuinely improves a
@@ -135,7 +136,7 @@ export default function AddedValuePanel() {
                 <Tile label="AUC full" value={result.discrimination.auc_full?.toFixed(3)} tone="text-emerald-600" />
                 <Tile label="ΔAUC (DeLong)"
                   value={(result.discrimination.delta_auc >= 0 ? "+" : "") + result.discrimination.delta_auc?.toFixed(3)}
-                  sub={`p = ${result.discrimination.delong_p < 0.001 ? "<0.001" : result.discrimination.delong_p?.toFixed(4)}`}
+                  sub={`p = ${fmtP(result.discrimination.delong_p)}`}
                   tone={result.discrimination.significant ? "text-emerald-600" : "text-gray-900"} />
               </div>
             </div>
@@ -157,7 +158,7 @@ export default function AddedValuePanel() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <Tile label="LR test"
                   value={`χ²=${result.fit.lr_stat?.toFixed(2)}`}
-                  sub={`p = ${result.fit.lr_p < 0.001 ? "<0.001" : result.fit.lr_p?.toFixed(4)}`} />
+                  sub={`p = ${fmtP(result.fit.lr_p)}`} />
                 <Tile label="ΔAIC" value={(result.fit.delta_aic >= 0 ? "+" : "") + result.fit.delta_aic?.toFixed(1)}
                   tone={result.fit.delta_aic < 0 ? "text-emerald-600" : "text-gray-900"} />
                 <Tile label="Nagelkerke R²" value={`${result.fit.nagelkerke_base?.toFixed(3)} → ${result.fit.nagelkerke_full?.toFixed(3)}`} />

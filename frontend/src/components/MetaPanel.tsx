@@ -5,6 +5,7 @@ import { runMetaAnalyze, runMetaSubgroup, runMetaRegression, runMetaBias } from 
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 type InputType = "ci" | "se" | "raw";
 type Mode = "analyze" | "subgroup" | "regression" | "bias";
@@ -359,7 +360,7 @@ export default function MetaPanel() {
               <div className="panel space-y-2">
                 <h4 className="text-sm font-semibold text-gray-800">Meta-regression</h4>
                 <div className="grid grid-cols-2 gap-1.5">
-                  {[["Slope", result.slope], ["p", result.slope_p < 0.001 ? "<0.001" : result.slope_p],
+                  {[["Slope", result.slope], ["p", fmtP(Number(result.slope_p))],
                     ["95% CI", `${result.slope_ci_low}–${result.slope_ci_high}`], ["R²", `${result.r2_pct}%`]].map(([k, v]) => (
                     <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
                       <p className="text-[9px] text-gray-400">{k}</p>
@@ -375,11 +376,11 @@ export default function MetaPanel() {
                 <h4 className="text-sm font-semibold text-gray-800">Publication bias</h4>
                 <div className="space-y-1 text-[11px]">
                   <div className={`flex justify-between px-2 py-1 rounded ${result.egger_p < 0.05 ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
-                    <span>Egger intercept</span><span className="font-mono">{result.egger_intercept}, p={result.egger_p < 0.001 ? "<0.001" : result.egger_p}</span>
+                    <span>Egger intercept</span><span className="font-mono">{result.egger_intercept}, p={fmtP(Number(result.egger_p))}</span>
                   </div>
                   {result.begg_p != null && (
                     <div className="flex justify-between px-2 py-1 rounded bg-gray-50 text-gray-600">
-                      <span>Begg τ</span><span className="font-mono">{result.begg_tau}, p={result.begg_p}</span>
+                      <span>Begg τ</span><span className="font-mono">{result.begg_tau}, p={fmtP(Number(result.begg_p))}</span>
                     </div>
                   )}
                   <div className="flex justify-between px-2 py-1 rounded bg-gray-50 text-gray-600">

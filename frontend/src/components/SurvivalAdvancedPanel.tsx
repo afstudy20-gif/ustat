@@ -9,6 +9,7 @@ import PlotExporter from "./PlotExporter";
 import TitledPlot from "./TitledPlot";
 import { Tip } from "./Tip";
 import ThreeCol from "./ThreeCol";
+import { fmtP, fmtPubP } from "../lib/format";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -423,8 +424,6 @@ function buildKmNarrative(
   const lab = (g: string) => labels[g] ?? g;
   const groups = km.groups as any[];
   const gv = groupName || "group";
-  const pStr = (p: number | null | undefined) =>
-    p == null ? "n/a" : p < 0.001 ? "p<0.001" : `p=${p.toFixed(3)}`;
   const parts: string[] = [];
 
   // 0. Median follow-up (reverse KM).
@@ -440,7 +439,7 @@ function buildKmNarrative(
     const sig = km.logrank.p < 0.05;
     parts.push(
       `Kaplan–Meier survival ${sig ? "differed significantly" : "did not differ significantly"} ` +
-      `across the ${groups.length} ${gv} groups (log-rank ${pStr(km.logrank.p)}).`,
+      `across the ${groups.length} ${gv} groups (log-rank ${fmtPubP(km.logrank.p)}).`,
     );
   }
 
@@ -473,7 +472,7 @@ function buildKmNarrative(
     const val = (c: any) => (useAdj ? c.p_adj : c.p);
     const sig = pw.filter((c) => val(c) != null && val(c) < 0.05);
     const ns = pw.filter((c) => val(c) != null && val(c) >= 0.05);
-    const fmtPair = (c: any) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${pStr(val(c))}`;
+    const fmtPair = (c: any) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${fmtPubP(val(c))}`;
     const bits: string[] = [];
     if (sig.length) bits.push(`significant differences were found for ${sig.map(fmtPair).join("; ")}`);
     if (ns.length) bits.push(`no significant difference between ${ns.map(fmtPair).join("; ")}`);
@@ -1093,7 +1092,7 @@ export default function SurvivalAdvancedPanel() {
                               <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${
                                 c.p != null && c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
                               }`}>
-                                {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                                {fmtP(c.p)}
                               </span>
                             </td>
                           </tr>
@@ -1205,7 +1204,7 @@ export default function SurvivalAdvancedPanel() {
                             <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${
                               c.p != null && c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
                             }`}>
-                              {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                              {fmtP(c.p)}
                             </span>
                           </td>
                         </tr>
@@ -1298,7 +1297,7 @@ export default function SurvivalAdvancedPanel() {
                             <td className="px-1.5 py-1 font-mono text-gray-500">[{c.rr_low?.toFixed(2)}, {c.rr_high?.toFixed(2)}]</td>
                             <td className="px-1.5 py-1">
                               <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"}`}>
-                                {c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}
+                                {fmtP(c.p)}
                               </span>
                             </td>
                           </tr>
@@ -1442,7 +1441,7 @@ export default function SurvivalAdvancedPanel() {
                           <td className="px-1.5 py-1 text-gray-700 font-mono">{r.HR}</td>
                           <td className="px-1.5 py-1 text-gray-500 font-mono">{r.ci_low}–{r.ci_high}</td>
                           <td className={`px-1.5 py-1 font-mono ${r.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
-                            {r.p < 0.001 ? "<0.001" : r.p?.toFixed(3)}
+                            {fmtP(r.p)}
                           </td>
                           {r.fmi != null && <td className="px-1.5 py-1 text-right text-gray-400 font-mono">{r.fmi}</td>}
                         </tr>
@@ -1573,7 +1572,7 @@ export default function SurvivalAdvancedPanel() {
                     <td className="px-3 py-1 text-gray-500">{r.groups ?? "—"}</td>
                     <td className="px-3 py-1 text-gray-500">{r.chi2 != null ? r.chi2.toFixed(3) : "—"}</td>
                     <td className={`px-3 py-1 font-semibold ${r.logrank_p !== null && r.logrank_p < 0.05 ? "text-indigo-700" : "text-gray-500"}`}>
-                      {r.logrank_p !== null ? (r.logrank_p < 0.001 ? "<0.001" : r.logrank_p.toFixed(4)) : "error"}
+                      {r.logrank_p !== null ? fmtP(r.logrank_p) : "error"}
                     </td>
                     <td className="px-3 py-1">
                       {r.logrank_p !== null && r.logrank_p < 0.05 && (
@@ -1620,7 +1619,7 @@ export default function SurvivalAdvancedPanel() {
 
           // Build plot title
           const lrP = kmResult.logrank?.p;
-          const pStr = lrP == null ? null : (lrP < 0.001 ? "<0.001" : lrP.toFixed(3));
+          const pStr = lrP == null ? null : fmtP(lrP);
           const baseTitle = kmCustomPlotTitle || (kmGroup ? `Kaplan–Meier survival by ${kmCustomGroupTitle || kmGroup}` : "Kaplan–Meier survival");
           const titleText = (kmShowPInTitle && pStr) ? `${baseTitle} (log-rank p=${pStr})` : baseTitle;
 
@@ -1911,7 +1910,7 @@ export default function SurvivalAdvancedPanel() {
                 <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
                   <span>Log-rank test (overall)</span>
                   <span>
-                    p = {kmResult.logrank.p < 0.001 ? "<0.001" : kmResult.logrank.p?.toFixed(4)}
+                    p = {fmtP(kmResult.logrank.p)}
                     {kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
                   </span>
                 </div>
@@ -1995,7 +1994,7 @@ export default function SurvivalAdvancedPanel() {
                     </thead>
                     <tbody>
                       {kmResult.pairwise.comparisons.map((c: any, i: number) => {
-                        const pShow = (p: number | null) => p == null ? "—" : p < 0.001 ? "<0.001" : p.toFixed(3);
+                        const pShow = (p: number | null) => fmtP(p);
                         const sig = (c.p_adj ?? c.p) != null && (c.p_adj ?? c.p) < 0.05;
                         const la = kmGroupLabels[c.group_a] ?? c.group_a;
                         const lb = kmGroupLabels[c.group_b] ?? c.group_b;
@@ -2166,7 +2165,7 @@ export default function SurvivalAdvancedPanel() {
                   const pAnnot = stratum.logrank?.p != null ? [{
                     xref: "paper", yref: "paper", x: 0.02, y: 0.98,
                     xanchor: "left", yanchor: "top",
-                    text: `p ${stratum.logrank.p < 0.001 ? "< 0.001" : `= ${stratum.logrank.p.toFixed(3)}`}`,
+                    text: `p = ${fmtP(stratum.logrank.p)}`,
                     showarrow: false,
                     font: { size: 11, color: stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
                     bgcolor: "rgba(249,250,251,0.85)", borderpad: 3, bordercolor: "#e5e7eb", borderwidth: 1,
@@ -2494,7 +2493,7 @@ export default function SurvivalAdvancedPanel() {
                       {r.hr_ci_low != null ? `${r.hr_ci_low.toFixed(3)} – ${r.hr_ci_high.toFixed(3)}` : "—"}
                     </td>
                     <td className={`px-3 py-1 font-semibold ${r.p !== null && r.p < 0.05 ? "text-indigo-700" : "text-gray-500"}`}>
-                      {r.p !== null ? (r.p < 0.001 ? "<0.001" : r.p.toFixed(4)) : "error"}
+                      {r.p !== null ? fmtP(r.p) : "error"}
                     </td>
                   </tr>
                 ))}
@@ -2544,7 +2543,7 @@ export default function SurvivalAdvancedPanel() {
                     <td className="px-3 py-1 font-semibold text-gray-800">{c.hr?.toFixed(4)}</td>
                     <td className="px-3 py-1 text-gray-500">{c.hr_ci_low?.toFixed(3)} – {c.hr_ci_high?.toFixed(3)}</td>
                     <td className={`px-3 py-1 ${c.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
-                      {c.p < 0.001 ? "<0.001" : c.p?.toFixed(4)}
+                      {fmtP(c.p)}
                     </td>
                   </tr>
                 ))}
@@ -2689,7 +2688,7 @@ export default function SurvivalAdvancedPanel() {
                       <td className="px-3 py-1.5 text-right text-gray-600">
                         {row.ci_low != null && row.ci_high != null ? `${row.ci_low.toFixed(2)}–${row.ci_high.toFixed(2)}` : "—"}
                       </td>
-                      <td className="px-3 py-1.5 text-right text-gray-600">{row.p != null ? (row.p < 0.001 ? "<0.001" : row.p.toFixed(3)) : "—"}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-600">{fmtP(row.p)}</td>
                     </tr>
                   ))}
                 </tbody>

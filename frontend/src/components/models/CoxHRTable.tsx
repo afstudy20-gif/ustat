@@ -1,6 +1,7 @@
 import type { ColMeta } from "../../store";
 import { StyledTableExporter } from "../StyledTableExporter";
 import type { StyledTableData } from "../../lib/styledTable";
+import { fmtPubP } from "../../lib/format";
 
 /** One Cox term's HR statistics for a single model column. */
 interface HRStat {
@@ -32,12 +33,6 @@ interface CoxHRTableProps {
   eventCol: string;
 }
 
-const fmtP = (p: number | null | undefined): string => {
-  if (p == null || !isFinite(p)) return "";
-  if (p < 0.001) return "p<0.001";
-  return `p=${p < 0.1 ? p.toFixed(3) : p.toFixed(2)}`;
-};
-
 /** "1.43 (0.69–2.96), p=0.34" — or "—" when the term is absent from a model. */
 const fmtCell = (s: HRStat | null): string => {
   if (!s || s.hr == null || !isFinite(s.hr)) return "—";
@@ -45,8 +40,8 @@ const fmtCell = (s: HRStat | null): string => {
     s.hr_ci_low != null && s.hr_ci_high != null && isFinite(s.hr_ci_low) && isFinite(s.hr_ci_high)
       ? ` (${s.hr_ci_low.toFixed(2)}–${s.hr_ci_high.toFixed(2)})`
       : "";
-  const p = fmtP(s.p);
-  return `${s.hr.toFixed(2)}${ci}${p ? `, ${p}` : ""}`;
+  const hasP = s.p != null && isFinite(s.p);
+  return `${s.hr.toFixed(2)}${ci}${hasP ? `, ${fmtPubP(s.p)}` : ""}`;
 };
 
 /** Build a publication row label from column metadata + value labels.

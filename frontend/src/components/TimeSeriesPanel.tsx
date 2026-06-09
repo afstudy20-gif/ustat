@@ -4,6 +4,7 @@ import { usePlotLayout, usePalette } from "../plotStyle";
 import { runArima, runDecompose, runStationarity } from "../api";
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
+import { fmtP } from "../lib/format";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 
@@ -320,7 +321,7 @@ export default function TimeSeriesPanel() {
                               <td className="px-1.5 py-1 font-mono text-gray-700">{c.term}</td>
                               <td className="px-1.5 py-1 font-mono text-right">{c.estimate?.toFixed(3)}</td>
                               <td className="px-1.5 py-1 font-mono text-right text-gray-500">{c.se != null ? c.se.toFixed(3) : "—"}</td>
-                              <td className="px-1.5 py-1 font-mono text-right">{c.p == null ? "—" : c.p < 0.001 ? "<0.001" : c.p.toFixed(3)}</td>
+                              <td className="px-1.5 py-1 font-mono text-right">{fmtP(c.p)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -352,7 +353,7 @@ export default function TimeSeriesPanel() {
                   <div className="space-y-1 text-xs">
                     <div className={`flex justify-between px-2 py-1 rounded ${result.adf_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>ADF (H₀: unit root)</span>
-                      <span className="font-mono">p = {result.adf_p < 0.001 ? "<0.001" : result.adf_p?.toFixed(3)}</span>
+                      <span className="font-mono">p = {fmtP(result.adf_p)}</span>
                     </div>
                     <div className={`flex justify-between px-2 py-1 rounded ${result.kpss_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>KPSS (H₀: stationary)</span>

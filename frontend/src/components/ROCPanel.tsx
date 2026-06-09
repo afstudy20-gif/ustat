@@ -446,7 +446,7 @@ export default function ROCPanel() {
       ["95% CI lower", result.ci_lower ?? "—"],
       ["95% CI upper", result.ci_upper ?? "—"],
       ["AUC Z (vs 0.5)", result.auc_z ?? "—"],
-      ["AUC p (H₀: AUC = 0.5)", result.auc_p ?? "—"],
+      ["AUC p (H₀: AUC = 0.5)", fmtP(result.auc_p)],
       ["", ""],
       ["Optimal cutoff (Youden J)", ""],
       ["Cutoff", opt.cutoff ?? "—"],
@@ -1020,7 +1020,7 @@ export default function ROCPanel() {
               ? `AUC = ${result.auc.toFixed(2)} (95% CI ${result.ci_lower.toFixed(2)}–${result.ci_upper.toFixed(2)})`
               : `AUC = ${result.auc.toFixed(2)}`;
             const aucP = result.auc_p != null
-              ? (result.auc_p < 0.001 ? "p < 0.001" : `p = ${result.auc_p.toFixed(3)}`)
+              ? `p = ${fmtP(result.auc_p)}`
               : null;
             const aucBoxText = aucP ? `${aucCI}<br>${aucP}` : aucCI;
 
@@ -1164,7 +1164,7 @@ export default function ROCPanel() {
                     text: [
                       `<b>ΔAUC = ${cmpResult.difference > 0 ? "+" : ""}${cmpResult.difference.toFixed(3)}</b>`,
                       `95% CI: ${cmpResult.ci_diff_low.toFixed(3)} to ${cmpResult.ci_diff_high.toFixed(3)}`,
-                      `DeLong p ${cmpResult.p < 0.001 ? "< 0.001" : "= " + cmpResult.p.toFixed(3)}`,
+                      `DeLong p = ${fmtP(cmpResult.p)}`,
                     ].join("<br>"),
                     showarrow: false,
                     font: { color: cmpResult.significant ? "#15803d" : "#6b7280", size: 11 },
@@ -1426,7 +1426,7 @@ export default function ROCPanel() {
                             pr.significant ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"
                           }`}
                             title={`raw p = ${pr.p_raw}`}>
-                            {pr.p_adj < 0.001 ? "<0.001" : pr.p_adj.toFixed(3)}
+                            {fmtP(pr.p_adj)}
                           </span>
                         </td>
                       </tr>

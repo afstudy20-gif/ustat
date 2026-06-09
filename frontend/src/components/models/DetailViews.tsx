@@ -332,7 +332,7 @@ export function CoefDetailPanel({
             ["β", beta.toFixed(5)],
             ["SE", se.toFixed(5)],
             ["z / t", (coef.z ?? coef.t)?.toFixed(4) ?? "–"],
-            ["p (adj)", adjP < 0.001 ? "<0.001" : adjP.toFixed(4)],
+            ["p (adj)", fmtP(adjP)],
             ...(coef.ci_low != null ? [["95% CI", `${coef.ci_low.toFixed(3)} – ${coef.ci_high.toFixed(3)}`]] : []),
             ...(coef.or_ci_low != null ? [["OR CI", `${coef.or_ci_low.toFixed(3)} – ${coef.or_ci_high.toFixed(3)}`]] : []),
             ...(coef.hr_ci_low  != null ? [["HR CI", `${coef.hr_ci_low.toFixed(3)} – ${coef.hr_ci_high.toFixed(3)}`]] : []),

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useStore, isNumericKind } from "../store";
 import { runPairedTTest, runWilcoxonSR, runFriedman, runRMAnova, runMixedAnova } from "../api";
 import ResultExporter from "./ResultExporter";
+import { fmtP } from "../lib/format";
 
 const RM_TESTS = [
   { id: "paired_ttest",   label: "Paired t-test",        group: "Parametric" },
@@ -147,7 +148,7 @@ function ResultCard({ result }: { result: any }) {
                     <td className="px-2 py-1 font-medium">{e.term}</td>
                     <td className="px-2 py-1 text-right font-mono">{e.F?.toFixed(3)}</td>
                     <td className="px-2 py-1 text-right">{e.df_num},{e.df_den}</td>
-                    <td className="px-2 py-1 text-right font-mono">{e.p < 0.001 ? "<0.001" : e.p?.toFixed(4)}</td>
+                    <td className="px-2 py-1 text-right font-mono">{fmtP(e.p)}</td>
                     <td className="px-2 py-1 text-right font-mono">{e.effect_size?.value?.toFixed(3)}</td>
                     <td className="px-2 py-1 text-center">{e.significant ? "\u2713" : "\u2014"}</td>
                   </tr>
@@ -175,7 +176,7 @@ function ResultCard({ result }: { result: any }) {
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
-                    <td className="px-2 py-1 text-right font-mono">{ph.p_adj < 0.001 ? "<0.001" : ph.p_adj?.toFixed(4)}</td>
+                    <td className="px-2 py-1 text-right font-mono">{fmtP(ph.p_adj)}</td>
                     <td className="px-2 py-1 text-center">{ph.significant ? "\u2713" : "\u2014"}</td>
                   </tr>
                 ))}

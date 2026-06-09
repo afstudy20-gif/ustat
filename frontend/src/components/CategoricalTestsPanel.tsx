@@ -2,7 +2,13 @@ import { useState } from "react";
 import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel, runCochranArmitage } from "../api";
+import { fmtP } from "../lib/format";
 // ResultExporter available via ResultCard pattern
+
+/** True when a stat-grid key holds a p-value (route through the canonical fmtP). */
+function isPKey(k: string): boolean {
+  return /^p$|^p_?value$|_p$|_p_?value$/.test(k);
+}
 
 const TESTS = [
   { id: "binomial",       label: "Binomial test",         group: "One-sample" },
@@ -38,7 +44,7 @@ function ResultCard({ result }: { result: any }) {
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
         {stats.map(([k, v]) => (
           <div key={k} className="flex justify-between border-b border-gray-100 py-1">
-            <span className="text-gray-400">{k}</span><span className="text-gray-700 font-mono">{fmt(v)}</span>
+            <span className="text-gray-400">{k}</span><span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as any) : fmt(v)}</span>
           </div>
         ))}
       </div>
@@ -65,7 +71,7 @@ function ResultCard({ result }: { result: any }) {
               {result.posthoc.map((ph: any, i: number) => (
                 <tr key={i} className={`border-t border-gray-100 ${ph.significant?"":"text-gray-400"}`}>
                   <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
-                  <td className="px-2 py-1 text-right font-mono">{ph.p_adj<0.001?"<0.001":ph.p_adj?.toFixed(4)}</td>
+                  <td className="px-2 py-1 text-right font-mono">{fmtP(ph.p_adj)}</td>
                   <td className="px-2 py-1 text-center">{ph.significant?"\u2713":"\u2014"}</td>
                 </tr>
               ))}
