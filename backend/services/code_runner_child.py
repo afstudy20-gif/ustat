@@ -253,11 +253,22 @@ def _main() -> int:
     return 0
 
 
+def _result_fd() -> int:
+    """The fd the parent passed as the result channel. The parent inherits the
+    pipe write-end via subprocess `pass_fds`, which keeps it open at its
+    original number (it is NOT remapped to fd 3), and tells us that number via
+    SANDBOX_RESULT_FD. Fall back to the legacy fd 3 if unset."""
+    try:
+        return int(os.environ.get("SANDBOX_RESULT_FD", "3"))
+    except (TypeError, ValueError):
+        return 3
+
+
 def _emit(payload: dict) -> None:
-    """Write the result JSON to fd-3 if available, otherwise stdout."""
+    """Write the result JSON to the result-channel fd, otherwise stdout."""
     data = (json.dumps(payload) + "\n").encode("utf-8")
     try:
-        os.write(3, data)
+        os.write(_result_fd(), data)
     except OSError:
         sys.__stdout__.buffer.write(data)
         sys.__stdout__.buffer.flush()

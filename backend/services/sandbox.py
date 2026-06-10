@@ -120,6 +120,10 @@ def run_python(
         "PYTHONHASHSEED": "0",
         "MPLBACKEND": "Agg",
         "HOME": "/tmp",
+        # The result channel is the inherited pipe write-end. pass_fds keeps it
+        # open at THIS fd number in the child (it is NOT remapped to fd 3), so
+        # the child must learn the real number rather than assume 3.
+        "SANDBOX_RESULT_FD": str(w_fd),
         "LANG": "C.UTF-8",
         "LC_ALL": "C.UTF-8",
         "SANDBOX_CPU_SEC":    str(timeout),
