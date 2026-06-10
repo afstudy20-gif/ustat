@@ -924,7 +924,16 @@ export default function ForestBuilderPanel() {
                 },
                 yaxis: {
                   tickvals: yIdx,
-                  ticktext: validRows.map((r) => r.label),
+                  // Color each row label to match its marker / CI / right-text
+                  // so a significant row reads consistently across the whole
+                  // line. Plotly's tickfont.color is a single value, so embed
+                  // a per-tick HTML span instead. Default rows stay gray.
+                  ticktext: validRows.map((r, i) => {
+                    const c = colors[i];
+                    const label = r.label ?? "";
+                    if (layout.colorBy === "all_one" || c === layout.nonSigColor) return label;
+                    return `<span style="color:${c}">${label}</span>`;
+                  }),
                   range: [-0.6, n - 0.4],
                   gridcolor: "transparent",
                   zeroline: false,
