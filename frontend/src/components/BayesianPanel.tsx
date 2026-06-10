@@ -4,8 +4,29 @@ import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
 import TitledPlot from "./TitledPlot";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
 
 type AnalysisType = "ttest_one" | "ttest_ind" | "ttest_paired" | "correlation" | "regression";
+
+interface PlotCoord {
+  x: number;
+  prior: number;
+  posterior: number;
+}
+interface BayesianResult {
+  analysis: string;
+  n: number;
+  bf10: number;
+  bf01: number;
+  interpretation: string;
+  statistic_label: string;
+  statistic_value: number;
+  df?: number;
+  effect_size_label: string;
+  effect_size_value: number;
+  plot_coords?: PlotCoord[];
+  r_code?: string;
+}
 
 export default function BayesianPanel() {
   const session = useStore((s) => s.session);
@@ -17,7 +38,7 @@ function BayesianPanelBody({ session }: { session: Session }) {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
 
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
@@ -31,14 +52,14 @@ function BayesianPanelBody({ session }: { session: Session }) {
   const [mu, setMu] = useState<number>(0.0);
   const [imputation, setImputation] = usePersistedPanelState<string>("bayesian", "imputation", "listwise");
 
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<BayesianResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
-      const payload: any = {
+      const payload: Record<string, unknown> = {
         session_id: session.session_id,
         analysis_type: analysisType,
         outcome,
@@ -54,7 +75,7 @@ function BayesianPanelBody({ session }: { session: Session }) {
       }
 
       const res = await runBayesian(payload);
-      setResult(res.data);
+      setResult(res.data as BayesianResult);
       
       // Log session action
       useStore.getState().logAction("bayesian_stats", {
@@ -64,8 +85,9 @@ function BayesianPanelBody({ session }: { session: Session }) {
         predictors: analysisType === "regression" ? predictors : undefined,
         mu: analysisType === "ttest_one" ? mu : undefined
       });
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Bayesian calculation failed.");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Bayesian calculation failed.");
     } finally {
       setLoading(false);
     }
@@ -81,29 +103,29 @@ function BayesianPanelBody({ session }: { session: Session }) {
   // Render Prior vs Posterior plot
   const priorPosteriorPlot = () => {
     if (!result?.plot_coords || result.plot_coords.length === 0) return null;
-    const coords = result.plot_coords;
+    const coords: PlotCoord[] = result.plot_coords;
 
-    const data: any[] = [
+    const data: PlotData[] = [
       {
         type: "scatter",
         mode: "lines",
-        x: coords.map((c: any) => c.x),
-        y: coords.map((c: any) => c.prior),
+        x: coords.map((c) => c.x),
+        y: coords.map((c) => c.prior),
         line: { color: "#94a3b8", width: 1.8, dash: "dash" },
         name: "Prior (Cauchy)"
       },
       {
         type: "scatter",
         mode: "lines",
-        x: coords.map((c: any) => c.x),
-        y: coords.map((c: any) => c.posterior),
+        x: coords.map((c) => c.x),
+        y: coords.map((c) => c.posterior),
         line: { color: pal[0], width: 2.2 },
         name: "Posterior"
       }
     ];
 
     // JASP Savage-Dickey visual: find density at effect size = 0
-    const zeroIndex = coords.reduce((bestIdx: number, curr: any, currIdx: number) => {
+    const zeroIndex = coords.reduce((bestIdx: number, curr: PlotCoord, currIdx: number) => {
       return Math.abs(curr.x) < Math.abs(coords[bestIdx].x) ? currIdx : bestIdx;
     }, 0);
 

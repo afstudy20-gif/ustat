@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import Plot from "../PlotComponent";
 import { useStore, isCategoricalKind, type Session } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
+import type { Data, Layout } from "plotly.js";
 import { runSubgroupBar, getUniqueValues } from "../api";
+import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
 import PlotExporter from "./PlotExporter";
 
 export default function SubgroupBarPanel() {
@@ -29,7 +31,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
   const [errorType, setErrorType] = useState("ci"); // "ci" | "se" | "sd" | "none"
 
   const [uniqueValues, setUniqueValues] = useState<string[]>([]);
-  const [plotData, setPlotData] = useState<any>(null);
+  const [plotData, setPlotData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [chartTitle, setChartTitle] = useState("");
@@ -64,7 +66,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
   // Bar pattern/texture for accessibility & print
   const [barPattern, setBarPattern] = useState<"none" | "stripes" | "dots">("none");
 
-  const chartRef = useRef<any>(null);
+  const chartRef = useRef<PlotCaptureHandle | null>(null);
   const plotContainerRef = useRef<HTMLDivElement>(null);
 
   // Drag the red line on the right edge to resize the chart width (drag left to
@@ -104,7 +106,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
     // Fetch unique values for target category selection
     getUniqueValues(session.session_id, yCol)
       .then((res) => {
-        const vals = res.data.map((v: any) => String(v));
+        const vals = (res.data as unknown[]).map((v) => String(v));
         setUniqueValues(vals);
         setTargetValue(vals[0] ?? "");
       })
@@ -119,7 +121,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
     if (yMode === "percentage" && uniqueValues.length === 0 && yCol) {
       getUniqueValues(session.session_id, yCol)
         .then((res) => {
-          const vals = res.data.map((v: any) => String(v));
+          const vals = (res.data as unknown[]).map((v) => String(v));
           setUniqueValues(vals);
           setTargetValue(vals[0] ?? "");
         })
@@ -190,8 +192,9 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
       setCustomTitle(autoTitle);
       setCustomYLabel(autoYAxisTitle);
       setCustomXLabel(""); // Reset X custom label or let user overwrite
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Error generating subgroup chart");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Error generating subgroup chart");
     } finally {
       setLoading(false);
     }
@@ -214,8 +217,8 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
   const yAxisTitle = yMode === "percentage" ? `% ${yCol} (${targetValueLabel})` : `Mean of ${yCol}`;
   
   // Build shapes and annotations for visual enhancements
-  const shapes: any[] = [];
-  const annotations: any[] = [];
+  const shapes: PlotData[] = [];
+  const annotations: PlotData[] = [];
 
   // Reference line
   if (plotData && referenceLine !== null) {
@@ -245,8 +248,9 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
 
   // Alternating background colors for outer subgroups (visual hierarchy)
   if (plotData && showSubgroupBackgrounds && plotData.subgroups) {
-    const subgroupCount = plotData.subgroups.length;
-    plotData.subgroups.forEach((_sg: string, idx: number) => {
+    const subgroups = plotData.subgroups as unknown[];
+    const subgroupCount = subgroups.length;
+    subgroups.forEach((_sg, idx) => {
       if (idx % 2 === 0) {
         // Light alternating background
         shapes.push({
@@ -272,7 +276,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
     title: { text: customTitle || chartTitle, font: { color: "#374151", size: 13, weight: "bold" } },
     showlegend: showLegend,
     xaxis: {
-      ...(layout.xaxis as any),
+      ...(layout.xaxis as PlotLayout),
       title: customXLabel ? { text: customXLabel, font: { size: 11 } } : undefined,
       type: "multicategory",
       showgrid: showGrid,
@@ -282,7 +286,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
       tickfont: { size: 10 },
     },
     yaxis: {
-      ...(layout.yaxis as any),
+      ...(layout.yaxis as PlotLayout),
       title: { text: customYLabel || yAxisTitle, font: { size: 11 } },
       showgrid: showGrid,
       gridcolor: showGrid ? "#e5e7eb" : "transparent",
@@ -475,7 +479,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
               <div className="space-y-2 pt-2 border-t border-gray-100">
                 <span className="text-xs font-semibold text-gray-700 block">Custom Legend Labels</span>
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {plotData.traces.map((t: any) => {
+                  {(plotData.traces as Array<{ name: unknown }>).map((t) => {
                     const rawVal = String(t.name);
                     const colorColMeta = session.columns.find((c) => c.name === colorCol);
                     const colorLabels = colorColMeta?.value_labels ?? {};
@@ -626,7 +630,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
                 <select 
                   className="select w-full text-xs" 
                   value={sortBars} 
-                  onChange={(e) => setSortBars(e.target.value as any)}
+                  onChange={(e) => setSortBars(e.target.value as "none" | "value-desc" | "value-asc")}
                 >
                   <option value="none">No sorting (original order)</option>
                   <option value="value-desc">Sort by value (descending)</option>
@@ -653,7 +657,7 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
                 <select 
                   className="select w-full text-xs" 
                   value={barPattern} 
-                  onChange={(e) => setBarPattern(e.target.value as any)}
+                  onChange={(e) => setBarPattern(e.target.value as "none" | "stripes" | "dots")}
                 >
                   <option value="none">Solid (default)</option>
                   <option value="stripes">Stripes</option>
@@ -703,8 +707,8 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
             <div className="flex-1 min-h-0">
               <Plot
                 ref={chartRef}
-                data={traces}
-                layout={fullLayout as any}
+                data={traces as unknown as Data[]}
+                layout={fullLayout as unknown as Partial<Layout>}
                 style={{ width: "100%", height: "100%" }}
                 useResizeHandler
                 config={{ responsive: true, displayModeBar: true, displaylogo: false }}
@@ -814,10 +818,22 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
   );
 }
 
+/** A raw subgroup-bar trace as returned by the subgroup_bar endpoint. */
+interface RawSubgroupTrace {
+  name: string;
+  x_subgroup: unknown[];
+  x_xaxis: unknown[];
+  y: number[];
+  ns?: unknown;
+  error?: number[];
+  error_high?: number[];
+  error_low?: number[];
+}
+
 function buildPlotlyTraces(
-  plotData: any, 
-  pal: string[], 
-  session: any, 
+  plotData: Record<string, unknown> | null,
+  pal: string[],
+  session: Session | null,
   customLegendLabels: Record<string, string>,
   options: {
     showValueLabels?: boolean;
@@ -827,44 +843,45 @@ function buildPlotlyTraces(
     sortBars?: "none" | "value-desc" | "value-asc";
     barPattern?: "none" | "stripes" | "dots";
   } = {}
-) {
+): PlotData[] {
   if (!plotData || !plotData.traces || !session) return [];
 
-  const { 
-    showValueLabels = true, 
-    showSampleSizes = true, 
+  const {
+    showValueLabels = true,
+    showSampleSizes = true,
     barWidth = 0.6,
     sortBars = "none",
     barPattern = "none"
   } = options;
 
-  const tracesData = [...plotData.traces];
+  const tracesData = [...(plotData.traces as RawSubgroupTrace[])];
 
   // === 1. Bar Sorting by Value ===
   if (sortBars !== "none") {
     tracesData.sort((a, b) => {
-      const sumA = a.y.reduce((sum: number, v: number) => sum + (v || 0), 0);
-      const sumB = b.y.reduce((sum: number, v: number) => sum + (v || 0), 0);
+      const sumA = a.y.reduce((sum, v) => sum + (v || 0), 0);
+      const sumB = b.y.reduce((sum, v) => sum + (v || 0), 0);
       return sortBars === "value-desc" ? sumB - sumA : sumA - sumB;
     });
   }
 
-  const subgroupColMeta = session.columns.find((c: any) => c.name === plotData.subgroup_col);
-  const xaxisColMeta = session.columns.find((c: any) => c.name === plotData.xaxis_col);
-  const colorColMeta = session.columns.find((c: any) => c.name === plotData.color_col);
+  const labelsFor = (colName: unknown): Record<string, string> => {
+    const meta = session.columns.find((c) => c.name === colName);
+    return meta?.value_labels ?? {};
+  };
 
-  const subgroupLabels = subgroupColMeta?.value_labels ?? {};
-  const xaxisLabels = xaxisColMeta?.value_labels ?? {};
-  const colorLabels = colorColMeta?.value_labels ?? {};
+  const subgroupLabels = labelsFor(plotData.subgroup_col);
+  const xaxisLabels = labelsFor(plotData.xaxis_col);
+  const colorLabels = labelsFor(plotData.color_col);
 
-  return tracesData.map((t: any, i: number) => {
-    const mappedSubgroup = t.x_subgroup.map((v: any) => subgroupLabels[String(v)] ?? String(v));
-    const mappedXaxis = t.x_xaxis.map((v: any) => xaxisLabels[String(v)] ?? String(v));
+  return tracesData.map((t, i) => {
+    const mappedSubgroup = t.x_subgroup.map((v) => subgroupLabels[String(v)] ?? String(v));
+    const mappedXaxis = t.x_xaxis.map((v) => xaxisLabels[String(v)] ?? String(v));
     const mappedName = customLegendLabels[String(t.name)] || colorLabels[t.name] || String(t.name);
 
     const xArray = [mappedSubgroup, mappedXaxis];
-    
-    const trace: any = {
+
+    const trace: PlotData = {
       type: "bar",
       name: mappedName,
       x: xArray,
@@ -901,7 +918,7 @@ function buildPlotlyTraces(
 
     // Value labels on top of bars
     if (showValueLabels) {
-      trace.text = t.y.map((v: number) => v.toFixed(1) + (plotData.y_mode === 'percentage' ? '%' : ''));
+      trace.text = t.y.map((v) => v.toFixed(1) + (plotData.y_mode === 'percentage' ? '%' : ''));
       trace.textposition = 'outside';
       trace.textfont = { size: 10, color: '#111827' };
     }

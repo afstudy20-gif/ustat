@@ -4,6 +4,43 @@ import { runNonInferiority, getUniqueValues } from "../api";
 import { Tip } from "./Tip";
 import ResultExporter from "./ResultExporter";
 
+interface Assumption {
+  name: string;
+  detail: string;
+  met: boolean;
+}
+
+interface NonInferiorityResult {
+  non_inferior?: boolean;
+  effect?: string;
+  estimate?: number | string;
+  ci_level?: number | string;
+  ci_low?: number | string;
+  ci_high?: number | string;
+  margin?: number | string;
+  bound?: string;
+  alpha_one_sided?: number | string;
+  p_noninferiority?: number;
+  test_group?: string;
+  ref_group?: string;
+  outcome_type?: string;
+  n_test?: number | null;
+  n_ref?: number;
+  events_test?: number;
+  events_ref?: number;
+  p_test?: number;
+  p_ref?: number;
+  mean_test?: number | string;
+  mean_ref?: number | string;
+  export_rows?: string[][];
+  assumptions?: Assumption[];
+  interpretation?: string;
+}
+
+interface ApiErrorDetail {
+  msg?: string;
+}
+
 export default function NonInferiorityPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
@@ -20,7 +57,7 @@ export default function NonInferiorityPanel() {
   const [margin, setMargin] = useState("1.20");
   const [bound, setBound] = useState<"upper" | "lower">("upper");
   const [alpha, setAlpha] = useState("0.05");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<NonInferiorityResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -28,7 +65,7 @@ export default function NonInferiorityPanel() {
     setResult(null);
     if (!groupCol || !sid) { setLevels([]); return; }
     getUniqueValues(sid, groupCol).then((res) => {
-      const vals = (res.data?.values ?? res.data ?? []).map((v: any) => String(v)).slice(0, 50);
+      const vals = (res.data?.values ?? res.data ?? []).map((v: unknown) => String(v)).slice(0, 50);
       setLevels(vals);
       if (vals.length === 2) { setTestGroup(vals[1]); setRefGroup(vals[0]); }
     }).catch(() => setLevels([]));
@@ -46,10 +83,11 @@ export default function NonInferiorityPanel() {
         outcome_type: outcomeType, effect, margin: Number(margin), bound, alpha: Number(alpha),
       });
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "Failed")));
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const message = e instanceof Error ? e.message : String(e);
+      setError(Array.isArray(detail) ? detail.map((m: ApiErrorDetail) => m.msg ?? String(m)).join(", ")
+        : (typeof detail === "string" ? detail : (message || "Failed")));
     } finally { setLoading(false); }
   };
 
@@ -131,7 +169,7 @@ export default function NonInferiorityPanel() {
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-500">Bound</span>
-              <select value={bound} onChange={(e) => setBound(e.target.value as any)}
+              <select value={bound} onChange={(e) => setBound(e.target.value as "upper" | "lower")}
                 className="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
                 <option value="upper">Upper</option>
                 <option value="lower">Lower</option>
@@ -207,7 +245,7 @@ export default function NonInferiorityPanel() {
               )}
             </div>
 
-            {result.assumptions?.map((a: any, i: number) => (
+            {result.assumptions?.map((a: Assumption, i: number) => (
               <div key={i} className={`flex items-start gap-2 text-xs px-3 py-1.5 rounded-lg ${a.met ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                 <span>{a.met ? "✓" : "⚠"}</span>
                 <span><span className="font-medium">{a.name}</span> — {a.detail}</span>

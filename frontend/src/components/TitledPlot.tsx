@@ -31,22 +31,54 @@
  *   to render a read-only TitledPlot (handy for snapshots).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentRef } from "react";
 import Plot from "../PlotComponent";
 import PlotExporter from "./PlotExporter";
 import { registerPlotCaptureHooks } from "../lib/plotCapture";
+import type { PlotData, PlotLayout, PlotConfig, PlotCaptureHandle } from "../lib/plotTypes";
+
+/** Minimal shape of the Plotly module / graph-div fields we call. */
+interface PlotlyRelayout {
+  relayout?: (gd: HTMLElement, update: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** The nested layout fields TitledPlot reads from / merges into. */
+interface LayoutLike {
+  height?: unknown;
+  margin?: { t?: number; b?: number } & Record<string, unknown>;
+  annotations?: unknown[];
+  xaxis?: { title?: { text?: string } & Record<string, unknown> } & Record<string, unknown>;
+  yaxis?: { title?: { text?: string } & Record<string, unknown> } & Record<string, unknown>;
+}
+
+/** Flat, typed view of the layout reads used during export relayout. */
+function readLayout(layout: PlotLayout | undefined): {
+  marginT?: number;
+  marginB?: number;
+  xAxisTitle?: string;
+  yAxisTitle?: string;
+} {
+  const l = (layout ?? {}) as LayoutLike;
+  return {
+    marginT: l.margin?.t,
+    marginB: l.margin?.b,
+    xAxisTitle: l.xaxis?.title?.text,
+    yAxisTitle: l.yaxis?.title?.text,
+  };
+}
 
 export interface TitledPlotProps {
-  data: any[];
-  layout?: any;
+  data: PlotData[];
+  layout?: PlotLayout;
   style?: React.CSSProperties;
-  config?: any;
+  config?: PlotConfig;
   defaultTitle?: string;
   defaultSubtitle?: string;
   defaultXAxis?: string;
   defaultYAxis?: string;
   showEditor?: boolean;
   /** Forward the inner Plotly ref so the global ResultExporter can grab it. */
-  plotRefOut?: React.MutableRefObject<any>;
+  plotRefOut?: React.MutableRefObject<PlotCaptureHandle | null>;
   /** Persist edits across re-renders. Provide a stable key per result. */
   storageKey?: string;
 }
@@ -94,7 +126,7 @@ export default function TitledPlot({
   const [plotH, setPlotH]       = useState<number>(typeof layout?.height === "number" ? layout.height : 440);
   // Hide chosen labels in the EXPORT only (kept on screen).
   const [hideExport, setHideExport] = useState({ title: false, caption: false, axes: false });
-  const localRef = useRef<any>(null);
+  const localRef = useRef<PlotCaptureHandle | null>(null);
   const refToUse = plotRefOut ?? localRef;
 
   // Caption is appended after any caller-supplied annotations.
@@ -104,19 +136,20 @@ export default function TitledPlot({
   // restore — so the on-screen figure keeps its labels but the file omits the
   // ones the user ticked (handy when the title goes in the manuscript legend).
   const exportRelayout = useCallback(async (strip: boolean) => {
-    const gd: any = (refToUse.current as any)?.el;
+    const gd = (refToUse.current as PlotCaptureHandle | null)?.el;
     if (!gd) return;
     // react-plotly.js doesn't always attach `_Plotly` to the graph div, so fall
     // back to the dist bundle — otherwise the label-hide silently no-ops.
-    let Plotly: any = gd._Plotly;
+    let Plotly: PlotlyRelayout | undefined = (gd as { _Plotly?: PlotlyRelayout })._Plotly;
     if (!Plotly?.relayout) {
-      const mod: any = await import("plotly.js/dist/plotly");
+      const mod = (await import("plotly.js/dist/plotly")) as PlotlyRelayout & { default?: PlotlyRelayout };
       Plotly = mod?.relayout ? mod : mod?.default;
     }
     if (!Plotly?.relayout) return;
-    const upd: Record<string, any> = {};
-    const baseTop = layout?.margin?.t ?? 30;
-    const baseBottom = layout?.margin?.b ?? 50;
+    const lv = readLayout(layout);
+    const upd: Record<string, unknown> = {};
+    const baseTop = lv.marginT ?? 30;
+    const baseBottom = lv.marginB ?? 50;
     if (hideExport.title) {
       upd["title.text"] = strip ? "" : (title || "");
       upd["margin.t"] = strip ? baseTop : Math.max(baseTop, title ? 50 : baseTop);
@@ -126,8 +159,8 @@ export default function TitledPlot({
       upd["margin.b"] = strip ? baseBottom : Math.max(baseBottom, 90);
     }
     if (hideExport.axes) {
-      upd["xaxis.title.text"] = strip ? "" : (xLab || (layout?.xaxis?.title?.text ?? ""));
-      upd["yaxis.title.text"] = strip ? "" : (yLab || (layout?.yaxis?.title?.text ?? ""));
+      upd["xaxis.title.text"] = strip ? "" : (xLab || lv.xAxisTitle || "");
+      upd["yaxis.title.text"] = strip ? "" : (yLab || lv.yAxisTitle || "");
     }
     if (Object.keys(upd).length) { try { await Plotly.relayout(gd, upd); } catch { /* non-fatal */ } }
   }, [captionIndex, hideExport, layout, refToUse, sub, title, xLab, yLab]);
@@ -155,8 +188,9 @@ export default function TitledPlot({
   }, [defaultTitle, defaultSubtitle, defaultXAxis, defaultYAxis]);
 
   const mergedLayout = useMemo(() => {
-    const base = layout || {};
-    const userAnnotations = Array.isArray(base.annotations) ? base.annotations : [];
+    const base: PlotLayout = layout || {};
+    const baseView = base as LayoutLike;
+    const userAnnotations = Array.isArray(baseView.annotations) ? baseView.annotations : [];
     const captionAnnotation = sub
       ? [{
           // Anchor at the plot-area bottom (y:0 paper) and offset by a FIXED
@@ -179,12 +213,12 @@ export default function TitledPlot({
         : undefined,
       // Bottom margin needs extra room for the caption.
       margin: {
-        ...(base.margin || {}),
-        t: title ? Math.max(base.margin?.t ?? 30, 50) : (base.margin?.t ?? 30),
-        b: sub   ? Math.max(base.margin?.b ?? 50, 90) : (base.margin?.b ?? 50),
+        ...(baseView.margin || {}),
+        t: title ? Math.max(baseView.margin?.t ?? 30, 50) : (baseView.margin?.t ?? 30),
+        b: sub   ? Math.max(baseView.margin?.b ?? 50, 90) : (baseView.margin?.b ?? 50),
       },
-      xaxis: { ...(base.xaxis || {}), title: xLab ? { ...(base.xaxis?.title || {}), text: xLab } : (base.xaxis?.title) },
-      yaxis: { ...(base.yaxis || {}), title: yLab ? { ...(base.yaxis?.title || {}), text: yLab } : (base.yaxis?.title) },
+      xaxis: { ...(baseView.xaxis || {}), title: xLab ? { ...(baseView.xaxis?.title || {}), text: xLab } : (baseView.xaxis?.title) },
+      yaxis: { ...(baseView.yaxis || {}), title: yLab ? { ...(baseView.yaxis?.title || {}), text: yLab } : (baseView.yaxis?.title) },
       annotations: [...userAnnotations, ...captionAnnotation],
       // The container (sized by the Width/Height sliders) drives dimensions.
       height: undefined,
@@ -313,11 +347,11 @@ export default function TitledPlot({
 
       <div className="relative" style={{ width: plotW != null ? plotW : "100%", height: plotH, maxWidth: "100%" }}>
         <Plot
-          ref={refToUse as any}
-          data={data}
-          layout={mergedLayout}
-          style={{ ...(style as object), width: "100%", height: "100%" }}
-          config={exportSafeConfig}
+          ref={refToUse as unknown as React.Ref<ComponentRef<typeof Plot>>}
+          data={data as React.ComponentProps<typeof Plot>["data"]}
+          layout={mergedLayout as React.ComponentProps<typeof Plot>["layout"]}
+          style={{ ...style, width: "100%", height: "100%" }}
+          config={exportSafeConfig as React.ComponentProps<typeof Plot>["config"]}
           useResizeHandler
         />
         <PlotExporter plotRef={refToUse} title={title || "chart"}

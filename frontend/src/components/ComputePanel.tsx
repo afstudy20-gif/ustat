@@ -198,8 +198,8 @@ function FormulaTab({
       const res = await computeFormula(sessionId, { formula, new_col: newCol.trim() });
       setSuccess(res.data);
       onResult(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Computation failed");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Computation failed");
     } finally { setLoading(false); }
   };
 
@@ -404,8 +404,8 @@ function TransformTab({
       const res = await computeTransform(sessionId, { source_col: srcCol, transform, new_col: newCol.trim() });
       setSuccess(res.data);
       onResult(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Transform failed");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Transform failed");
     } finally { setLoading(false); }
   };
 
@@ -581,8 +581,8 @@ function RecodeTab({
           useStore.getState().setSession({ ...session, columns: updatedCols });
         }
       }
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Recode failed");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Recode failed");
     } finally { setLoading(false); }
   };
 
@@ -1041,8 +1041,8 @@ function ClinicalCalcForm({
       const res = await computeClinical(sessionId, calc.id, payload);
       setSuccess(res.data);
       onResult(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Calculation failed");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Calculation failed");
     } finally { setLoading(false); }
   };
 

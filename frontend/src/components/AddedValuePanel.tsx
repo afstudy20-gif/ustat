@@ -10,6 +10,54 @@ import { fmtP } from "../lib/format";
  * base + new predictor(s) on discrimination (ΔAUC, DeLong), reclassification
  * (NRI, IDI), overall fit (LR test, ΔAIC, pseudo-R²), and calibration.
  */
+interface Discrimination {
+  auc_base?: number;
+  auc_full?: number;
+  delta_auc: number;
+  delong_p?: number;
+  significant?: boolean;
+}
+
+interface Reclassification {
+  idi: number;
+  idi_ci?: [number | string, number | string] | null;
+  nri: number;
+  nri_ci?: [number | string, number | string] | null;
+  nri_events?: number;
+  nri_nonevents?: number;
+}
+
+interface Fit {
+  lr_stat?: number;
+  lr_p?: number;
+  delta_aic: number;
+  nagelkerke_base?: number;
+  nagelkerke_full?: number;
+}
+
+interface CalibrationSide {
+  calibration_slope?: number;
+  brier?: number | string;
+}
+
+interface Calibration {
+  base: CalibrationSide;
+  full: CalibrationSide;
+  preserved?: boolean;
+}
+
+interface AddedValueResult {
+  added_value?: boolean;
+  result_text?: string;
+  n?: number;
+  n_excluded?: number;
+  prediction_basis?: string;
+  discrimination: Discrimination;
+  reclassification: Reclassification;
+  fit: Fit;
+  calibration: Calibration;
+}
+
 export default function AddedValuePanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
@@ -20,7 +68,7 @@ export default function AddedValuePanel() {
   const [basePreds, setBasePreds] = useState<string[]>([]);
   const [newPreds, setNewPreds] = useState<string[]>([]);
   const [cv, setCv] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<AddedValueResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -36,8 +84,8 @@ export default function AddedValuePanel() {
         model_type: "logistic", cv_folds: cv ? 5 : 0, bootstrap: 400,
       });
       setResult(r.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Added-value analysis failed.");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Added-value analysis failed.");
     } finally { setLoading(false); }
   };
 

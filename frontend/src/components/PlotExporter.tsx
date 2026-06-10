@@ -5,11 +5,17 @@
  */
 import { useState, useEffect } from "react";
 import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
+import type { PlotRef, PlotCaptureHandle } from "../lib/plotTypes";
 
 type ExportFmt = "png" | "svg" | "tiff" | "jpeg";
 
+/** Minimal shape of the Plotly module / graph-div fields we call. */
+interface PlotlyToImage {
+  toImage?: (gd: HTMLElement, opts: Record<string, unknown>) => Promise<string>;
+}
+
 interface Props {
-  plotRef: React.RefObject<any>;
+  plotRef: PlotRef;
   title?: string;
   className?: string;
   defaultWidth?: number;
@@ -51,19 +57,19 @@ export default function PlotExporter({
 
   const safeTitle = title.replace(/[^\w\s-]/g, "").replace(/\s+/g, "_").slice(0, 40) || "chart";
   const getEl = (): HTMLElement | null => {
-    const ref = plotRef.current;
+    const ref: PlotCaptureHandle | null = plotRef.current;
     if (!ref) return null;
     // react-plotly.js component instance → .el
     if (ref.el) return ref.el;
     // Direct DOM element with .data (already a plotly div)
-    if (ref.data) return ref;
+    if (ref.data) return ref as unknown as HTMLElement;
     // Wrapper div → find the plotly div inside
     if (ref instanceof HTMLElement) {
       const plotlyDiv = ref.querySelector(".js-plotly-plot") ?? ref.querySelector("[class*='plotly']");
       if (plotlyDiv) return plotlyDiv as HTMLElement;
       // If the ref IS the container, find first child div with data
       for (const child of ref.querySelectorAll("div")) {
-        if ((child as any).data) return child as HTMLElement;
+        if ((child as { data?: unknown }).data) return child as HTMLElement;
       }
       return ref;
     }
@@ -75,9 +81,9 @@ export default function PlotExporter({
     const el = getEl();
     if (!el) return null;
     // Reuse the gd's own Plotly instance — same fix as downloadImage.
-    let Plotly: any = (el as any)._Plotly;
+    let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
     if (!Plotly?.toImage) {
-      const mod: any = await import("plotly.js/dist/plotly");
+      const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
       Plotly = mod?.toImage ? mod : mod?.default;
     }
     if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
@@ -139,9 +145,9 @@ export default function PlotExporter({
         // Prefer the Plotly instance react-plotly.js already attached to
         // the gd — calling _Plotly.toImage reuses the exact bundle that
         // rendered the chart and bypasses the ESM tree-shake bug entirely.
-        let Plotly: any = (el as any)._Plotly;
+        let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
         if (!Plotly?.toImage) {
-          const mod: any = await import("plotly.js/dist/plotly");
+          const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
           Plotly = mod?.toImage ? mod : mod?.default;
         }
         if (!Plotly?.toImage) {

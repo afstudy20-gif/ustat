@@ -3,6 +3,8 @@ import Plot from "../../PlotComponent";
 import { useStore } from "../../store";
 import PlotExporter from "../PlotExporter";
 import { fmtP } from "../../lib/format";
+import type { PlotCaptureHandle, PlotData } from "../../lib/plotTypes";
+import type { Coefficient, ORRow, ForestResult } from "./shared";
 
 const FOREST_BASE = {
   paper_bgcolor: "transparent",
@@ -63,11 +65,11 @@ type ForestLayout = "overlay" | "split";
 type ForestColorMode = "series" | "significance";
 
 export function ForestPlot({ result, modelType, outcome }: {
-  result: any;
+  result: ForestResult;
   modelType: string;
   outcome?: string;
 }) {
-  const forestRef = useRef<any>(null);
+  const forestRef = useRef<PlotCaptureHandle | null>(null);
   const isORTable = modelType === "ortable" || modelType === "firth_ortable";
   const isCox     = modelType === "cox";
   const metric    = isCox ? "HR" : "OR";
@@ -104,7 +106,11 @@ export function ForestPlot({ result, modelType, outcome }: {
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   // Significance color helper honours user-supplied palette.
-  const sigColor = (est: number | null, lo: number | null, hi: number | null): string => {
+  const sigColor = (
+    est: number | null | undefined,
+    lo: number | null | undefined,
+    hi: number | null | undefined,
+  ): string => {
     if (est == null || lo == null || hi == null) return "#9ca3af";
     const includesOne = lo <= 1 && hi >= 1;
     return includesOne ? opts.nonSigColor : opts.sigColor;
@@ -219,7 +225,11 @@ export function ForestPlot({ result, modelType, outcome }: {
   );
 
   // ── Shared helpers ────────────────────────────────────────────────────────
-  const fmtCI = (est: number | null, lo: number | null, hi: number | null) =>
+  const fmtCI = (
+    est: number | null | undefined,
+    lo: number | null | undefined,
+    hi: number | null | undefined,
+  ) =>
     est == null ? "—" : `${est.toFixed(2)} (${lo?.toFixed(2)}–${hi?.toFixed(2)})`;
 
   // Base props for layout annotations
@@ -248,7 +258,7 @@ export function ForestPlot({ result, modelType, outcome }: {
 
   // ── OR Table (dual trace) ─────────────────────────────────────────────────
   if (isORTable) {
-    const rows       = result.table as any[];
+    const rows       = result.table ?? [];
     const n          = rows.length;
     const yIdx       = Object.fromEntries(rows.map((r, i) => [r.variable, i]));
     const uniValid   = rows.filter((r) => r.uni_or   != null && r.uni_or   > 0);
@@ -259,11 +269,11 @@ export function ForestPlot({ result, modelType, outcome }: {
     // Color resolvers honour the colorBy toggle:
     //   • "series"        — uni=slate / multi=emerald (existing palette)
     //   • "significance"  — gray when CI includes 1, red when it doesn't
-    const uniColor = (r: any) =>
+    const uniColor = (r: ORRow) =>
       opts.colorBy === "significance"
         ? sigColor(r.uni_or, r.uni_ci_low, r.uni_ci_high)
         : (r.uni_p != null && r.uni_p < 0.05 ? "#6366f1" : "#6b7280");
-    const multiColor = (r: any) =>
+    const multiColor = (r: ORRow) =>
       opts.colorBy === "significance"
         ? sigColor(r.multi_or, r.multi_ci_low, r.multi_ci_high)
         : (r.multi_p != null && r.multi_p < 0.05 ? "#10b981" : "#6b7280");
@@ -330,7 +340,7 @@ export function ForestPlot({ result, modelType, outcome }: {
     // Trace builders shared by both layouts
     const uniMarker = opts.markerStyle === "square" ? "square" : "circle";
     const multiMarker = opts.markerStyle === "square" ? "square" : "diamond";
-    const uniTrace: any = {
+    const uniTrace: PlotData = {
       name: splitLayout ? "Unadjusted" : "Univariate",
       type: "scatter", mode: "markers",
       x: uniValid.map((r) => r.uni_or),
@@ -353,7 +363,7 @@ export function ForestPlot({ result, modelType, outcome }: {
       ),
       ...(splitLayout ? { xaxis: "x", yaxis: "y" } : {}),
     };
-    const multiTrace: any = {
+    const multiTrace: PlotData = {
       name: splitLayout ? "Adjusted" : "Multivariate",
       type: "scatter", mode: "markers",
       x: multiValid.map((r) => r.multi_or),
@@ -469,15 +479,15 @@ export function ForestPlot({ result, modelType, outcome }: {
   }
 
   // ── Single model — logistic or cox ────────────────────────────────────────
-  const coefs    = (result.coefficients ?? []).filter((c: any) => c.variable !== "const");
+  const coefs    = (result.coefficients ?? []).filter((c: Coefficient) => c.variable !== "const");
   const n        = coefs.length;
   if (n === 0) return null;
 
-  const estimates = coefs.map((c: any) => isCox ? c.hr         : c.odds_ratio);
-  const ciLow     = coefs.map((c: any) => isCox ? c.hr_ci_low  : c.or_ci_low);
-  const ciHigh    = coefs.map((c: any) => isCox ? c.hr_ci_high : c.or_ci_high);
-  const pVals     = coefs.map((c: any) => c.p);
-  const labels    = coefs.map((c: any) => c.variable);
+  const estimates = coefs.map((c: Coefficient) => isCox ? c.hr         : c.odds_ratio);
+  const ciLow     = coefs.map((c: Coefficient) => isCox ? c.hr_ci_low  : c.or_ci_low);
+  const ciHigh    = coefs.map((c: Coefficient) => isCox ? c.hr_ci_high : c.or_ci_high);
+  const pVals     = coefs.map((c: Coefficient) => c.p);
+  const labels    = coefs.map((c: Coefficient) => c.variable);
   const COLOR     = isCox ? "#10b981" : "#6366f1";
   const COLOR_SIG = isCox ? "#34d399" : "#818cf8";
   const plotH     = Math.max(260, n * 46 + 120);
@@ -505,7 +515,7 @@ export function ForestPlot({ result, modelType, outcome }: {
     ...(opts.showArrows ? dirAnnotations(forestRight) : []),
     // Per-variable rows (only when value columns are shown)
     ...(opts.showValueColumns
-      ? coefs.map((_: any, i: number) => {
+      ? coefs.map((_: Coefficient, i: number) => {
           const col = rowColor(i);
           return [
             { ...AB, xref: "paper", yref: "y", x: TX1, y: i,
@@ -533,7 +543,7 @@ export function ForestPlot({ result, modelType, outcome }: {
       data={[{
         type: "scatter", mode: "markers",
         x: estimates,
-        y: coefs.map((_: any, i: number) => i),
+        y: coefs.map((_: Coefficient, i: number) => i),
         error_x: {
           type: "data", symmetric: false,
           array:      estimates.map((e: number, i: number) => (ciHigh[i] ?? e) - e),
@@ -544,10 +554,10 @@ export function ForestPlot({ result, modelType, outcome }: {
         marker: {
           size: estimates.map((_: number, i: number) => precisionSize(estimates[i], ciLow[i], ciHigh[i])),
           symbol: opts.markerStyle,
-          color: coefs.map((_: any, i: number) => rowColor(i)),
+          color: coefs.map((_: Coefficient, i: number) => rowColor(i)),
           line: { color: "#d1d5db", width: 1 },
         },
-        hovertemplate: coefs.map((_: any, i: number) =>
+        hovertemplate: coefs.map((_: Coefficient, i: number) =>
           `<b>${labels[i]}</b><br>${metric}: ${estimates[i]?.toFixed(3)}<br>95% CI: ${ciLow[i]?.toFixed(3)} – ${ciHigh[i]?.toFixed(3)}<br>p = ${fmtP(pVals[i])}<extra></extra>`
         ),
         name: isCox ? "Hazard Ratio" : "Odds Ratio",
@@ -569,7 +579,7 @@ export function ForestPlot({ result, modelType, outcome }: {
         },
         yaxis: {
           ...FOREST_BASE.yaxis,
-          tickvals: coefs.map((_: any, i: number) => i),
+          tickvals: coefs.map((_: Coefficient, i: number) => i),
           ticktext: labels.map((l: string) => varLabel(l)),
           autorange: "reversed" as const,
           range: [-0.5, n - 0.5],

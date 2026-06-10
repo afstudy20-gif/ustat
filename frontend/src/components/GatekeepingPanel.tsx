@@ -7,6 +7,30 @@ import { fmtP } from "../lib/format";
 interface Hyp { label: string; p: string }
 interface Family { name: string; gamma: string; hyps: Hyp[] }
 
+interface ResultHypothesis {
+  label?: string;
+  p_raw?: number;
+  p_adjusted?: number;
+  reject?: boolean;
+}
+
+interface ResultFamily {
+  name?: string;
+  gamma?: number;
+  n_rejected?: number;
+  n?: number;
+  hypotheses: ResultHypothesis[];
+}
+
+interface GatekeepingResult {
+  method?: string;
+  logic?: string;
+  alpha?: number;
+  families: ResultFamily[];
+  export_rows?: (string | number | null | undefined)[][];
+  interpretation?: string;
+}
+
 const SAMPLE: Family[] = [
   { name: "Primary", gamma: "", hyps: [{ label: "All-cause death", p: "0.012" }] },
   { name: "Secondary", gamma: "", hyps: [
@@ -19,7 +43,7 @@ export default function GatekeepingPanel() {
   const [method, setMethod] = useState<"hochberg" | "holm">("hochberg");
   const [logic, setLogic] = useState<"serial" | "parallel">("serial");
   const [alpha, setAlpha] = useState("0.05");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<GatekeepingResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,10 +71,11 @@ export default function GatekeepingPanel() {
     try {
       const res = await runGatekeeping(payload);
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "Failed")));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: unknown } }; message?: string };
+      const detail = err?.response?.data?.detail;
+      setError(Array.isArray(detail) ? detail.map((m: { msg?: string }) => m.msg ?? String(m)).join(", ")
+        : (typeof detail === "string" ? detail : (err?.message ?? "Failed")));
     } finally { setLoading(false); }
   };
 
@@ -70,14 +95,14 @@ export default function GatekeepingPanel() {
           <div className="grid grid-cols-3 gap-2">
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-500">Within-family</span>
-              <select value={method} onChange={(e) => setMethod(e.target.value as any)} className="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
+              <select value={method} onChange={(e) => setMethod(e.target.value as "hochberg" | "holm")} className="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
                 <option value="hochberg">Hochberg</option>
                 <option value="holm">Holm</option>
               </select>
             </label>
             <label className="flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-500">Logic</span>
-              <select value={logic} onChange={(e) => setLogic(e.target.value as any)} className="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
+              <select value={logic} onChange={(e) => setLogic(e.target.value as "serial" | "parallel")} className="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
                 <option value="serial">Serial</option>
                 <option value="parallel">Parallel</option>
               </select>
@@ -140,10 +165,10 @@ export default function GatekeepingPanel() {
                   Adjusted p-values <span className="text-gray-400 font-normal">· {result.method} · {result.logic} · α={result.alpha}</span>
                 </h4>
                 {result.export_rows && (
-                  <ResultExporter title="Gatekeeping" headers={result.export_rows[0]} rows={result.export_rows.slice(1)} />
+                  <ResultExporter title="Gatekeeping" headers={result.export_rows[0].map((h) => String(h ?? ""))} rows={result.export_rows.slice(1)} />
                 )}
               </div>
-              {result.families.map((f: any, fi: number) => (
+              {result.families.map((f: ResultFamily, fi: number) => (
                 <div key={fi} className="space-y-1">
                   <div className="flex items-center gap-2 text-xs">
                     <span className="font-semibold text-gray-700">{f.name}</span>
@@ -160,7 +185,7 @@ export default function GatekeepingPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {f.hypotheses.map((h: any, hi: number) => (
+                        {f.hypotheses.map((h: ResultHypothesis, hi: number) => (
                           <tr key={hi} className={`border-b border-gray-100 ${h.reject ? "bg-indigo-50/40" : ""}`}>
                             <td className="px-2 py-1 font-mono text-gray-800">{h.label}</td>
                             <td className="px-2 py-1 font-mono text-right text-gray-500">{h.p_raw}</td>

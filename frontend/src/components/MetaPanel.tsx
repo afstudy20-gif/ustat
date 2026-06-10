@@ -6,6 +6,56 @@ import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
+
+interface MetaStudy {
+  label: string;
+  effect: number;
+  ci_low: number;
+  ci_high: number;
+  weight_pct: number;
+}
+interface MetaPoint { moderator: number; effect: number; size: number; label: string }
+interface MetaFunnelPoint { effect: number; se: number; label: string }
+interface MetaSubgroupRow {
+  subgroup: string; k: number; effect: number; ci_low: number; ci_high: number; I2_pct: number;
+}
+interface MetaPooled { effect: number; ci_low: number; ci_high: number }
+interface MetaResult {
+  studies?: MetaStudy[];
+  random: MetaPooled;
+  fixed: MetaPooled;
+  measure: string;
+  null_line: number;
+  I2_pct: number;
+  tau2: number;
+  Q: number;
+  Q_p: number;
+  prediction_low?: number | null;
+  prediction_high?: number | null;
+  export_rows?: string[][];
+  points?: MetaPoint[];
+  line_x: number[];
+  line_y: number[];
+  log_scale?: boolean;
+  funnel?: MetaFunnelPoint[];
+  pooled_effect: number;
+  se_max: number;
+  subgroups?: MetaSubgroupRow[];
+  q_between?: number;
+  q_between_p?: number | null;
+  slope?: number;
+  slope_p?: number;
+  slope_ci_low?: number;
+  slope_ci_high?: number;
+  r2_pct?: number;
+  egger_intercept?: number;
+  egger_p: number;
+  begg_tau?: number;
+  begg_p?: number | null;
+  trim_fill_missing?: number;
+  interpretation?: string;
+}
 
 type InputType = "ci" | "se" | "raw";
 type Mode = "analyze" | "subgroup" | "regression" | "bias";
@@ -28,16 +78,16 @@ export default function MetaPanel() {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const forestRef = useRef<any>(null);
-  const bubbleRef = useRef<any>(null);
-  const funnelRef = useRef<any>(null);
+  const forestRef = useRef<PlotCaptureHandle | null>(null);
+  const bubbleRef = useRef<PlotCaptureHandle | null>(null);
+  const funnelRef = useRef<PlotCaptureHandle | null>(null);
 
   const [measure, setMeasure] = useState("OR");
   const [tau2Method, setTau2Method] = useState("DL");
   const [inputType, setInputType] = useState<InputType>("ci");
   const [rows, setRows] = useState<Row[]>(SAMPLE);
   const [mode, setMode] = useState<Mode>("analyze");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<MetaResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pasteOpen, setPasteOpen] = useState(false);
@@ -69,7 +119,7 @@ export default function MetaPanel() {
     return rows
       .filter((r) => r.label.trim() !== "")
       .map((r) => {
-        const s: any = { label: r.label };
+        const s: Record<string, string | number | undefined> = { label: r.label };
         if (inputType === "ci") { s.effect = num(r.effect); s.ci_low = num(r.ci_low); s.ci_high = num(r.ci_high); }
         else if (inputType === "se") { s.effect = num(r.effect); s.se = num(r.se); }
         else { s.e1 = num(r.e1); s.n1 = num(r.n1); s.e2 = num(r.e2); s.n2 = num(r.n2); }
@@ -90,10 +140,11 @@ export default function MetaPanel() {
         : m === "regression" ? runMetaRegression : runMetaBias;
       const res = await fn(payload);
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setError(Array.isArray(detail) ? detail.map((x: any) => x.msg ?? String(x)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "Meta-analysis failed")));
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(Array.isArray(detail) ? detail.map((x: { msg?: string }) => x.msg ?? String(x)).join(", ")
+        : (typeof detail === "string" ? detail : (msg || "Meta-analysis failed")));
     } finally { setLoading(false); }
   };
 
@@ -101,16 +152,16 @@ export default function MetaPanel() {
   const forestPlot = () => {
     if (!result?.studies) return null;
     const studies = result.studies;
-    const labels = studies.map((s: any) => s.label);
+    const labels = studies.map((s) => s.label);
     const n = studies.length;
-    const yIdx = studies.map((_: any, i: number) => n - i);
-    const data: any[] = [
+    const yIdx = studies.map((_, i: number) => n - i);
+    const data: PlotData[] = [
       {
-        type: "scatter", mode: "markers", x: studies.map((s: any) => s.effect), y: yIdx,
+        type: "scatter", mode: "markers", x: studies.map((s) => s.effect), y: yIdx,
         error_x: { type: "data", symmetric: false,
-          array: studies.map((s: any) => s.ci_high - s.effect),
-          arrayminus: studies.map((s: any) => s.effect - s.ci_low), color: "#6b7280", thickness: 1.2 },
-        marker: { color: pal[0], size: studies.map((s: any) => 6 + 0.4 * s.weight_pct), symbol: "square" },
+          array: studies.map((s) => s.ci_high - s.effect),
+          arrayminus: studies.map((s) => s.effect - s.ci_low), color: "#6b7280", thickness: 1.2 },
+        marker: { color: pal[0], size: studies.map((s) => 6 + 0.4 * s.weight_pct), symbol: "square" },
         text: labels, hovertemplate: "%{text}<br>%{x:.3f}<extra></extra>", name: "Studies",
       },
       // pooled diamond (random)
@@ -149,9 +200,9 @@ export default function MetaPanel() {
         plotRefOut={bubbleRef}
         storageKey="meta:regression"
         data={[
-          { type: "scatter", mode: "markers", x: result.points.map((p: any) => p.moderator), y: result.points.map((p: any) => p.effect),
-            marker: { color: pal[0], size: result.points.map((p: any) => p.size), opacity: 0.6 },
-            text: result.points.map((p: any) => p.label), hovertemplate: "%{text}<br>x=%{x}<br>%{y:.3f}<extra></extra>", name: "Studies" },
+          { type: "scatter", mode: "markers", x: result.points.map((p) => p.moderator), y: result.points.map((p) => p.effect),
+            marker: { color: pal[0], size: result.points.map((p) => p.size), opacity: 0.6 },
+            text: result.points.map((p) => p.label), hovertemplate: "%{text}<br>x=%{x}<br>%{y:.3f}<extra></extra>", name: "Studies" },
           { type: "scatter", mode: "lines", x: result.line_x, y: result.line_y, line: { color: "#dc2626", width: 2 }, name: "Fit" },
         ]}
         layout={{
@@ -170,15 +221,15 @@ export default function MetaPanel() {
 
   const funnelPlot = () => {
     if (!result?.funnel) return null;
-    const eff = result.funnel.map((f: any) => f.effect);
-    const se = result.funnel.map((f: any) => f.se);
+    const eff = result.funnel.map((f) => f.effect);
+    const se = result.funnel.map((f) => f.se);
     return (
       <TitledPlot
         plotRefOut={funnelRef}
         storageKey="meta:funnel"
         data={[
           { type: "scatter", mode: "markers", x: eff, y: se, marker: { color: pal[0], size: 8, opacity: 0.7 },
-            text: result.funnel.map((f: any) => f.label), hovertemplate: "%{text}<br>eff=%{x:.3f}<br>SE=%{y:.3f}<extra></extra>", name: "Studies" },
+            text: result.funnel.map((f) => f.label), hovertemplate: "%{text}<br>eff=%{x:.3f}<br>SE=%{y:.3f}<extra></extra>", name: "Studies" },
         ]}
         layout={{
           ...baseLayout,
@@ -337,7 +388,7 @@ export default function MetaPanel() {
                 <table className="w-full text-[11px]">
                   <thead className="text-gray-400"><tr><th className="text-left px-1">Group</th><th className="text-right px-1">k</th><th className="text-right px-1">{result.measure}</th><th className="text-right px-1">95% CI</th><th className="text-right px-1">I²</th></tr></thead>
                   <tbody>
-                    {result.subgroups.map((s: any) => (
+                    {result.subgroups.map((s) => (
                       <tr key={s.subgroup} className="border-t border-gray-100">
                         <td className="px-1 py-0.5 font-mono">{s.subgroup}</td>
                         <td className="px-1 py-0.5 text-right">{s.k}</td>

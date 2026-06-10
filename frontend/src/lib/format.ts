@@ -18,7 +18,7 @@
  */
 export function fmtP(p: number | null | undefined): string {
   if (p == null) return "—";
-  const n = typeof p === "number" ? p : parseFloat(p as any);
+  const n = typeof p === "number" ? p : parseFloat(String(p));
   if (!Number.isFinite(n)) return "—";
   if (n < 0.001) return "<0.001";
   return n.toFixed(3);
@@ -30,7 +30,7 @@ export function fmtP(p: number | null | undefined): string {
  */
 export function fmtPubP(p: number | null | undefined): string {
   if (p == null) return "—";
-  const n = typeof p === "number" ? p : parseFloat(p as any);
+  const n = typeof p === "number" ? p : parseFloat(String(p));
   if (!Number.isFinite(n)) return "—";
   if (n < 0.001) return "p<0.001";
   return `p=${n.toFixed(3)}`;
@@ -42,7 +42,7 @@ export function fmtPubP(p: number | null | undefined): string {
  */
 export function fmtPFull(p: number | null | undefined): string {
   if (p == null) return "—";
-  const n = typeof p === "number" ? p : parseFloat(p as any);
+  const n = typeof p === "number" ? p : parseFloat(String(p));
   if (!Number.isFinite(n)) return "—";
   // For very small p we show scientific notation so significand is not lost.
   if (n < 1e-4 && n > 0) return n.toExponential(3);

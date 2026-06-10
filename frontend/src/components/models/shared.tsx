@@ -1,5 +1,170 @@
 // Shared presentational helpers for the model result views.
 
+// ── Shared model result types ────────────────────────────────────────────────
+// These describe the (loosely-typed) JSON returned by the regression endpoints.
+// Every field is optional because the exact shape depends on the model family
+// (linear / logistic / Poisson / Cox / GEE / GLM). Components read whichever
+// fields apply to their branch.
+
+/** A single coefficient row across all model families. */
+export interface Coefficient {
+  variable: string;
+  estimate?: number;
+  se?: number;
+  t?: number;
+  z?: number;
+  p: number;
+  ci_low?: number;
+  ci_high?: number;
+  // Logistic
+  log_odds?: number;
+  odds_ratio?: number;
+  or_ci_low?: number;
+  or_ci_high?: number;
+  // Cox
+  log_hr?: number;
+  hr?: number;
+  hr_ci_low?: number;
+  hr_ci_high?: number;
+  // Poisson / Negative Binomial
+  log_irr?: number;
+  irr?: number;
+  irr_ci_low?: number;
+  irr_ci_high?: number;
+  // Exponentiated estimate (GLM exp(β))
+  exp_estimate?: number;
+}
+
+/** A univariate/multivariate odds-ratio comparison row (ORTable / forest). */
+export interface ORRow {
+  variable: string;
+  uni_or?: number | null;
+  uni_ci_low?: number | null;
+  uni_ci_high?: number | null;
+  uni_p?: number | null;
+  multi_or?: number | null;
+  multi_ci_low?: number | null;
+  multi_ci_high?: number | null;
+  multi_p?: number | null;
+}
+
+/** Per-predictor metadata returned alongside a prediction model. */
+export interface PredictorInfo {
+  type: "numeric" | "categorical";
+  median?: number;
+  mean?: number;
+  min?: number;
+  max?: number;
+  categories?: string[];
+}
+
+/** Linear-prediction model result consumed by the interactive predictor. */
+export interface PredictionResult {
+  predictor_info?: Record<string, PredictorInfo>;
+  coefficients?: Coefficient[];
+  outcome?: string;
+  residual_se?: number;
+  df_resid?: number;
+  n?: number;
+  r_squared?: number;
+  adj_r_squared?: number;
+}
+
+/** Classification metrics block for a logistic model summary. */
+export interface Classification {
+  accuracy: number;
+  sensitivity: number;
+  specificity: number;
+  ppv: number;
+  npv: number;
+  tp: number;
+  tn: number;
+  fp: number;
+  fn: number;
+}
+
+/** A chi-square style fit/calibration test. */
+export interface ChiSquareTest {
+  chi2?: number;
+  df?: number;
+  p: number;
+}
+
+/** Logistic-model summary block (fit + calibration + classification). */
+export interface ModelSummary {
+  classification?: Classification;
+  hosmer_lemeshow?: ChiSquareTest;
+  omnibus?: ChiSquareTest;
+  minus2ll?: number;
+  cox_snell_r2?: number;
+  nagelkerke_r2?: number;
+  auc?: number;
+}
+
+/** Inputs the forest plot reads from a fitted regression result. */
+export interface ForestResult {
+  table?: ORRow[];
+  coefficients?: Coefficient[];
+}
+
+/** One Cox term's HR statistics for a single model column. */
+export interface HRStat {
+  hr: number | null;
+  hr_ci_low: number | null;
+  hr_ci_high: number | null;
+  p: number | null;
+}
+
+/** A Cox univariable/parsimonious/adjusted HR table row. */
+export interface HRRow {
+  term: string;
+  predictor: string;
+  kind: "numeric" | "category";
+  category: string | null;
+  reference: string | null;
+  unadjusted: HRStat | null;
+  parsimonious: HRStat | null;
+  adjusted: HRStat | null;
+}
+
+/**
+ * Loosely-typed regression result returned by the model endpoints. Every field
+ * is optional because the exact shape depends on the model family. Structurally
+ * compatible with the narrower result types each child view consumes
+ * (PredictionResult / ForestResult).
+ */
+export interface ModelResult {
+  model?: string;
+  outcome?: string;
+  n?: number;
+  n_total?: number;
+  n_excluded?: number;
+  n_events?: number;
+  n_events_pars?: number;
+  n_pars?: number;
+  n_multi?: number;
+  imputation?: string;
+  selection_method?: string;
+  duration_col?: string;
+  event_col?: string;
+  r_squared?: number;
+  adj_r_squared?: number;
+  pseudo_r2?: number;
+  f_stat?: number;
+  aic?: number;
+  bic?: number;
+  concordance?: number;
+  result_text?: string;
+  coefficients?: Coefficient[];
+  predictor_info?: Record<string, PredictorInfo>;
+  residual_se?: number;
+  df_resid?: number;
+  table?: ORRow[];
+  rows?: HRRow[];
+  model_stats?: ModelSummary;
+  omnibus?: ChiSquareTest;
+}
+
 export function adjustP(p: number, beta: number, nullHyp: string): number {
   if (nullHyp === "leq") return beta > 0 ? Math.min(p / 2, 1) : Math.min(1 - p / 2, 1);
   if (nullHyp === "geq") return beta < 0 ? Math.min(p / 2, 1) : Math.min(1 - p / 2, 1);

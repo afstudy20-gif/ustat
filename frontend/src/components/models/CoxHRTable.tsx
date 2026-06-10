@@ -4,14 +4,14 @@ import type { StyledTableData } from "../../lib/styledTable";
 import { fmtPubP } from "../../lib/format";
 
 /** One Cox term's HR statistics for a single model column. */
-interface HRStat {
+export interface HRStat {
   hr: number | null;
   hr_ci_low: number | null;
   hr_ci_high: number | null;
   p: number | null;
 }
 
-interface HRRow {
+export interface HRRow {
   term: string;
   predictor: string;
   kind: "numeric" | "category";

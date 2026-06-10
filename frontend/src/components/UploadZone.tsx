@@ -45,14 +45,15 @@ export default function UploadZone() {
         const res = await uploadFile(file);
         setSession(res.data);
       }
-    } catch (e: any) {
-      const detail = e.response?.data?.detail;
-      const status = e.response?.status;
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string }; status?: number }; message?: string };
+      const detail = err.response?.data?.detail;
+      const status = err.response?.status;
       const msg = detail
         ? `${detail}`
-        : e.message?.includes("Network")
+        : err.message?.includes("Network")
         ? "Cannot connect to backend (localhost:8000). Is it running?"
-        : `Upload failed (${status ?? e.message ?? "unknown error"})`;
+        : `Upload failed (${status ?? err.message ?? "unknown error"})`;
       setError(msg);
     } finally {
       setLoading(false);

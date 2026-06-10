@@ -7,6 +7,7 @@ import { Tip, InfoBanner } from "./Tip";
 import ResultExporter from "./ResultExporter";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
 
 const PLOT_LAYOUT = {
   paper_bgcolor: "transparent",
@@ -31,6 +32,74 @@ interface SplineTermState {
   n_knots: number;
   knot_positions: string;
   ref_value: string;
+}
+
+interface CoxRCSCoefficient {
+  name: string; coef: number; hr: number; se: number;
+  z: number | null; p: number | null; ci_low: number; ci_high: number;
+}
+interface CoxRCSCurve {
+  column: string; x: number[]; hr: number[];
+  lower: number[]; upper: number[]; knots: number[]; ref: number;
+}
+interface CoxRCSResult {
+  coefficients: CoxRCSCoefficient[];
+  curves_1d?: CoxRCSCurve[];
+  surface_2d: SurfaceData | null;
+  interaction: null | { lr_stat?: number; df?: number; p?: number; error?: string };
+  nonlinearity?: Record<string, { wald: number | null; df: number; p: number | null }>;
+  n: number;
+  n_events: number;
+  concordance?: number;
+  aic?: number;
+}
+
+interface RCSCovariateSummary {
+  name: string;
+  effect: number | null;
+  coef: number | null;
+}
+interface RCSCrude {
+  x_values: number[];
+  or_values: number[];
+  ci_low: number[];
+  ci_high: number[];
+  nonlinearity_p: number | null;
+}
+interface RCSInteraction {
+  lr_stat?: number;
+  df?: number;
+  p?: number | null;
+  covariates?: string[];
+  error?: string;
+}
+/** Univariate RCS result. Field set is server-driven and partly optional. */
+interface RCSResult {
+  x_values: number[];
+  or_values: number[];
+  ci_low: number[];
+  ci_high: number[];
+  x_data: number[];
+  predictor: string;
+  outcome?: string;
+  model_type?: string;
+  duration_col?: string;
+  event_col?: string;
+  knots: number[];
+  n_knots: number;
+  ref_value: number;
+  n: number;
+  n_total?: number;
+  n_events?: number | null;
+  n_excluded?: number | null;
+  aic?: number | null;
+  nonlinearity_p?: number | null;
+  nonlinearity_df?: number | string | null;
+  crude?: RCSCrude | null;
+  covariates_used?: string[];
+  covariates_requested?: string[];
+  covariates_summary?: RCSCovariateSummary[];
+  interaction?: RCSInteraction | null;
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────
@@ -64,21 +133,21 @@ function HRSurfaceCard({ surface }: { surface: SurfaceData }) {
                 z: surface.hr, x: surface.x, y: surface.y,
                 type: "contour", colorscale: "RdBu", reversescale: true,
                 contours: { coloring: "heatmap", showlabels: true },
-                colorbar: { title: { text: "HR" } as any },
+                colorbar: { title: { text: "HR" } },
                 hovertemplate: `${surface.x_col}=%{x:.2f}<br>${surface.y_col}=%{y:.2f}<br>HR=%{z:.2f}<extra></extra>`,
-              } as any
+              } as PlotData
             : {
                 z: surface.hr, x: surface.x, y: surface.y,
                 type: "surface", colorscale: "RdBu", reversescale: true,
-                colorbar: { title: { text: "HR" } as any },
+                colorbar: { title: { text: "HR" } },
                 contours: { z: { show: true, usecolormap: true, project: { z: true } } },
                 hovertemplate: `${surface.x_col}=%{x:.2f}<br>${surface.y_col}=%{y:.2f}<br>HR=%{z:.2f}<extra></extra>`,
-              } as any,
+              } as PlotData,
         ]}
         layout={
           view === "contour"
             ? { height: 380, margin: { l: 60, r: 30, t: 10, b: 50 }, xaxis: { title: { text: surface.x_col } }, yaxis: { title: { text: surface.y_col } } }
-            : ({ height: 460, margin: { l: 0, r: 0, t: 10, b: 0 }, scene: { xaxis: { title: { text: surface.x_col } }, yaxis: { title: { text: surface.y_col } }, zaxis: { title: { text: "Hazard Ratio" }, type: "log" }, camera: { eye: { x: 1.4, y: -1.4, z: 0.9 } } } } as any)
+            : ({ height: 460, margin: { l: 0, r: 0, t: 10, b: 0 }, scene: { xaxis: { title: { text: surface.x_col } }, yaxis: { title: { text: surface.y_col } }, zaxis: { title: { text: "Hazard Ratio" }, type: "log" }, camera: { eye: { x: 1.4, y: -1.4, z: 0.9 } } } } as PlotLayout)
         }
         config={{ displaylogo: false, responsive: true }}
         style={{ width: "100%" }}
@@ -90,12 +159,12 @@ function HRSurfaceCard({ surface }: { surface: SurfaceData }) {
   );
 }
 
-function CoxRCSResultPanel({ result }: { result: any }) {
-  const coefs = result.coefficients as Array<{ name: string; coef: number; hr: number; se: number; z: number | null; p: number | null; ci_low: number; ci_high: number }>;
-  const curves = (result.curves_1d || []) as Array<{ column: string; x: number[]; hr: number[]; lower: number[]; upper: number[]; knots: number[]; ref: number }>;
-  const surface = result.surface_2d as null | SurfaceData;
-  const interaction = result.interaction as null | { lr_stat?: number; df?: number; p?: number; error?: string };
-  const nonlinearity = (result.nonlinearity || {}) as Record<string, { wald: number | null; df: number; p: number | null }>;
+function CoxRCSResultPanel({ result }: { result: CoxRCSResult }) {
+  const coefs = result.coefficients;
+  const curves = result.curves_1d ?? [];
+  const surface = result.surface_2d;
+  const interaction = result.interaction;
+  const nonlinearity = result.nonlinearity ?? {};
 
   return (
     <div className="panel space-y-4">
@@ -252,7 +321,7 @@ export default function RCSPanel() {
       return session.columns
         .filter((c) => {
           if (c.analysis_excluded) return false;
-          const vals = session.preview!.map((r: any) => r[c.name]).filter((v: any) => v != null);
+          const vals = session.preview!.map((r) => (r as Record<string, unknown>)[c.name]).filter((v) => v != null);
           const uniq = new Set(vals.map(Number));
           return uniq.size <= 2 && [...uniq].every((v) => v === 0 || v === 1);
         })
@@ -266,11 +335,11 @@ export default function RCSPanel() {
   const [mode, setMode] = useState<"rcs" | "cox_rcs">("rcs");
 
   // ── Shared state ──────────────────────────────────────────────────────────
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<RCSResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
-  const rcsPlotRef = useRef<any>(null);
+  const rcsPlotRef = useRef<PlotCaptureHandle | null>(null);
 
   // ── RCS univariate state ──────────────────────────────────────────────────
   const [rcsPredictor, setRcsPredictor] = useState(numCols[0] ?? "");
@@ -301,7 +370,7 @@ export default function RCSPanel() {
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
-      let res: any;
+      let res: Awaited<ReturnType<typeof runRCS>>;
       if (mode === "rcs") {
         const customKnotsArr = rcsKnotMode === "custom"
           ? rcsCustomKnots.split(/[,\s]+/).filter(Boolean).map(Number).filter((n) => !Number.isNaN(n))
@@ -353,10 +422,14 @@ export default function RCSPanel() {
           imputation,
         });
       }
-      setResult(res.data);
-    } catch (e: any) {
-      const detail = e.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : (e.message ?? "Unknown error"));
+      setResult(res.data as RCSResult);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(
+        typeof detail === "string"
+          ? detail
+          : e instanceof Error ? e.message : "Unknown error",
+      );
     } finally { setLoading(false); }
   };
 
@@ -645,7 +718,7 @@ export default function RCSPanel() {
         )}
 
         {result && mode === "cox_rcs" && (
-          <CoxRCSResultPanel result={result} />
+          <CoxRCSResultPanel result={result as unknown as CoxRCSResult} />
         )}
 
         {result && mode === "rcs" && Array.isArray(result.x_values) && (() => {
@@ -758,7 +831,7 @@ export default function RCSPanel() {
                 const nlp = result.nonlinearity_p as number | null | undefined;
                 const nlAdjStr = nlp == null ? null : fmtP(nlp);
 
-                const traces: any[] = [
+                const traces: PlotData[] = [
                   // Adjusted 95% CI band
                   {
                     type: "scatter", x: [...(result.x_values as number[]), ...(result.x_values as number[]).slice().reverse()],

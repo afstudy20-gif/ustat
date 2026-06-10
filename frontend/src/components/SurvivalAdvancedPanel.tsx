@@ -10,8 +10,211 @@ import TitledPlot from "./TitledPlot";
 import { Tip } from "./Tip";
 import ThreeCol from "./ThreeCol";
 import { fmtP, fmtPubP } from "../lib/format";
+import type { PlotData, PlotLayout, PlotCaptureHandle, PlotRef } from "../lib/plotTypes";
+
+// ── Loose result shapes for the survival API responses ────────────────────────
+// The /api/survival_advanced/* and /api/models/survival/* endpoints return wide,
+// duck-typed JSON. These interfaces capture exactly the fields read in this file
+// so member access stays typed without resorting to `any`.
+
+/** A Plotly figure as returned embedded in an API result. */
+interface ApiPlot {
+  data: PlotData[];
+  layout: PlotLayout & {
+    title?: { text?: string };
+    xaxis?: { title?: { text?: string } };
+    yaxis?: { title?: { text?: string } };
+  };
+}
+
+/** A single (time, survival) point on a KM-style step curve. */
+interface CurvePoint { time: number; survival: number }
+
+/** Survival-at-landmark-time estimate for a group. */
+interface SurvivalAtPoint {
+  survival?: number | null;
+  ci_low?: number | null;
+  ci_high?: number | null;
+  reliable?: boolean;
+  n_at_risk?: number | null;
+}
+
+interface LogRank { p?: number | null; chi2?: number | null }
+
+interface PairwiseComparison {
+  group_a: string;
+  group_b: string;
+  p?: number | null;
+  p_adj?: number | null;
+}
+
+interface KMGroup {
+  group: string | number;
+  n?: number;
+  events?: number;
+  median_survival?: number | string | null;
+  curve: CurvePoint[];
+  censors?: CurvePoint[];
+  at_risk?: (number | null)[];
+  survival_at?: SurvivalAtPoint[];
+}
+
+interface KMStratum {
+  label: string | number;
+  n?: number;
+  groups: KMGroup[];
+  logrank?: LogRank;
+}
+
+interface KMResult {
+  groups?: KMGroup[];
+  logrank?: LogRank;
+  pairwise?: { comparisons?: PairwiseComparison[]; correction?: string } | null;
+  survival_times?: number[];
+  median_follow_up?: { median?: number | null; q1?: number | null; q3?: number | null };
+  risk_times?: number[];
+  strata?: KMStratum[];
+  n_total?: number;
+}
+
+/** Row produced by the log-rank screening scan. */
+interface KMScanRow {
+  variable: string;
+  groups: number | null;
+  logrank_p: number | null;
+  chi2: number | null;
+}
+
+interface CoxCoefficient {
+  variable: string;
+  log_hr?: number;
+  se?: number;
+  hr?: number;
+  hr_ci_low?: number;
+  hr_ci_high?: number;
+  p?: number | null;
+}
+
+interface CoxResult {
+  coefficients?: CoxCoefficient[];
+  n?: number;
+  concordance?: number;
+  log_likelihood?: number;
+}
+
+/** Row produced by the univariable Cox screening scan. */
+interface CoxScanRow {
+  variable: string;
+  hr: number | null;
+  hr_ci_low: number | null;
+  hr_ci_high: number | null;
+  p: number | null;
+  n: number | null;
+}
+
+interface FineGrayCoefficient {
+  variable: string;
+  shr?: number;
+  shr_low?: number;
+  shr_high?: number;
+  p?: number | null;
+}
+
+interface FineGrayResult {
+  plot?: ApiPlot;
+  regression_result?: {
+    model?: string;
+    n?: number;
+    n_events_of_interest?: number;
+    n_competing?: number;
+    n_censored?: number;
+    concordance?: number;
+    coefficients: FineGrayCoefficient[];
+    method_note?: string;
+  };
+}
+
+interface RmstGroupStat { n?: number; rmst?: number | string; ci_low?: number | string; ci_high?: number | string }
+interface RmstContrast { group_a: string; group_b: string; delta_rmst?: number | string; p?: number | null }
+interface RmstResult {
+  plot?: ApiPlot;
+  rmst_by_group?: Record<string, RmstGroupStat>;
+  rmst_mi_note?: string;
+  contrasts?: RmstContrast[];
+}
+
+interface LwyyCoefficient {
+  variable: string;
+  rate_ratio?: number;
+  rr_low?: number;
+  rr_high?: number;
+  p?: number | null;
+}
+interface LwyyResult {
+  plot?: ApiPlot;
+  model?: string;
+  n_subjects?: number;
+  n_events?: number;
+  events_per_subject?: number;
+  coefficients?: LwyyCoefficient[];
+}
+
+interface EValueResult {
+  evalue_point?: number | string;
+  evalue_ci?: number | string;
+  interpretation?: string;
+}
+
+interface LandmarkCoxRow {
+  variable: string;
+  HR?: number | string;
+  ci_low?: number | string;
+  ci_high?: number | string;
+  p?: number | null;
+  fmi?: number | string | null;
+  error?: string;
+}
+interface LandmarkResult {
+  plot?: ApiPlot;
+  cox_mi_note?: string;
+  cox_results?: LandmarkCoxRow[];
+}
+
+/** Forest row consumed by the Forest Builder handoff. */
+interface ForestRow {
+  label: string;
+  est: number | null;
+  ci_low: number | null;
+  ci_high: number | null;
+  p: number | null;
+  extra: string;
+}
+interface CoxHorizonsResult {
+  forest_rows?: ForestRow[];
+  covariates?: string[];
+  predictor?: string;
+}
+
+interface CoxUniMultiResult { rows: UMRow[]; n: number; n_events: number }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Axios-style error envelope: `e.response.data.detail` may be a string or a
+ *  list of validation messages. */
+function errorDetail(e: unknown): unknown {
+  if (e && typeof e === "object" && "response" in e) {
+    const resp = (e as { response?: { data?: { detail?: unknown } } }).response;
+    return resp?.data?.detail;
+  }
+  return undefined;
+}
+
+/** Extract a user-facing message from an unknown thrown value, falling back to
+ *  the provided default when no `detail` is present. */
+function errorMessage(e: unknown, fallback: string): string {
+  const detail = errorDetail(e);
+  return typeof detail === "string" ? detail : fallback;
+}
 
 // In the 2-grid layout only the selected method renders, so the Section is
 // always expanded — the header is a static card title, no collapse toggle.
@@ -43,7 +246,7 @@ function CoxUniMultiForest({
 }: {
   result: { rows: UMRow[]; n: number; n_events: number };
   columns: { name: string; value_labels?: Record<string, string> }[];
-  plotRef: React.RefObject<any>;
+  plotRef: PlotRef;
   refs: Record<string, string>;
   loading: boolean;
   onChangeRef: (predictor: string, level: string) => void;
@@ -121,7 +324,7 @@ function CoxUniMultiForest({
         type: "data", symmetric: false, array: plus, arrayminus: minus,
         color: which === "unadjusted" ? UM_GREY : UM_BLUE, thickness: 2, width: 4,
       },
-    } as any;
+    } as PlotData;
   };
 
   // Right-hand numeric columns: anchor at the plot-area right edge (x=1 paper)
@@ -130,7 +333,7 @@ function CoxUniMultiForest({
   const COL_U_SHIFT = 14;    // px right of plot area: Unadjusted column
   const COL_A_SHIFT = 168;   // px right of plot area: Adjusted column
   const RIGHT_MARGIN = 340;  // must exceed COL_A_SHIFT + text width so export fits
-  const ann: any[] = [
+  const ann: PlotData[] = [
     { xref: "paper", yref: "paper", x: 1, y: 1, xanchor: "left", yanchor: "bottom",
       xshift: COL_U_SHIFT, yshift: 8,
       text: "<b>Unadjusted</b>", showarrow: false, font: { color: UM_GREY, size: 12 } },
@@ -416,13 +619,13 @@ function niceRiskTimes(xmax: number): number[] {
  * comparisons, and median survival. Returns "" when not enough is present.
  */
 function buildKmNarrative(
-  km: any,
+  km: KMResult | null,
   labels: Record<string, string>,
   groupName: string,
 ): string {
   if (!km || !Array.isArray(km.groups) || km.groups.length === 0) return "";
   const lab = (g: string) => labels[g] ?? g;
-  const groups = km.groups as any[];
+  const groups = km.groups;
   const gv = groupName || "group";
   const parts: string[] = [];
 
@@ -466,13 +669,13 @@ function buildKmNarrative(
   }
 
   // 3. Pairwise comparisons.
-  const pw = km.pairwise?.comparisons as any[] | undefined;
+  const pw = km.pairwise?.comparisons;
   if (pw && pw.length) {
     const useAdj = pw.some((c) => c.p_adj != null);
-    const val = (c: any) => (useAdj ? c.p_adj : c.p);
-    const sig = pw.filter((c) => val(c) != null && val(c) < 0.05);
-    const ns = pw.filter((c) => val(c) != null && val(c) >= 0.05);
-    const fmtPair = (c: any) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${fmtPubP(val(c))}`;
+    const val = (c: PairwiseComparison) => (useAdj ? c.p_adj : c.p);
+    const sig = pw.filter((c) => val(c) != null && val(c)! < 0.05);
+    const ns = pw.filter((c) => val(c) != null && val(c)! >= 0.05);
+    const fmtPair = (c: PairwiseComparison) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${fmtPubP(val(c))}`;
     const bits: string[] = [];
     if (sig.length) bits.push(`significant differences were found for ${sig.map(fmtPair).join("; ")}`);
     if (ns.length) bits.push(`no significant difference between ${ns.map(fmtPair).join("; ")}`);
@@ -504,7 +707,15 @@ function RunButton({ onClick, loading, label }: { onClick: () => void; loading: 
   );
 }
 
-function ResultBlock({ result }: { result: any }) {
+interface ResultBlockData {
+  result_text?: string;
+  assumptions?: { met?: boolean; name?: string; detail?: string }[];
+  export_rows?: (string | number | null)[][];
+  r_code?: string;
+  test?: string;
+}
+
+function ResultBlock({ result }: { result: ResultBlockData | null | undefined }) {
   if (!result) return null;
   return (
     <div className="space-y-3 mt-3">
@@ -518,7 +729,7 @@ function ResultBlock({ result }: { result: any }) {
       {/* Assumptions */}
       {result.assumptions?.length > 0 && (
         <div className="space-y-1">
-          {result.assumptions.map((a: any, i: number) => (
+          {result.assumptions.map((a, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${a.met ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
               <span>{a.met ? "✓" : "⚠"}</span>
               <span className="font-medium">{a.name}</span>
@@ -540,9 +751,9 @@ function ResultBlock({ result }: { result: any }) {
               </tr>
             </thead>
             <tbody>
-              {result.export_rows.slice(1).map((row: any[], ri: number) => (
+              {result.export_rows.slice(1).map((row, ri: number) => (
                 <tr key={ri} className="border-t border-gray-100">
-                  {row.map((v: any, ci: number) => (
+                  {row.map((v, ci: number) => (
                     <td key={ci} className="px-3 py-1 text-gray-700 border-r border-gray-100 last:border-r-0">{v ?? "—"}</td>
                   ))}
                 </tr>
@@ -600,8 +811,8 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const pal = usePalette();
   const traceDefaults = useTraceDefaults();
 
-  const fgPlotRef = useRef<any>(null);
-  const lmPlotRef = useRef<any>(null);
+  const fgPlotRef = useRef<PlotCaptureHandle | null>(null);
+  const lmPlotRef = useRef<PlotCaptureHandle | null>(null);
 
   // Fine-Gray state
   const [fgDuration, setFgDuration] = usePersistedPanelState("survival", "fgDuration", "");
@@ -610,7 +821,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [fgGroup, setFgGroup] = usePersistedPanelState("survival", "fgGroup", "");
   const [fgPredictors, setFgPredictors] = usePersistedPanelState<string[]>("survival", "fgPredictors", []);
   const [fgPredFilter, setFgPredFilter] = useState("");
-  const [fgResult, setFgResult] = useState<any>(null);
+  const [fgResult, setFgResult] = useState<FineGrayResult | null>(null);
   const [fgLoading, setFgLoading] = useState(false);
   const [fgError, setFgError] = useState<string | null>(null);
 
@@ -620,7 +831,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [evHi, setEvHi] = useState("");
   const [evType, setEvType] = usePersistedPanelState("survival", "evType", "OR");
   const [evP0, setEvP0] = useState("0.1");
-  const [evResult, setEvResult] = useState<any>(null);
+  const [evResult, setEvResult] = useState<EValueResult | null>(null);
   const [evLoading, setEvLoading] = useState(false);
   const [evError, setEvError] = useState<string | null>(null);
 
@@ -632,12 +843,12 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [kmSurvTimes, setKmSurvTimes] = usePersistedPanelState("survival", "kmSurvTimes", "");          // e.g. "365, 1825"
   const [kmPairwise, setKmPairwise] = usePersistedPanelState("survival", "kmPairwise", false);
   const [kmCorrection, setKmCorrection] = usePersistedPanelState("survival", "kmCorrection", "holm");    // none|bonferroni|holm|bh
-  const [kmResult, setKmResult] = useState<any>(null);
+  const [kmResult, setKmResult] = useState<KMResult | null>(null);
   const [kmLoading, setKmLoading] = useState(false);
   const [kmError, setKmError] = useState<string | null>(null);
-  const kmPlotRef = useRef<any>(null);
+  const kmPlotRef = useRef<HTMLDivElement | null>(null);
   // KM screening state
-  const [kmScanResult, setKmScanResult] = useState<any[]>([]);
+  const [kmScanResult, setKmScanResult] = useState<KMScanRow[]>([]);
   const [kmScanLoading, setKmScanLoading] = useState(false);
   // Group rename state
   const [kmGroupLabels, setKmGroupLabels] = useState<Record<string, string>>({});
@@ -673,8 +884,8 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   // extras render without forcing the user to re-run.
   useEffect(() => {
     if (!kmResult?.groups?.length) return;
-    const needRisk = kmRiskTable && !kmResult.groups.some((g: any) => Array.isArray(g.at_risk));
-    const needCens = kmShowCensors && !kmResult.groups.some((g: any) => Array.isArray(g.censors));
+    const needRisk = kmRiskTable && !kmResult.groups.some((g) => Array.isArray(g.at_risk));
+    const needCens = kmShowCensors && !kmResult.groups.some((g) => Array.isArray(g.censors));
     if (!needRisk && !needCens) return;
     let xmax = 0;
     for (const g of kmResult.groups) {
@@ -707,17 +918,17 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [coxInteractions, setCoxInteractions] = usePersistedPanelState<Array<[string, string]>>("survival", "coxInteractions", []);
   const [coxIxA, setCoxIxA] = useState<string>("");
   const [coxIxB, setCoxIxB] = useState<string>("");
-  const [coxResult, setCoxResult] = useState<any>(null);
+  const [coxResult, setCoxResult] = useState<CoxResult | null>(null);
   const [coxLoading, setCoxLoading] = useState(false);
   const [coxError, setCoxError] = useState<string | null>(null);
   // Cox univariable screening state
-  const [coxScanResult, setCoxScanResult] = useState<any[]>([]);
+  const [coxScanResult, setCoxScanResult] = useState<CoxScanRow[]>([]);
   const [coxScanLoading, setCoxScanLoading] = useState(false);
   // Unadjusted-vs-adjusted paired forest (publication "Figure 4")
-  const [coxUMResult, setCoxUMResult] = useState<any>(null);
+  const [coxUMResult, setCoxUMResult] = useState<CoxUniMultiResult | null>(null);
   const [coxUMLoading, setCoxUMLoading] = useState(false);
   const [coxUMRefs, setCoxUMRefs] = useState<Record<string, string>>({});  // per-predictor reference level
-  const coxUMRef = useRef<any>(null);
+  const coxUMRef = useRef<PlotCaptureHandle | null>(null);
 
   const runCoxUMForest = async (refs: Record<string, string>) => {
     setCoxUMLoading(true);
@@ -727,7 +938,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         predictors: coxPreds, references: Object.keys(refs).length ? refs : undefined,
       });
       setCoxUMResult(res.data);
-    } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Forest failed"); }
+    } catch (e: unknown) { setCoxError(errorMessage(e, "Forest failed")); }
     finally { setCoxUMLoading(false); }
   };
 
@@ -765,7 +976,11 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
       // per model with the MODEL NAME as the label (short, no clipping, matches
       // the manuscript). The contrast goes into the caption instead.
       const focusLevel = multiTerm && specExposureLevel ? specExposureLevel : null;
-      type SpecData = { label: string; n: number; n_events: number; terms: any[] };
+      type SpecTerm = {
+        term: string; kind: string; category: string | null; reference: string | null;
+        hr?: number | null; hr_ci_low?: number | null; hr_ci_high?: number | null; p?: number | null;
+      };
+      type SpecData = { label: string; n: number; n_events: number; terms: SpecTerm[] };
       const specsData = data.specs as SpecData[];
       // If every model shares the same n / events (no covariate missingness),
       // the per-row "(48/388 events)" is redundant — show it once in the
@@ -804,7 +1019,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
       });
       setVisualSubTab("forest");
       setActiveTab("visual");
-    } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Model-spec forest failed"); }
+    } catch (e: unknown) { setCoxError(errorMessage(e, "Model-spec forest failed")); }
     finally { setSpecLoading(false); }
   };
 
@@ -816,7 +1031,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [chCovariates, setChCovariates] = usePersistedPanelState<string[]>("survival", "chCovariates", []);
   const [chHorizons, setChHorizons] = usePersistedPanelState("survival", "chHorizons", "365, 730");
   const [chLabels, setChLabels] = usePersistedPanelState("survival", "chLabels", "1 year, 2 years");
-  const [chResult, setChResult] = useState<any>(null);
+  const [chResult, setChResult] = useState<CoxHorizonsResult | null>(null);
   const [chLoading, setChLoading] = useState(false);
   const [chError, setChError] = useState<string | null>(null);
 
@@ -829,10 +1044,10 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [rmstEvent, setRmstEvent] = usePersistedPanelState("survival", "rmstEvent", "");
   const [rmstGroup, setRmstGroup] = usePersistedPanelState("survival", "rmstGroup", "");
   const [rmstTau, setRmstTau] = usePersistedPanelState<string>("survival", "rmstTau", "");
-  const [rmstResult, setRmstResult] = useState<any>(null);
+  const [rmstResult, setRmstResult] = useState<RmstResult | null>(null);
   const [rmstLoading, setRmstLoading] = useState(false);
   const [rmstError, setRmstError] = useState<string | null>(null);
-  const rmstPlotRef = useRef<any>(null);
+  const rmstPlotRef = useRef<PlotCaptureHandle | null>(null);
 
   // Recurrent-events LWYY state
   const [lwId, setLwId] = usePersistedPanelState("survival", "lwId", "");
@@ -841,10 +1056,10 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [lwEvent, setLwEvent] = usePersistedPanelState("survival", "lwEvent", "");
   const [lwPreds, setLwPreds] = usePersistedPanelState<string[]>("survival", "lwPreds", []);
   const [lwGroup, setLwGroup] = usePersistedPanelState("survival", "lwGroup", "");
-  const [lwResult, setLwResult] = useState<any>(null);
+  const [lwResult, setLwResult] = useState<LwyyResult | null>(null);
   const [lwLoading, setLwLoading] = useState(false);
   const [lwError, setLwError] = useState<string | null>(null);
-  const lwPlotRef = useRef<any>(null);
+  const lwPlotRef = useRef<PlotCaptureHandle | null>(null);
 
   // Landmark state
   const [lmDuration, setLmDuration] = usePersistedPanelState("survival", "lmDuration", "");
@@ -852,7 +1067,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [lmTime, setLmTime] = usePersistedPanelState("survival", "lmTime", "");
   const [lmGroup, setLmGroup] = usePersistedPanelState("survival", "lmGroup", "");
   const [lmPreds, setLmPreds] = usePersistedPanelState<string[]>("survival", "lmPreds", []);
-  const [lmResult, setLmResult] = useState<any>(null);
+  const [lmResult, setLmResult] = useState<LandmarkResult | null>(null);
   const [lmLoading, setLmLoading] = useState(false);
   const [lmError, setLmError] = useState<string | null>(null);
 
@@ -868,7 +1083,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         imputation: survImputation,
       });
       setFgResult(res.data);
-    } catch (e: any) { setFgError(e?.response?.data?.detail ?? "Fine-Gray failed"); }
+    } catch (e: unknown) { setFgError(errorMessage(e, "Fine-Gray failed")); }
     finally { setFgLoading(false); }
   };
   const fgToggleP = (c: string) =>
@@ -887,7 +1102,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         imputation: survImputation,
       });
       setRmstResult(res.data);
-    } catch (e: any) { setRmstError(e?.response?.data?.detail ?? "RMST failed"); }
+    } catch (e: unknown) { setRmstError(errorMessage(e, "RMST failed")); }
     finally { setRmstLoading(false); }
   };
 
@@ -901,7 +1116,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         measure_type: evType, baseline_risk: parseFloat(evP0),
       });
       setEvResult(res.data);
-    } catch (e: any) { setEvError(e?.response?.data?.detail ?? "E-value failed"); }
+    } catch (e: unknown) { setEvError(errorMessage(e, "E-value failed")); }
     finally { setEvLoading(false); }
   };
 
@@ -917,7 +1132,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         imputation: survImputation,
       });
       setLmResult(res.data);
-    } catch (e: any) { setLmError(e?.response?.data?.detail ?? "Landmark analysis failed"); }
+    } catch (e: unknown) { setLmError(errorMessage(e, "Landmark analysis failed")); }
     finally { setLmLoading(false); }
   };
 
@@ -940,10 +1155,12 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         event_col: lwEvent, predictors: lwPreds, group_col: lwGroup || undefined,
       });
       setLwResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setLwError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "LWYY failed")));
+    } catch (e: unknown) {
+      const detail = errorDetail(e);
+      const msg = e instanceof Error ? e.message : "LWYY failed";
+      setLwError(Array.isArray(detail)
+        ? detail.map((m) => (m && typeof m === "object" && "msg" in m ? String((m as { msg?: unknown }).msg) : String(m))).join(", ")
+        : (typeof detail === "string" ? detail : msg));
     } finally { setLwLoading(false); }
   };
   useEffect(() => { setEvResult(null); setEvError(null); }, [evEst, evLo, evHi, evType, evP0]);
@@ -1009,7 +1226,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   className="w-full text-xs border border-gray-300 rounded-lg px-3 py-1 focus:outline-none focus:border-indigo-400" />
                 <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg p-1 space-y-0.5">
                   {pickCols
-                    .map((c: any) => c.name)
+                    .map((c) => c.name)
                     .filter((n: string) =>
                       n !== fgDuration && n !== fgEvent && n !== fgGroup
                       && n.toLowerCase().includes(fgPredFilter.toLowerCase()))
@@ -1082,7 +1299,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {fgResult.regression_result.coefficients.map((c: any) => (
+                        {fgResult.regression_result.coefficients.map((c) => (
                           <tr key={c.variable} className="border-b border-gray-100">
                             <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[80px]">{c.variable}</td>
                             <td className={`px-1.5 py-1 font-mono font-semibold ${c.p != null && c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.shr?.toFixed(2)}</td>
@@ -1517,7 +1734,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 include_censors: kmShowCensors,
               });
               setKmResult(res.data);
-            } catch (e: any) { setKmError(e?.response?.data?.detail ?? "KM failed"); }
+            } catch (e: unknown) { setKmError(errorMessage(e, "KM failed")); }
             finally { setKmLoading(false); }
           }} loading={kmLoading} label="Run Kaplan-Meier" />
 
@@ -1844,7 +2061,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 useResizeHandler
                 config={{ responsive: true }} style={{ width: "100%", height: "100%" }}
               />
-              <PlotExporter plotRef={kmPlotRef} title="KM_Survival" />
+              <PlotExporter plotRef={kmPlotRef as unknown as PlotRef} title="KM_Survival" />
             </div>
 
             {/* Number at risk is embedded in the figure above (Plotly
@@ -2329,7 +2546,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 interactions: coxInteractions.length > 0 ? coxInteractions : undefined,
               });
               setCoxResult(res.data);
-            } catch (e: any) { setCoxError(e?.response?.data?.detail ?? "Cox failed"); }
+            } catch (e: unknown) { setCoxError(errorMessage(e, "Cox failed")); }
             finally { setCoxLoading(false); }
           }} loading={coxLoading} label="Run Cox Regression" />
 
@@ -2637,8 +2854,8 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   include_full: true,
                 });
                 setChResult(res.data);
-              } catch (e: any) {
-                setChError(e?.response?.data?.detail ?? "Time-horizon analysis failed");
+              } catch (e: unknown) {
+                setChError(errorMessage(e, "Time-horizon analysis failed"));
               } finally {
                 setChLoading(false);
               }

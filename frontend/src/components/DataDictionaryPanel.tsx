@@ -53,8 +53,11 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
     setMeta(m);
   }, [session.session_id]);
 
-  const update = (colName: string, field: string, value: any) => {
-    setMeta((prev) => ({ ...prev, [colName]: { ...prev[colName], [field]: value } }));
+  const update = (colName: string, field: keyof ColMeta, value: string) => {
+    setMeta((prev) => ({
+      ...prev,
+      [colName]: { ...prev[colName], [field]: value } as Partial<ColMeta>,
+    }));
     setSaved(false);
   };
 
@@ -68,7 +71,7 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
       setUniqueValuesByCol((p) => ({ ...p, [colName]: null }));
       try {
         const res = await getUniqueValues(session.session_id, colName);
-        const values: string[] = (res.data?.values ?? []).map((v: any) => String(v));
+        const values: string[] = (res.data?.values ?? []).map((v: unknown) => String(v));
         setUniqueValuesByCol((p) => ({ ...p, [colName]: values }));
       } catch {
         setUniqueValuesByCol((p) => ({ ...p, [colName]: [] }));

@@ -6,9 +6,60 @@ import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
+import type { PlotCaptureHandle } from "../lib/plotTypes";
 
 type ModelKind = "random_forest" | "gradient_boosting";
 type Task = "auto" | "classification" | "regression";
+
+interface ImportanceRow {
+  feature: string;
+  permutation?: number;
+  permutation_sd?: number;
+  impurity?: number | null;
+}
+
+interface RocPoint {
+  fpr: number;
+  tpr: number;
+}
+
+interface ScatterPoint {
+  actual: number;
+  predicted: number;
+}
+
+interface CalibrationPoint {
+  pred: number;
+  obs: number;
+  n: number;
+}
+
+interface MLResult {
+  model: string;
+  outcome: string;
+  task: "classification" | "regression";
+  cv_folds: number;
+  n?: number;
+  n_features?: number;
+  importance: ImportanceRow[];
+  roc_curve: RocPoint[];
+  scatter: ScatterPoint[];
+  auc?: number;
+  auc_ci_low?: number | null;
+  auc_ci_high?: number;
+  accuracy: number;
+  sensitivity?: number | null;
+  specificity?: number | null;
+  ppv?: number | null;
+  npv?: number | null;
+  brier?: number;
+  r2?: number;
+  rmse?: number;
+  mae?: number;
+  confusion?: { tp: number; tn: number; fp: number; fn: number };
+  calibration?: CalibrationPoint[];
+  interpretation?: string;
+}
 
 const MODEL_LABEL: Record<ModelKind, string> = {
   random_forest: "Random Forest",
@@ -20,9 +71,9 @@ export default function MLPanel() {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const rocRef = useRef<any>(null);
-  const impRef = useRef<any>(null);
-  const scatterRef = useRef<any>(null);
+  const rocRef = useRef<PlotCaptureHandle | null>(null);
+  const impRef = useRef<PlotCaptureHandle | null>(null);
+  const scatterRef = useRef<PlotCaptureHandle | null>(null);
 
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
@@ -39,7 +90,7 @@ export default function MLPanel() {
   const [classWeight, setClassWeight] = useState(true);
   const [learningRate, setLearningRate] = useState(0.1);
 
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<MLResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -68,13 +119,13 @@ export default function MLPanel() {
       };
       const fn = model === "random_forest" ? runRandomForest : runGradientBoosting;
       const res = await fn(payload);
-      setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
+      setResult(res.data as MLResult);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
       setError(
         Array.isArray(detail)
-          ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-          : (typeof detail === "string" ? detail : (e?.message ?? "ML run failed")),
+          ? detail.map((m) => (m as { msg?: string }).msg ?? String(m)).join(", ")
+          : (typeof detail === "string" ? detail : (e instanceof Error ? e.message : "ML run failed")),
       );
     } finally {
       setLoading(false);
@@ -221,8 +272,8 @@ export default function MLPanel() {
                     data={[
                       {
                         type: "scatter", mode: "lines",
-                        x: result.roc_curve.map((p: any) => p.fpr),
-                        y: result.roc_curve.map((p: any) => p.tpr),
+                        x: result.roc_curve.map((p) => p.fpr),
+                        y: result.roc_curve.map((p) => p.tpr),
                         line: { color: pal[0], width: 2.5, shape: "hv" as const },
                         fill: "tozeroy", fillcolor: `${pal[0]}22`,
                         name: "ROC", hoverinfo: "skip" as const,
@@ -263,13 +314,13 @@ export default function MLPanel() {
                     data={[
                       {
                         type: "scatter", mode: "markers",
-                        x: result.scatter.map((p: any) => p.actual),
-                        y: result.scatter.map((p: any) => p.predicted),
+                        x: result.scatter.map((p) => p.actual),
+                        y: result.scatter.map((p) => p.predicted),
                         marker: { color: pal[0], size: 5, opacity: 0.5 },
                         name: "obs", hovertemplate: "actual %{x:.2f}<br>pred %{y:.2f}<extra></extra>",
                       },
                       (() => {
-                        const xs = result.scatter.map((p: any) => p.actual);
+                        const xs = result.scatter.map((p) => p.actual);
                         const lo = Math.min(...xs), hi = Math.max(...xs);
                         return { type: "scatter" as const, mode: "lines" as const, x: [lo, hi], y: [lo, hi],
                           line: { color: "#9ca3af", width: 1, dash: "dash" as const }, name: "y=x", hoverinfo: "skip" as const };
@@ -297,9 +348,9 @@ export default function MLPanel() {
                     storageKey="ml:importance"
                     data={[{
                       type: "bar", orientation: "h",
-                      x: topImp.map((d: any) => d.permutation),
-                      y: topImp.map((d: any) => d.feature),
-                      error_x: { type: "data", array: topImp.map((d: any) => d.permutation_sd), visible: true, color: "#9ca3af" },
+                      x: topImp.map((d) => d.permutation),
+                      y: topImp.map((d) => d.feature),
+                      error_x: { type: "data", array: topImp.map((d) => d.permutation_sd), visible: true, color: "#9ca3af" },
                       marker: { color: pal[1] ?? "#6366f1" },
                       hovertemplate: "%{y}<br>Δ%{x:.4f}<extra></extra>",
                     }]}
@@ -380,7 +431,7 @@ export default function MLPanel() {
                   <ResultExporter
                     title={`ML_${result.model}_${result.outcome}`}
                     headers={["Feature", "Permutation", "SD", "Impurity"]}
-                    rows={result.importance.map((d: any) => [d.feature, d.permutation, d.permutation_sd, d.impurity])}
+                    rows={result.importance.map((d) => [d.feature, d.permutation, d.permutation_sd, d.impurity])}
                   />
                 </div>
                 <div className="overflow-auto rounded-lg border border-gray-200 max-h-72">
@@ -393,7 +444,7 @@ export default function MLPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.importance.map((d: any) => (
+                      {result.importance.map((d) => (
                         <tr key={d.feature} className="border-b border-gray-100">
                           <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[150px]">{d.feature}</td>
                           <td className="px-1.5 py-1 font-mono text-right text-indigo-700">{d.permutation?.toFixed(4)}</td>
@@ -417,7 +468,7 @@ export default function MLPanel() {
                       <tr><th className="text-left px-1 py-0.5">Pred</th><th className="text-left px-1 py-0.5">Obs</th><th className="text-right px-1 py-0.5">n</th></tr>
                     </thead>
                     <tbody>
-                      {result.calibration.map((c: any, i: number) => (
+                      {result.calibration.map((c, i: number) => (
                         <tr key={i} className="border-t border-gray-100">
                           <td className="px-1 py-0.5 font-mono">{c.pred.toFixed(3)}</td>
                           <td className="px-1 py-0.5 font-mono">{c.obs.toFixed(3)}</td>

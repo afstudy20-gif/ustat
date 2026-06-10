@@ -82,8 +82,46 @@ const TEST_GUIDANCE: Record<string, { when: string; assumptions: string; reading
   },
 };
 
-function ResultCard({ result }: { result: any }) {
-  const fmt = (v: any) => {
+interface EffectSize {
+  name?: string;
+  value?: number;
+  ci_low?: number | null;
+  ci_high?: number | null;
+  magnitude?: string;
+}
+interface AssumptionCheck {
+  name?: string;
+  detail?: string;
+  met?: boolean;
+}
+interface PostHocRow {
+  group1?: string;
+  group2?: string;
+  statistic?: number;
+  p_adj?: number | null;
+  rank_diff?: number;
+  effect_size?: { value?: number; magnitude?: string };
+  significant?: boolean;
+}
+interface TestResult {
+  test?: string;
+  interpretation?: string;
+  significant?: boolean;
+  result_text?: string;
+  effect_sizes?: EffectSize[];
+  assumptions?: AssumptionCheck[];
+  warnings?: string[];
+  posthoc?: PostHocRow[];
+  posthoc_method?: string;
+  groups?: Record<string, unknown>[];
+  table?: number[][];
+  row_labels?: string[];
+  col_labels?: string[];
+  [key: string]: unknown;
+}
+
+function ResultCard({ result }: { result: TestResult }) {
+  const fmt = (v: unknown) => {
     if (typeof v !== "number") return String(v);
     if (Math.abs(v) < 0.001 && v !== 0) return v.toExponential(3);
     return v.toFixed(4);
@@ -96,7 +134,7 @@ function ResultCard({ result }: { result: any }) {
 
   const statEntries = Object.entries(result).filter(([k]) => !skip.includes(k) && typeof result[k] !== "object");
   const exportHeaders = ["Statistic", "Value"];
-  const exportRows = statEntries.map(([k, v]) => [k, isPKey(k) ? fmtP(v as any) : fmt(v)]);
+  const exportRows = statEntries.map(([k, v]) => [k, isPKey(k) ? fmtP(v as number | null | undefined) : fmt(v)]);
 
   return (
     <div className="panel space-y-3">
@@ -119,7 +157,7 @@ function ResultCard({ result }: { result: any }) {
           .map(([k, v]) => (
             <div key={k} className="flex justify-between border-b border-gray-100 py-1">
               <span className="text-gray-400">{k}</span>
-              <span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as any) : fmt(v)}</span>
+              <span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as number | null | undefined) : fmt(v)}</span>
             </div>
           ))}
       </div>
@@ -128,7 +166,7 @@ function ResultCard({ result }: { result: any }) {
       {result.effect_sizes?.length > 0 && (
         <div className="mt-2 space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: any, i: number) => (
+          {result.effect_sizes.map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -153,7 +191,7 @@ function ResultCard({ result }: { result: any }) {
       {result.assumptions?.length > 0 && (
         <div className="mt-2 space-y-1">
           <p className="text-xs font-semibold text-gray-600">Assumption Checks</p>
-          {result.assumptions.map((a: any, i: number) => (
+          {result.assumptions.map((a: AssumptionCheck, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1 rounded-lg ${a.met ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"}`}>
               <span>{a.met ? "✓" : "⚠"}</span>
               <span className="font-medium">{a.name}</span>
@@ -203,7 +241,7 @@ function ResultCard({ result }: { result: any }) {
                 </tr>
               </thead>
               <tbody>
-                {result.posthoc.map((ph: any, i: number) => (
+                {result.posthoc.map((ph: PostHocRow, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1 font-medium">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
@@ -227,9 +265,9 @@ function ResultCard({ result }: { result: any }) {
               <tr>{Object.keys(result.groups[0]).map((k) => <th key={k}>{k}</th>)}</tr>
             </thead>
             <tbody>
-              {result.groups.map((g: any, i: number) => (
-                <tr key={i}>{Object.values(g).map((v: any, j) => (
-                  <td key={j}>{typeof v === "number" ? fmt(v) : v}</td>
+              {result.groups.map((g: Record<string, unknown>, i: number) => (
+                <tr key={i}>{Object.values(g).map((v: unknown, j) => (
+                  <td key={j}>{typeof v === "number" ? fmt(v) : String(v)}</td>
                 ))}</tr>
               ))}
             </tbody>
@@ -286,12 +324,12 @@ function HypothesisPanelBody({ session }: { session: Session }) {
   const [posthocCorrection, setPosthocCorrection] = usePersistedPanelState<"holm" | "bonferroni" | "fdr" | "none">("hypothesis", "correction", "holm");
   const cached = useStore((s) => s.panelCache.hypothesis);
   const setCache = useStore((s) => s.setPanelCache);
-  const [result, _setResult] = useState<any>(cached?.result ?? null);
+  const [result, _setResult] = useState<TestResult | null>((cached?.result as TestResult | undefined) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Merge into the existing cache object so the persisted selection keys
   // (test, col, groupCol, …) written by usePersistedPanelState survive.
-  const setResult = (r: any) => {
+  const setResult = (r: TestResult | null) => {
     _setResult(r);
     setCache("hypothesis", { ...(useStore.getState().panelCache.hypothesis ?? {}), result: r });
   };
@@ -312,7 +350,7 @@ function HypothesisPanelBody({ session }: { session: Session }) {
     setLoading(true); setError(null); setResult(null);
     const sid = session.session_id;
     try {
-      let res: any;
+      let res: Awaited<ReturnType<typeof runTTest>> | undefined;
       if (test === "ttest_1sample")  res = await runTTest({ session_id: sid, column: col, mu: +mu });
       else if (test === "ttest_2sample") res = await runTTest({ session_id: sid, column: col, group_column: groupCol });
       else if (test === "anova")     res = await runAnova({ session_id: sid, column: col, group_column: groupCol });
@@ -324,9 +362,10 @@ function HypothesisPanelBody({ session }: { session: Session }) {
       else if (test === "ancova")    res = await runAncova({ session_id: sid, outcome: col, group_col: groupCol, covariates });
       else if (test === "mancova")   res = await runMancova({ session_id: sid, outcomes, group_col: groupCol, covariates });
       else if (test === "two_way")   res = await runTwoWayAnova({ session_id: sid, outcome: col, factor1: groupCol, factor2 });
-      setResult(res?.data);
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Error");
+      setResult((res?.data as TestResult | undefined) ?? null);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Error");
     } finally { setLoading(false); }
   };
 

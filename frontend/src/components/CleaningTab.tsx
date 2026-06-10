@@ -67,8 +67,8 @@ export function CleaningTab({
         await refreshSession();
         setSuccess(`Success! Replaced ${res.data.replaced_count} cell values across selected columns.`);
       }
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Data cleaning failed.");
+    } catch (e: unknown) {
+      setError((e as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Data cleaning failed.");
     } finally {
       setLoading(false);
     }
@@ -95,7 +95,7 @@ export function CleaningTab({
                   name="clean_mode"
                   checked={cleanMode === id}
                   onChange={() => {
-                    setCleanMode(id as any);
+                    setCleanMode(id as "missing" | "outliers" | "find_replace");
                     setSelectedCols([]);
                     setError(null);
                     setSuccess(null);

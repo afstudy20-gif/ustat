@@ -4,6 +4,8 @@ import PlotExporter from "./PlotExporter";
 import ThreeCol from "./ThreeCol";
 import { useStore, isNumericKind } from "../store";
 import { fmtPubP } from "../lib/format";
+import type { PlotData } from "../lib/plotTypes";
+import type { Data, Layout } from "plotly.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -96,7 +98,7 @@ const emptyRow = (): ForestRowInput => ({
 export default function ForestBuilderPanel() {
   const [rows, setRows] = useState<ForestRowInput[]>([emptyRow()]);
   const [layout, setLayout] = useState<ForestLayout>(DEFAULT_LAYOUT);
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<HTMLDivElement | null>(null);
   // Resizable plot box: the user can drag the bottom-right corner. A
   // ResizeObserver writes the dragged height back into layout.height (so it
   // persists across re-renders) and nudges Plotly to re-fit its width.
@@ -379,7 +381,7 @@ export default function ForestBuilderPanel() {
   // string (an array is silently ignored → default black whiskers), so to
   // colour each confidence interval to match its marker we emit a separate
   // trace per point.
-  const forestTraces: any[] = validRows.map((r, i) => {
+  const forestTraces: PlotData[] = validRows.map((r, i) => {
     const c = colors[i];
     const yi = yIdx[i];
     return {
@@ -412,7 +414,7 @@ export default function ForestBuilderPanel() {
   const TX1 = 0.58;   // HR (95% CI), p
   const TX2 = 0.86;   // extra
 
-  const annotations: any[] = [];
+  const annotations: PlotData[] = [];
   // Left column header (e.g. "Time horizon") — sits above the row labels,
   // left-aligned into the y-axis label margin via a pixel shift.
   if (layout.leftHeader) {
@@ -893,7 +895,7 @@ export default function ForestBuilderPanel() {
           >
           <div ref={plotRef} style={{ width: "100%", height: "100%" }}>
             <Plot
-              data={forestTraces}
+              data={forestTraces as unknown as Data[]}
               layout={{
                 paper_bgcolor: "transparent",
                 plot_bgcolor: "#ffffff",
@@ -935,7 +937,7 @@ export default function ForestBuilderPanel() {
                     line: { color: "#9ca3af", dash: "dash", width: 1.4 },
                   },
                 ],
-                annotations,
+                annotations: annotations as unknown as Layout["annotations"],
                 showlegend: false,
               }}
               style={{ width: "100%", height: "100%" }}
@@ -985,7 +987,7 @@ export default function ForestBuilderPanel() {
                       placeholder="—"
                       onChange={(e) => {
                         const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                        updateRow(i, { [k]: Number.isNaN(v as number) ? null : v } as any);
+                        updateRow(i, { [k]: Number.isNaN(v as number) ? null : v } as Partial<ForestRowInput>);
                       }}
                       className="w-full text-right border border-transparent rounded px-1 py-0.5 focus:outline-none focus:border-indigo-400 hover:border-gray-300" />
                   </td>

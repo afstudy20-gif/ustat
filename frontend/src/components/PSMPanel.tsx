@@ -18,6 +18,86 @@ import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { exportDataset } from "../lib/exportDataset";
+import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
+
+interface OutcomeCoefficient {
+  variable: string;
+  estimate?: number;
+  se?: number;
+  z?: number;
+  p: number;
+  or?: number;
+  or_low?: number;
+  or_high?: number;
+  hr?: number;
+  hr_low?: number;
+  hr_high?: number;
+}
+
+interface OutcomeResult {
+  type?: string;
+  model?: string;
+  n?: number;
+  n_events?: number;
+  n_informative_sets?: number;
+  n_uninformative_sets?: number;
+  concordance?: number;
+  aic?: number;
+  bic?: number;
+  coefficients: OutcomeCoefficient[];
+  method_note?: string;
+  error?: string;
+}
+
+interface RosenbaumCurvePoint {
+  gamma: number;
+  p_upper: number;
+}
+
+interface RosenbaumResult {
+  applicable?: boolean;
+  reason?: string;
+  discordant_pairs?: number;
+  b?: number;
+  c?: number;
+  p_unbiased?: number;
+  critical_gamma?: number | null;
+  gamma_max?: number;
+  alpha?: number;
+  curve?: RosenbaumCurvePoint[];
+}
+
+interface PSMResult {
+  balance_achieved: boolean;
+  n_total: number;
+  n_treated: number;
+  n_control: number;
+  n_matched_pairs: number;
+  n_matched_controls: number;
+  n_unmatched: number;
+  n_trimmed_common_support: number;
+  caliper_used?: number;
+  caliper_scale?: string;
+  common_support?: { lo?: number; hi?: number };
+  matched_session_id?: string;
+  smd_before: Record<string, number>;
+  smd_after: Record<string, number>;
+  avg_smd_before: number;
+  avg_smd_after: number;
+  reduction_pct: number;
+  variance_ratio_after?: Record<string, number | null>;
+  variance_ratio_before?: Record<string, number | null>;
+  ks_p_after?: Record<string, number | null>;
+  ps_distribution?: {
+    treated_unmatched: number[];
+    control_unmatched: number[];
+    treated_matched: number[];
+    control_matched: number[];
+  };
+  outcome_result?: OutcomeResult;
+  rosenbaum?: RosenbaumResult;
+  matching_warning?: string;
+}
 
 const smdColor = (smd: number) =>
   smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
@@ -42,12 +122,12 @@ function LovePlot({
   showConnectors: boolean;
   showGrid: boolean;
 }) {
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
   const covariates = Object.keys(smdBefore).reverse(); // bottom-to-top
 
   const xMax = Math.max(0.4, ...Object.values(smdBefore), ...Object.values(smdAfter)) * 1.15;
 
-  const traces: any[] = [
+  const traces: PlotData[] = [
     {
       type: "scatter",
       mode: "markers",
@@ -82,7 +162,7 @@ function LovePlot({
     }
   }
 
-  const layout: any = {
+  const layout: PlotLayout = {
     ...PLOT_BASE,
     autosize: true,
     height: Math.max(260, covariates.length * 52 + 80),
@@ -145,7 +225,7 @@ function PSOverlapPlot({
   psDist: { treated_unmatched: number[]; control_unmatched: number[]; treated_matched: number[]; control_matched: number[] };
   showGrid: boolean;
 }) {
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
   return (
     <TitledPlot
       plotRefOut={plotRef}
@@ -187,7 +267,7 @@ function PSOverlapPlot({
           text: "Propensity Score Overlap (Common Support)",
           showarrow: false, font: { color: "#374151", size: 12 },
         }],
-      } as any}
+      } as PlotLayout}
       config={{ responsive: true, displaylogo: false, displayModeBar: false }}
       defaultTitle=""
       defaultSubtitle=""
@@ -240,7 +320,7 @@ function PSMPanelBody({ session }: { session: Session }) {
   const [covFilter, setCovFilter] = useState("");
 
   // Result & UI
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<PSMResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(0.10);
@@ -272,10 +352,10 @@ function PSMPanelBody({ session }: { session: Session }) {
         compute_rosenbaum: outcomeType === "binary" && ratio === 1 && computeRosenbaum,
         rosenbaum_gamma_max: rosenbaumGammaMax,
       });
-      setResult(res.data);
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setError(typeof msg === "string" ? msg : (e.message ?? "PSM failed"));
+      setResult(res.data as PSMResult);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      setError(typeof msg === "string" ? msg : (e instanceof Error ? e.message : "PSM failed"));
     } finally { setLoading(false); }
   };
 
@@ -433,7 +513,7 @@ function PSMPanelBody({ session }: { session: Session }) {
             <div className="flex items-center justify-between">
               <span className="text-[10px] text-gray-500 font-medium">Score model</span>
               <select className="select text-[10px] py-0.5" value={scoreMethod}
-                onChange={(e) => setScoreMethod(e.target.value as any)}>
+                onChange={(e) => setScoreMethod(e.target.value as "logistic" | "probit" | "gbm")}>
                 <option value="logistic">Logistic ★</option>
                 <option value="probit">Probit</option>
                 <option value="gbm">GBM</option>
@@ -534,7 +614,7 @@ function PSMPanelBody({ session }: { session: Session }) {
         {result ? (
           <div
             className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
-            style={{ ["--right-col" as any]: `${rightColW}px` }}
+            style={{ "--right-col": `${rightColW}px` } as React.CSSProperties}
           >
             <div
               role="separator"
@@ -575,7 +655,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                   { label: "Controls", val: result.n_control },
                   { label: "Matched Pairs", val: result.n_matched_pairs, highlight: true },
                   { label: "Unmatched", val: result.n_unmatched, warn: result.n_unmatched > 0 },
-                ].map(({ label, val, highlight, warn }: any) => (
+                ].map(({ label, val, highlight, warn }) => (
                   <div key={label} className={`rounded-lg px-2 py-2 text-center border ${
                     highlight ? "bg-indigo-50 border-indigo-200" :
                     warn && val > 0 ? "bg-amber-50 border-amber-200" :
@@ -610,8 +690,9 @@ function PSMPanelBody({ session }: { session: Session }) {
                       // Switch to data tab so the user sees the new matched cohort patient list
                       useStore.getState().setActiveTab("data");
                       alert("Successfully loaded matched cohort! The entire app is now filtered and updated to the matched sample.");
-                    } catch (e: any) {
-                      alert("Failed to load matched cohort: " + (e.response?.data?.detail ?? e.message));
+                    } catch (e: unknown) {
+                      const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+                      alert("Failed to load matched cohort: " + (typeof detail === "string" ? detail : (e instanceof Error ? e.message : String(e))));
                     } finally {
                       setLoading(false);
                     }
@@ -829,7 +910,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                       ["n (matched)", result.outcome_result.n],
                       ["Events", result.outcome_result.n_events],
                       ["C-index", result.outcome_result.concordance?.toFixed(3)],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -840,7 +921,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                       ["n (in fit)", result.outcome_result.n],
                       ["Informative sets", result.outcome_result.n_informative_sets],
                       ["Concordant sets", result.outcome_result.n_uninformative_sets],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -851,7 +932,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                       ["n (matched)", result.outcome_result.n],
                       ["AIC", result.outcome_result.aic?.toFixed(2)],
                       ["BIC", result.outcome_result.bic?.toFixed(2)],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -872,7 +953,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.outcome_result.coefficients.map((c: any) => {
+                      {result.outcome_result.coefficients.map((c) => {
                         const effect = isCoxKind ? c.hr : c.or;
                         const lo = isCoxKind ? c.hr_low : c.or_low;
                         const hi = isCoxKind ? c.hr_high : c.or_high;
@@ -951,7 +1032,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {result.rosenbaum.curve?.map((r: any) => (
+                          {result.rosenbaum.curve?.map((r) => (
                             <tr key={r.gamma} className={r.p_upper > result.rosenbaum.alpha ? "bg-amber-50" : ""}>
                               <td className="px-2 py-0.5 font-mono">{r.gamma.toFixed(2)}</td>
                               <td className="px-2 py-0.5 text-right font-mono">{r.p_upper.toFixed(4)}</td>

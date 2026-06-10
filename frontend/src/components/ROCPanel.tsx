@@ -7,6 +7,113 @@ import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
+
+// ── Result shapes (loose views over the untyped API responses) ──────────────
+/** A single point on an ROC curve. */
+interface CurvePoint { fpr: number; tpr: number; }
+/** Sens/Spec/PPV/etc. block returned for a cutoff. */
+interface CutoffMetrics {
+  cutoff?: number | null;
+  sensitivity?: number | null;
+  specificity?: number | null;
+  ppv?: number | null;
+  npv?: number | null;
+  accuracy?: number | null;
+  lr_pos?: number | null;
+  lr_neg?: number | null;
+  youden_j?: number | null;
+  tp?: number | null;
+  tn?: number | null;
+  fp?: number | null;
+  fn?: number | null;
+}
+/** Loose view of the /roc single-result payload. */
+interface ROCResult {
+  auc: number;
+  auc_p?: number | null;
+  auc_se?: number | null;
+  auc_z?: number | null;
+  ci_lower?: number | null;
+  ci_upper?: number | null;
+  curve: CurvePoint[];
+  optimal?: CutoffMetrics;
+  manual?: CutoffMetrics;
+  optimal_cutoff?: number | null;
+  sensitivity?: number | null;
+  specificity?: number | null;
+  direction_flipped?: boolean;
+  result_text?: string;
+  imputation?: string;
+  n?: number;
+  n_excluded?: number | null;
+  n_positive?: number;
+  n_negative?: number;
+  tp?: number | null;
+  tn?: number | null;
+  fp?: number | null;
+  fn?: number | null;
+}
+/** Loose view of the /roc_compare (DeLong) payload. */
+interface ROCCompareResult {
+  score_1: string;
+  score_2: string;
+  auc_1: number;
+  auc_2: number;
+  ci_1_low: number;
+  ci_1_high: number;
+  ci_2_low: number;
+  ci_2_high: number;
+  ci_diff_low: number;
+  ci_diff_high: number;
+  difference: number;
+  z: number;
+  p: number;
+  n: number;
+  significant: boolean;
+  interpretation: string;
+  curve_1?: CurvePoint[];
+  curve_2?: CurvePoint[];
+  direction_1_flipped?: boolean;
+  direction_2_flipped?: boolean;
+}
+/** One row of the pairwise DeLong matrix. */
+interface DelongPair {
+  a: string;
+  b: string;
+  delta_auc: number;
+  ci_low: number;
+  ci_high: number;
+  p_raw: number;
+  p_adj: number;
+  significant: boolean;
+}
+/** Loose view of the /roc_multi_compare payload. */
+interface ROCMultiDelong {
+  pairs?: DelongPair[];
+  scores?: string[];
+  n: number;
+  n_pairs: number;
+  p_adjust: string;
+}
+/** Shape of an axios-style error with a backend `detail` field. */
+interface ApiError {
+  message?: string;
+  response?: { data?: { detail?: unknown } };
+}
+
+/** Extract a human-readable message from an unknown API rejection. */
+function apiErrorMessage(e: unknown, fallback: string): string {
+  const err = e as ApiError;
+  const detail = err?.response?.data?.detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((m) => (m as { msg?: string }).msg ?? String(m))
+      .join(", ");
+  }
+  if (typeof detail === "string") return detail;
+  return err?.message ?? fallback;
+}
 
 // ── Helper to get current palette primary color ────────────────────────────
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
@@ -100,7 +207,7 @@ const METRIC_TIPS: Record<string, string> = {
   "FN": "False Negatives (Type II error).",
 };
 
-function MetricsBlock({ m, label }: { m: any; label: string }) {
+function MetricsBlock({ m, label }: { m: CutoffMetrics; label: string }) {
   return (
     <div className="space-y-0.5">
       <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mt-2 mb-1">{label}</p>
@@ -115,15 +222,18 @@ function MetricsBlock({ m, label }: { m: any; label: string }) {
         ["LR−",         m.lr_neg    != null ? m.lr_neg.toFixed(2) : "—"],
         ["Youden J",    m.youden_j  != null ? m.youden_j.toFixed(2) : "—"],
         ["TP", m.tp], ["TN", m.tn], ["FP", m.fp], ["FN", m.fn],
-      ].map(([k, v]: any) => (
-        <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+      ].map(([k, v]) => {
+        const key = k as string;
+        return (
+        <div key={key} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
           <span className="text-gray-400 flex items-center">
-            {k}
-            {METRIC_TIPS[k] && <Tip text={METRIC_TIPS[k]} wide />}
+            {key}
+            {METRIC_TIPS[key] && <Tip text={METRIC_TIPS[key]} wide />}
           </span>
           <span className="text-gray-700 font-mono">{v}</span>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -203,9 +313,9 @@ function ROCPanelBody({ session }: { session: Session }) {
 
   // ── Shared ──
   const [outcomeCol, setOutcomeCol] = usePersistedPanelState<string>("roc", "outcomeCol", defaultOutcome);
-  const rocSingleRef = useRef<any>(null);
-  const rocCompareRef = useRef<any>(null);
-  const rocMultiRef = useRef<any>(null);
+  const rocSingleRef = useRef<PlotCaptureHandle | null>(null);
+  const rocCompareRef = useRef<PlotCaptureHandle | null>(null);
+  const rocMultiRef = useRef<PlotCaptureHandle | null>(null);
 
   // ── Single-curve state ──
   const [scoreCol,     setScoreCol]     = usePersistedPanelState<string>("roc", "scoreCol", numCols[0] ?? "");
@@ -217,14 +327,14 @@ function ROCPanelBody({ session }: { session: Session }) {
   const [scoreDirection, setScoreDirection]   = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection", "auto");
   const [scoreDirection2, setScoreDirection2] = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection2", "auto");
   const [useManual,    setUseManual]    = useState(false);
-  const [result,       setResult]       = useState<any>(null);
+  const [result,       setResult]       = useState<ROCResult | null>(null);
   const [error,        setError]        = useState<string | null>(null);
   const [loading,      setLoading]      = useState(false);
   const [imputation,   setImputation]   = useState<ImputationStrategy>("listwise");
 
   const [showCompare, setShowCompare] = useState(false);
   const [scoreCol2,   setScoreCol2]   = usePersistedPanelState<string>("roc", "scoreCol2", numCols[1] ?? numCols[0] ?? "");
-  const [cmpResult,   setCmpResult]   = useState<any>(null);
+  const [cmpResult,   setCmpResult]   = useState<ROCCompareResult | null>(null);
   const [cmpError,    setCmpError]    = useState<string | null>(null);
   const [cmpLoading,  setCmpLoading]  = useState(false);
 
@@ -242,7 +352,7 @@ function ROCPanelBody({ session }: { session: Session }) {
   const [multiLoading, setMultiLoading] = useState(false);
   const [multiError,   setMultiError]   = useState<string | null>(null);
   // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
-  const [multiDelong,    setMultiDelong]    = useState<any>(null);
+  const [multiDelong,    setMultiDelong]    = useState<ROCMultiDelong | null>(null);
   const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
   const [multiPAdjust,   setMultiPAdjust]   = usePersistedPanelState<"holm" | "bonferroni" | "none">("roc", "multiPAdjust", "holm");
   const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
@@ -266,11 +376,8 @@ function ROCPanelBody({ session }: { session: Session }) {
           p_adjust: multiPAdjust,
         });
         if (!cancelled) { setMultiDelong(dl.data); setMultiDelongErr(null); }
-      } catch (e: any) {
-        const detail = e?.response?.data?.detail;
-        const msg = Array.isArray(detail)
-          ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-          : (typeof detail === "string" ? detail : (e?.message ?? "DeLong matrix failed"));
+      } catch (e: unknown) {
+        const msg = apiErrorMessage(e, "DeLong matrix failed");
         if (!cancelled) { setMultiDelong(null); setMultiDelongErr(msg); }
       }
     })();
@@ -311,9 +418,8 @@ function ROCPanelBody({ session }: { session: Session }) {
       });
       const d = res.data;
       setCombinedResult({ col: combinedName || "Combined Model", auc: d.auc, curve: d.curve });
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setCombinedError(typeof msg === "string" ? msg : (e.message ?? "Failed"));
+    } catch (e: unknown) {
+      setCombinedError(apiErrorMessage(e, "Failed"));
     } finally { setCombinedLoading(false); }
   };
 
@@ -349,11 +455,8 @@ function ROCPanelBody({ session }: { session: Session }) {
         } else {
           // Capture backend detail so the user sees what went wrong instead
           // of a generic "Failed" / "err" badge.
-          const reason: any = (s as PromiseRejectedResult).reason;
-          const detail = reason?.response?.data?.detail;
-          const msg = Array.isArray(detail)
-            ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-            : (typeof detail === "string" ? detail : (reason?.message ?? "Failed"));
+          const reason: unknown = (s as PromiseRejectedResult).reason;
+          const msg = apiErrorMessage(reason, "Failed");
           return { col: multiCols[i], auc: 0, curve: [], error: msg };
         }
       });
@@ -372,20 +475,16 @@ function ROCPanelBody({ session }: { session: Session }) {
           });
           setMultiDelong(dl.data);
           setMultiDelongErr(null);
-        } catch (e: any) {
-          const detail = e?.response?.data?.detail;
-          const msg = Array.isArray(detail)
-            ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-            : (typeof detail === "string" ? detail : (e?.message ?? "DeLong matrix failed"));
+        } catch (e: unknown) {
           setMultiDelong(null);
-          setMultiDelongErr(msg);
+          setMultiDelongErr(apiErrorMessage(e, "DeLong matrix failed"));
         }
       } else {
         setMultiDelong(null);
         setMultiDelongErr(null);
       }
-    } catch (e: any) {
-      setMultiError(e.message ?? "Request failed");
+    } catch (e: unknown) {
+      setMultiError(e instanceof Error ? e.message : "Request failed");
     } finally { setMultiLoading(false); }
   };
 
@@ -405,9 +504,12 @@ function ROCPanelBody({ session }: { session: Session }) {
         ...(mc != null && !isNaN(mc) ? { manual_cutoff: mc } : {}),
       });
       setResult(res.data);
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setError(Array.isArray(msg) ? msg.map((m: any) => m.msg).join(", ") : (msg ?? e.message ?? "Request failed"));
+    } catch (e: unknown) {
+      const err = e as ApiError;
+      const msg = err.response?.data?.detail;
+      setError(Array.isArray(msg)
+        ? msg.map((m) => (m as { msg?: string }).msg).join(", ")
+        : ((msg as string | undefined) ?? err.message ?? "Request failed"));
     } finally { setLoading(false); }
   };
 
@@ -424,9 +526,12 @@ function ROCPanelBody({ session }: { session: Session }) {
         direction_2: scoreDirection2,
       });
       setCmpResult(res.data);
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setCmpError(Array.isArray(msg) ? msg.map((m: any) => m.msg).join(", ") : (msg ?? "Comparison failed"));
+    } catch (e: unknown) {
+      const err = e as ApiError;
+      const msg = err.response?.data?.detail;
+      setCmpError(Array.isArray(msg)
+        ? msg.map((m) => (m as { msg?: string }).msg).join(", ")
+        : ((msg as string | undefined) ?? "Comparison failed"));
     } finally { setCmpLoading(false); }
   };
 
@@ -749,8 +854,8 @@ function ROCPanelBody({ session }: { session: Session }) {
                         ["Z statistic", cmpResult.z.toFixed(3)],
                         ["DeLong p-value", fmtP(cmpResult.p)],
                         ["n (paired)", cmpResult.n],
-                      ].map(([k, v]: any) => (
-                        <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+                      ].map(([k, v]) => (
+                        <div key={String(k)} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
                           <span className="text-gray-400">{k}</span>
                           <span className={`font-mono ml-2 shrink-0 ${k === "DeLong p-value" && cmpResult.significant ? "text-green-700 font-semibold" : "text-gray-700"}`}>{v}</span>
                         </div>
@@ -1028,7 +1133,7 @@ function ROCPanelBody({ session }: { session: Session }) {
               : null;
             const aucBoxText = aucP ? `${aucCI}<br>${aucP}` : aucCI;
 
-            const annotations: any[] = [
+            const annotations: Record<string, unknown>[] = [
               {
                 x: 0.98, y: 0.04, xref: "paper" as const, yref: "paper" as const,
                 text: aucBoxText,
@@ -1062,8 +1167,8 @@ function ROCPanelBody({ session }: { session: Session }) {
               data={[
                 {
                   type: "scatter", mode: "lines",
-                  x: result.curve.map((p: any) => p.fpr),
-                  y: result.curve.map((p: any) => p.tpr),
+                  x: result.curve.map((p) => p.fpr),
+                  y: result.curve.map((p) => p.tpr),
                   line: { color: singleStyle.color, width: singleStyle.width, dash: singleStyle.dash, shape: "hv" as const },
                   name: fmtAUC(result.auc, result.ci_lower, result.ci_upper),
                   fill: "tozeroy",
@@ -1125,16 +1230,16 @@ function ROCPanelBody({ session }: { session: Session }) {
                 // Baseline model (blue dashed)
                 {
                   type: "scatter", mode: "lines",
-                  x: cmpResult.curve_2.map((p: any) => p.fpr),
-                  y: cmpResult.curve_2.map((p: any) => p.tpr),
+                  x: cmpResult.curve_2.map((p) => p.fpr),
+                  y: cmpResult.curve_2.map((p) => p.tpr),
                   line: { color: "#2563eb", width: 2.5, dash: "dash" },
                   name: `Baseline (${cmpResult.score_2}): AUC = ${cmpResult.auc_2.toFixed(3)} (${cmpResult.ci_2_low.toFixed(3)}–${cmpResult.ci_2_high.toFixed(3)})`,
                 },
                 // New model (red solid)
                 {
                   type: "scatter", mode: "lines",
-                  x: cmpResult.curve_1.map((p: any) => p.fpr),
-                  y: cmpResult.curve_1.map((p: any) => p.tpr),
+                  x: cmpResult.curve_1.map((p) => p.fpr),
+                  y: cmpResult.curve_1.map((p) => p.tpr),
                   line: { color: "#e11d48", width: 3, dash: "solid" },
                   name: `New model (${cmpResult.score_1}): AUC = ${cmpResult.auc_1.toFixed(3)} (${cmpResult.ci_1_low.toFixed(3)}–${cmpResult.ci_1_high.toFixed(3)})`,
                 },
@@ -1194,7 +1299,7 @@ function ROCPanelBody({ session }: { session: Session }) {
             <TitledPlot
               plotRefOut={rocMultiRef}
               storageKey={`roc:multi:${outcomeCol}`}
-              data={multiTraces as any}
+              data={multiTraces as PlotData[]}
               layout={{
                 ...PLOT_LAYOUT,
                 xaxis: {
@@ -1298,8 +1403,8 @@ function ROCPanelBody({ session }: { session: Session }) {
                   {result.imputation && result.imputation !== "listwise" ? ` (${result.imputation} imputation applied)` : " (listwise deletion)"}.
                 </InfoBanner>
               )}
-              {[["n", result.n], ["Positives", result.n_positive], ["Negatives", result.n_negative]].map(([k, v]: any) => (
-                <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+              {[["n", result.n], ["Positives", result.n_positive], ["Negatives", result.n_negative]].map(([k, v]) => (
+                <div key={String(k)} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
                   <span className="text-gray-400">{k}</span>
                   <span className="text-gray-700 font-mono">{v}</span>
                 </div>
@@ -1396,7 +1501,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                 </p>
                 <select
                   value={multiPAdjust}
-                  onChange={(e) => setMultiPAdjust(e.target.value as any)}
+                  onChange={(e) => setMultiPAdjust(e.target.value as "holm" | "bonferroni" | "none")}
                   className="text-[10px] border border-gray-300 rounded px-1.5 py-0.5 bg-white">
                   <option value="holm">Holm</option>
                   <option value="bonferroni">Bonferroni</option>

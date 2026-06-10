@@ -40,8 +40,56 @@ const RM_GUIDANCE: Record<string, { when: string; assumptions: string; reading: 
   },
 };
 
-function ResultCard({ result }: { result: any }) {
-  const fmt = (v: any) => {
+interface EffectSize {
+  name?: string;
+  value?: number;
+  ci_low?: number;
+  ci_high?: number;
+  magnitude?: string;
+}
+
+interface AssumptionCheck {
+  name?: string;
+  detail?: string;
+  met?: boolean;
+}
+
+interface AnovaEffect {
+  term?: string;
+  F?: number;
+  df_num?: number;
+  df_den?: number;
+  p?: number;
+  effect_size?: { value?: number };
+  significant?: boolean;
+}
+
+interface PostHocRow {
+  group1?: string;
+  group2?: string;
+  statistic?: number;
+  p_adj?: number;
+  significant?: boolean;
+}
+
+interface RMResult {
+  test?: string;
+  interpretation?: string;
+  result_text?: string;
+  significant?: boolean;
+  effect_sizes?: EffectSize[];
+  assumptions?: AssumptionCheck[];
+  warnings?: string[];
+  posthoc?: PostHocRow[];
+  posthoc_method?: string;
+  export_rows?: (string | number | null | undefined)[][];
+  r_code?: string;
+  effects?: AnovaEffect[];
+  [key: string]: unknown;
+}
+
+function ResultCard({ result }: { result: RMResult }) {
+  const fmt = (v: unknown) => {
     if (typeof v !== "number") return String(v ?? "");
     if (Math.abs(v) < 0.001 && v !== 0) return v.toExponential(3);
     return v.toFixed(4);
@@ -51,7 +99,7 @@ function ResultCard({ result }: { result: any }) {
     "r_code", "effects"]);
 
   const statEntries = Object.entries(result).filter(([k, v]) => !skip.has(k) && typeof v !== "object");
-  const exportHeaders = result.export_rows?.[0] ?? ["Statistic", "Value"];
+  const exportHeaders = (result.export_rows?.[0] ?? ["Statistic", "Value"]).map((h) => String(h ?? ""));
   const exportRows = result.export_rows?.slice(1) ?? statEntries.map(([k, v]) => [k, fmt(v)]);
 
   return (
@@ -83,7 +131,7 @@ function ResultCard({ result }: { result: any }) {
       {result.effect_sizes?.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: any, i: number) => (
+          {result.effect_sizes.map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -106,7 +154,7 @@ function ResultCard({ result }: { result: any }) {
       {result.assumptions?.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Assumption Checks</p>
-          {result.assumptions.map((a: any, i: number) => (
+          {result.assumptions.map((a: AssumptionCheck, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1 rounded-lg ${a.met ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"}`}>
               <span>{a.met ? "\u2713" : "\u26A0"}</span>
               <span className="font-medium">{a.name}</span>
@@ -143,7 +191,7 @@ function ResultCard({ result }: { result: any }) {
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
               <tbody>
-                {result.effects.map((e: any, i: number) => (
+                {result.effects.map((e: AnovaEffect, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${e.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1 font-medium">{e.term}</td>
                     <td className="px-2 py-1 text-right font-mono">{e.F?.toFixed(3)}</td>
@@ -172,7 +220,7 @@ function ResultCard({ result }: { result: any }) {
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
               <tbody>
-                {result.posthoc.map((ph: any, i: number) => (
+                {result.posthoc.map((ph: PostHocRow, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
@@ -215,7 +263,7 @@ function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
   const [withinCol, setWithinCol] = useState(allCols[1] ?? "");
   const [betweenCol, setBetweenCol] = useState(allCols[2] ?? "");
   const [valueCol, setValueCol] = useState(numCols[0] ?? "");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<RMResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -228,15 +276,16 @@ function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
     setLoading(true); setError(null); setResult(null);
     const sid = session.session_id;
     try {
-      let res: any;
+      let res: { data?: RMResult };
       if (test === "paired_ttest") res = await runPairedTTest({ session_id: sid, col1, col2 });
       else if (test === "wilcoxon_sr") res = await runWilcoxonSR({ session_id: sid, col1, col2 });
       else if (test === "friedman") res = await runFriedman({ session_id: sid, columns: friedmanCols });
       else if (test === "rm_anova") res = await runRMAnova({ session_id: sid, subject_col: subjectCol, within_col: withinCol, value_col: valueCol });
       else if (test === "mixed_anova") res = await runMixedAnova({ session_id: sid, subject_col: subjectCol, within_col: withinCol, between_col: betweenCol, value_col: valueCol });
-      setResult(res?.data);
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Error");
+      setResult(res?.data ?? null);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Error");
     } finally { setLoading(false); }
   };
 

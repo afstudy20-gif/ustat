@@ -30,8 +30,35 @@ const GUIDANCE: Record<string, { when: string; reading: string }> = {
   cochran_armitage: { when: "Test for a monotone linear trend in the proportion of a binary outcome across 3+ ordered groups (e.g. dose levels 0/1/2/3 vs adverse event).", reading: "Significant Z = the proportion changes linearly across the ordered groups. Sign of Z indicates direction (positive = increasing, negative = decreasing)." },
 };
 
-function ResultCard({ result }: { result: any }) {
-  const fmt = (v: any) => typeof v !== "number" ? String(v ?? "") : Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(3) : v.toFixed(4);
+interface EffectSize {
+  name?: string;
+  value?: number;
+  ci_low?: number;
+  ci_high?: number;
+  magnitude?: string;
+}
+
+interface PostHocRow {
+  group1?: string;
+  group2?: string;
+  p_adj?: number;
+  significant?: boolean;
+}
+
+interface CategoricalResult {
+  test?: string;
+  interpretation?: string;
+  result_text?: string;
+  significant?: boolean;
+  effect_sizes?: EffectSize[];
+  posthoc?: PostHocRow[];
+  posthoc_method?: string;
+  r_code?: string;
+  [key: string]: unknown;
+}
+
+function ResultCard({ result }: { result: CategoricalResult }) {
+  const fmt = (v: unknown) => typeof v !== "number" ? String(v ?? "") : Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(3) : v.toFixed(4);
   const skip = new Set(["test","interpretation","result_text","significant","effect_sizes","assumptions","warnings","summary","posthoc","posthoc_method","export_rows","r_code","effects","table","row_labels","col_labels","plot_data","crosstab","strata_tables"]);
   const stats = Object.entries(result).filter(([k, v]) => !skip.has(k) && typeof v !== "object");
   return (
@@ -44,14 +71,14 @@ function ResultCard({ result }: { result: any }) {
       <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm">
         {stats.map(([k, v]) => (
           <div key={k} className="flex justify-between border-b border-gray-100 py-1">
-            <span className="text-gray-400">{k}</span><span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as any) : fmt(v)}</span>
+            <span className="text-gray-400">{k}</span><span className="text-gray-700 font-mono">{isPKey(k) ? fmtP(v as number | null | undefined) : fmt(v)}</span>
           </div>
         ))}
       </div>
       {result.effect_sizes?.length > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: any, i: number) => (
+          {result.effect_sizes.map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -68,7 +95,7 @@ function ResultCard({ result }: { result: any }) {
             <table className="w-full text-xs"><thead><tr className="bg-gray-50">
               <th className="px-2 py-1 text-left">Comparison</th><th className="px-2 py-1 text-right">p (adj)</th><th className="px-2 py-1 text-center">Sig</th>
             </tr></thead><tbody>
-              {result.posthoc.map((ph: any, i: number) => (
+              {result.posthoc.map((ph: PostHocRow, i: number) => (
                 <tr key={i} className={`border-t border-gray-100 ${ph.significant?"":"text-gray-400"}`}>
                   <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
                   <td className="px-2 py-1 text-right font-mono">{fmtP(ph.p_adj)}</td>
@@ -111,7 +138,7 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
   const [strataCol, setStrataCol] = usePersistedPanelState<string>("categorical_tests", "strataCol", catCols[1] ?? catCols[0] ?? "");
   const [nullProp, setNullProp] = usePersistedPanelState<string>("categorical_tests", "nullProp", "0.5");
   const [friedmanCols, setFriedmanCols] = usePersistedPanelState<string[]>("categorical_tests", "friedmanCols", []);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<CategoricalResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -130,7 +157,7 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
     setLoading(true); setError(null); setResult(null);
     const sid = session.session_id;
     try {
-      let res: any;
+      let res: { data?: CategoricalResult };
       if (test === "binomial") res = await runBinomial({ session_id: sid, column: col, expected_proportion: +nullProp });
       else if (test === "one_prop") res = await runOneProportion({ session_id: sid, column: col, null_proportion: +nullProp });
       else if (test === "two_prop") res = await runTwoProportions({ session_id: sid, column: col, group_column: groupCol });
@@ -138,8 +165,11 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
       else if (test === "cochran_q") res = await runCochranQ({ session_id: sid, columns: friedmanCols });
       else if (test === "mantel_haenszel") res = await runMantelHaenszel({ session_id: sid, row_col: col, col_col: col2, strata_col: strataCol });
       else if (test === "cochran_armitage") res = await runCochranArmitage({ session_id: sid, ordinal_col: groupCol, event_col: col });
-      setResult(res?.data);
-    } catch (e: any) { setError(e.response?.data?.detail ?? "Error"); }
+      setResult(res?.data ?? null);
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Error");
+    }
     finally { setLoading(false); }
   };
 

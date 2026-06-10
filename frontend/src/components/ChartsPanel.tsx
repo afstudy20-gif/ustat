@@ -3,6 +3,7 @@ import { useStore, isNumericKind, isCategoricalKind, type Session } from "../sto
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
+import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
 import TitledPlot from "./TitledPlot";
 
 export default function ChartsPanel() {
@@ -24,7 +25,7 @@ function ChartsPanelBody({ session }: { session: Session }) {
   const [y, setY] = usePersistedPanelState<string>("charts", "y", numCols[1] ?? "");
   const [color, setColor] = usePersistedPanelState<string>("charts", "color", "");
   const [bins, setBins] = usePersistedPanelState<number>("charts", "bins", 20);
-  const [plotData, setPlotData] = useState<any>(null);
+  const [plotData, setPlotData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -38,7 +39,7 @@ function ChartsPanelBody({ session }: { session: Session }) {
     setError(null);
     try {
       const base = { session_id: session.session_id, x, bins };
-      let res: any;
+      let res;
       if (chartType === "histogram") res = await getHistogram(base);
       else if (chartType === "scatter") res = await getScatter({ ...base, y, color: color || undefined });
       else if (chartType === "boxplot" || chartType === "violin") res = await getBoxplot({ ...base, color: color || undefined });
@@ -80,14 +81,15 @@ function ChartsPanelBody({ session }: { session: Session }) {
       setCustomTitle(autoTitle);
       setCustomXLabel(autoX);
       setCustomYLabel(autoY);
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Error generating chart");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Error generating chart");
     } finally {
       setLoading(false);
     }
   };
 
-  const chartRef = useRef<any>(null);
+  const chartRef = useRef<PlotCaptureHandle | null>(null);
   const traces = plotData ? buildTraces(plotData, chartType, pal, td, session) : null;
 
   return (
@@ -208,9 +210,9 @@ function ChartsPanelBody({ session }: { session: Session }) {
             plotRefOut={chartRef}
             storageKey={`charts:${chartType}:${x}`}
             data={traces}
-            layout={{ ...layout, xaxis: { ...(layout.xaxis as any) }, yaxis: { ...(layout.yaxis as any) } }}
+            layout={{ ...layout, xaxis: { ...(layout.xaxis as PlotLayout) }, yaxis: { ...(layout.yaxis as PlotLayout) } }}
             config={{ responsive: true, displayModeBar: true, displaylogo: false }}
-            defaultTitle={customTitle || plotData?.x || ""}
+            defaultTitle={customTitle || (plotData?.x ? String(plotData.x) : "")}
             defaultSubtitle=""
             defaultXAxis={customXLabel}
             defaultYAxis={customYLabel}
@@ -225,22 +227,37 @@ function ChartsPanelBody({ session }: { session: Session }) {
   );
 }
 
-function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: number; markerSize: number; markerOpacity: number }, session: any): any[] | null {
+function buildTraces(
+  d: Record<string, unknown> | null,
+  chartType: string,
+  C: string[],
+  td: { lineWidth: number; markerSize: number; markerOpacity: number },
+  session: Session,
+): PlotData[] | null {
   if (!d) return null;
 
+  const valueLabelsFor = (colName: unknown): Record<string, string> => {
+    const meta = session.columns.find((c) => c.name === colName);
+    return (meta?.value_labels as Record<string, string> | undefined) ?? {};
+  };
+
   if (d.type === "histogram") {
+    const bins = d.bins as Array<Record<string, number>>;
+    const kde = d.kde as Array<Record<string, number>>;
+    const totalCount = bins.reduce((a, b) => a + b.count, 0);
+    const binWidth = bins[0].x1 - bins[0].x0;
     return [
       {
         type: "bar",
-        x: d.bins.map((b: any) => (b.x0 + b.x1) / 2),
-        y: d.bins.map((b: any) => b.count),
+        x: bins.map((b) => (b.x0 + b.x1) / 2),
+        y: bins.map((b) => b.count),
         marker: { color: C[0], opacity: 0.8 },
         name: "Count",
       },
       {
         type: "scatter",
-        x: d.kde.map((k: any) => k.x),
-        y: d.kde.map((k: any) => k.y * d.bins.reduce((a: number, b: any) => a + b.count, 0) * ((d.bins[0].x1 - d.bins[0].x0))),
+        x: kde.map((k) => k.x),
+        y: kde.map((k) => k.y * totalCount * binWidth),
         mode: "lines",
         line: { color: C[1], width: td.lineWidth },
         name: "KDE",
@@ -250,50 +267,54 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
   }
 
   if (d.type === "scatter") {
+    const points = d.points as Array<Record<string, unknown>>;
+    const regression = d.regression as { line_x: unknown; line_y: unknown; r2: number };
+    const xKey = String(d.x);
+    const yKey = String(d.y);
     if (d.color) {
-      const colorColMeta = session.columns.find((c: any) => c.name === d.color);
-      const colorLabels = colorColMeta?.value_labels ?? {};
-      const groups = [...new Set(d.points.map((p: any) => p[d.color]))];
+      const colorKey = String(d.color);
+      const colorLabels = valueLabelsFor(d.color);
+      const groups = [...new Set(points.map((p) => p[colorKey]))];
       return [
         ...groups.map((g, i) => ({
           type: "scatter",
           mode: "markers",
           name: colorLabels[String(g)] ?? String(g),
-          x: d.points.filter((p: any) => p[d.color] === g).map((p: any) => p[d.x]),
-          y: d.points.filter((p: any) => p[d.color] === g).map((p: any) => p[d.y]),
+          x: points.filter((p) => p[colorKey] === g).map((p) => p[xKey]),
+          y: points.filter((p) => p[colorKey] === g).map((p) => p[yKey]),
           marker: { color: C[i % C.length], size: td.markerSize, opacity: td.markerOpacity },
         })),
         {
           type: "scatter", mode: "lines",
-          x: d.regression.line_x, y: d.regression.line_y,
+          x: regression.line_x, y: regression.line_y,
           line: { color: "#374151", width: 1.5, dash: "dash" },
-          name: `Fit (R²=${d.regression.r2.toFixed(3)})`,
+          name: `Fit (R²=${regression.r2.toFixed(3)})`,
         },
       ];
     }
     return [
       {
         type: "scatter", mode: "markers",
-        x: d.points.map((p: any) => p[d.x]),
-        y: d.points.map((p: any) => p[d.y]),
+        x: points.map((p) => p[xKey]),
+        y: points.map((p) => p[yKey]),
         marker: { color: C[0], size: td.markerSize, opacity: td.markerOpacity },
-        name: d.y,
+        name: yKey,
       },
       {
         type: "scatter", mode: "lines",
-        x: d.regression.line_x, y: d.regression.line_y,
+        x: regression.line_x, y: regression.line_y,
         line: { color: C[1], width: td.lineWidth },
-        name: `Fit (R²=${d.regression.r2.toFixed(3)})`,
+        name: `Fit (R²=${regression.r2.toFixed(3)})`,
       },
     ];
   }
 
   if (d.type === "boxplot") {
-    const colorColMeta = session.columns.find((c: any) => c.name === d.color);
-    const colorLabels = colorColMeta?.value_labels ?? {};
-    
+    const colorLabels = valueLabelsFor(d.color);
+    const groups = d.groups as Array<{ values: unknown[]; group: unknown; row_indices?: number[] }>;
+
     if (chartType === "violin") {
-      return d.groups.map((g: any, i: number) => ({
+      return groups.map((g, i) => ({
         type: "violin",
         y: g.values,
         name: colorLabels[String(g.group)] ?? g.group,
@@ -307,24 +328,24 @@ function buildTraces(d: any, chartType: string, C: string[], td: { lineWidth: nu
         marker: { color: C[i % C.length], size: 3, opacity: 0.5 },
       }));
     }
-    return d.groups.map((g: any, i: number) => ({
+    return groups.map((g, i) => ({
       type: "box",
       y: g.values,
       name: colorLabels[String(g.group)] ?? g.group,
       marker: { color: C[i % C.length] },
-      boxpoints: d.groups[0].values.length < 500 ? "outliers" : false,
-      text: g.row_indices?.map((idx: number) => `Row ${idx + 1}`),
+      boxpoints: groups[0].values.length < 500 ? "outliers" : false,
+      text: g.row_indices?.map((idx) => `Row ${idx + 1}`),
       hovertemplate: "%{y}<br>%{text}<extra>%{fullData.name}</extra>",
     }));
   }
 
   if (d.type === "bar") {
-    const xColMeta = session.columns.find((c: any) => c.name === d.x);
-    const xLabels = xColMeta?.value_labels ?? {};
+    const xLabels = valueLabelsFor(d.x);
+    const data = d.data as Array<{ label: unknown; value: unknown }>;
     return [{
       type: "bar",
-      x: d.data.map((r: any) => xLabels[String(r.label)] ?? r.label),
-      y: d.data.map((r: any) => r.value),
+      x: data.map((r) => xLabels[String(r.label)] ?? r.label),
+      y: data.map((r) => r.value),
       marker: { color: C[0] },
     }];
   }

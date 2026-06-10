@@ -40,8 +40,8 @@ export default function ThreeCol({
   // Width applied via CSS variables; Tailwind `xl:w-[var(--…)]` activates only
   // above the xl breakpoint so mobile / tablet keeps the stacked layout.
   const styleVars = {
-    ["--left-col" as any]: `${leftCol.w}px`,
-    ["--right-col" as any]: `${rightCol.w}px`,
+    "--left-col": `${leftCol.w}px`,
+    "--right-col": `${rightCol.w}px`,
   } as React.CSSProperties;
 
   return (

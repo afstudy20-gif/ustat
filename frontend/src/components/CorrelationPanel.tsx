@@ -15,6 +15,7 @@ import {
   getRawColumns,
 } from "../api";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -36,6 +37,11 @@ function starsFor(p: number | null): string {
   if (p < 0.01) return "**";
   if (p < 0.05) return "*";
   return "";
+}
+
+function getErrorDetail(e: unknown, fallback = "Error"): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
 }
 
 function downloadCSV(filename: string, rows: string[][]): void {
@@ -76,7 +82,7 @@ interface PairResult {
 // ── PairwiseTab ───────────────────────────────────────────────────────────────
 function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: string[] }) {
   const showGrid = useStore((s) => s.showGrid);
-  const corrScatterRef = useRef<any>(null);
+  const corrScatterRef = useRef<PlotCaptureHandle | null>(null);
   const [vars, setVars] = usePersistedPanelState<string[]>("correlation_pairwise", "vars", columns.slice(0, Math.min(4, columns.length)));
   const [varFilter, setVarFilter] = useState("");
   const [method, setMethod] = usePersistedPanelState<string>("correlation_pairwise", "method", "auto");
@@ -462,15 +468,27 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
   );
 }
 
+interface MulticollinearityWarning {
+  var1: string;
+  var2: string;
+  r: number;
+}
+interface MatrixResult {
+  variables: string[];
+  matrix: Record<string, Record<string, number | null>>;
+  p_matrix?: Record<string, Record<string, number | null>>;
+  multicollinearity_warnings: MulticollinearityWarning[];
+}
+
 // ── MatrixTab ─────────────────────────────────────────────────────────────────
 function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[] }) {
   const showGrid = useStore((s) => s.showGrid);
-  const corrHeatmapRef = useRef<any>(null);
-  const corrSplomRef = useRef<any>(null);
+  const corrHeatmapRef = useRef<PlotCaptureHandle | null>(null);
+  const corrSplomRef = useRef<PlotCaptureHandle | null>(null);
   const [selected, setSelected] = usePersistedPanelState<string[]>("correlation_matrix", "selected", columns.slice(0, Math.min(8, columns.length)));
   const [colFilter, setColFilter] = useState("");
   const [method, setMethod] = usePersistedPanelState<string>("correlation_matrix", "method", "pearson");
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<MatrixResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [displayMode, setDisplayMode] = usePersistedPanelState<"heatmap" | "splom">("correlation_matrix", "displayMode", "heatmap");
@@ -487,9 +505,9 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
     setLoading(true);
     try {
       const res = await runCorrelationMatrix({ session_id: sessionId, variables: selected, method, imputation: "listwise" });
-      setData(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Error");
+      setData(res.data as MatrixResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e));
     } finally {
       setLoading(false);
     }
@@ -730,7 +748,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
               showupperhalf: false,
               text: Object.keys(rawData).join(", "),
               hovertemplate: "%{xaxis.title.text}: %{x:.3f}<br>%{yaxis.title.text}: %{y:.3f}<extra></extra>",
-            } as any]}
+            } as PlotData]}
             layout={{
               paper_bgcolor: "transparent",
               plot_bgcolor: "#f9fafb",
@@ -744,7 +762,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
             style={{ width: "100%", flex: 1 }}
             useResizeHandler
             config={{ responsive: true, displayModeBar: false }}
-            onClickAnnotation={(e: any) => setSelectedVar(e?.annotation?.text ?? null)}
+            onClickAnnotation={(e: Readonly<{ annotation?: { text?: string } }>) => setSelectedVar(e?.annotation?.text ?? null)}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-gray-400 text-sm">
@@ -774,7 +792,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
             ⚠ High Collinearity Detected (|r| ≥ 0.70)
             <Tip text="Do not include strongly correlated variables in the same regression model to prevent standard error inflation." wide />
           </p>
-          {data.multicollinearity_warnings.map((w: any, i: number) => (
+          {data.multicollinearity_warnings.map((w: MulticollinearityWarning, i: number) => (
             <div key={i} className="text-xs text-gray-700 flex items-center justify-between bg-white/60 px-2 py-1 rounded border border-amber-100">
               <span className="font-mono truncate max-w-[150px]">{w.var1} ↔ {w.var2}</span>
               <span className="text-amber-600 font-bold font-mono">r = {w.r.toFixed(3)}</span>
@@ -818,13 +836,30 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
   );
 }
 
+interface ICCResult {
+  icc: number;
+  ci_low: number;
+  ci_high: number;
+  f_stat: number;
+  f_p: number;
+  n: number;
+  interpretation: string;
+  bland_altman: {
+    means: number[];
+    diffs: number[];
+    mean_diff: number;
+    loa_upper: number;
+    loa_lower: number;
+  };
+}
+
 // ── ICCTab ────────────────────────────────────────────────────────────────────
 function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }) {
   const showGrid = useStore((s) => s.showGrid);
-  const blandAltmanRef = useRef<any>(null);
+  const blandAltmanRef = useRef<PlotCaptureHandle | null>(null);
   const [rater1, setRater1] = useState(columns[0] ?? "");
   const [rater2, setRater2] = useState(columns[1] ?? "");
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ICCResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -834,9 +869,9 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
     setLoading(true);
     try {
       const res = await runICC({ session_id: sessionId, rater1_col: rater1, rater2_col: rater2 });
-      setData(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Error");
+      setData(res.data as ICCResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e));
     } finally {
       setLoading(false);
     }
@@ -994,13 +1029,24 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
   );
 }
 
+interface KappaResult {
+  kappa: number;
+  ci_low: number;
+  ci_high: number;
+  se: number;
+  n: number;
+  interpretation: string;
+  confusion_matrix: number[][];
+  labels: string[];
+}
+
 // ── KappaTab ──────────────────────────────────────────────────────────────────
 function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[] }) {
   const showGrid = useStore((s) => s.showGrid);
-  const kappaMatrixRef = useRef<any>(null);
+  const kappaMatrixRef = useRef<PlotCaptureHandle | null>(null);
   const [rater1, setRater1] = useState(columns[0] ?? "");
   const [rater2, setRater2] = useState(columns[1] ?? "");
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<KappaResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -1010,9 +1056,9 @@ function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[]
     setLoading(true);
     try {
       const res = await runCohensKappa({ session_id: sessionId, rater1_col: rater1, rater2_col: rater2 });
-      setData(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Error");
+      setData(res.data as KappaResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e));
     } finally {
       setLoading(false);
     }

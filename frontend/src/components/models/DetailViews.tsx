@@ -1,11 +1,13 @@
 import { useRef, useState } from "react";
 import TitledPlot from "../TitledPlot";
+import type { PlotCaptureHandle } from "../../lib/plotTypes";
 import { fmtP } from "../../lib/format";
-import { adjustP } from "./shared";
+import { adjustP, type Coefficient, type PredictorInfo, type PredictionResult,
+  type ModelSummary } from "./shared";
 
-export function PredictionPanel({ result }: { result: any }) {
-  const predictorInfo: Record<string, any> = result.predictor_info ?? {};
-  const coefs: any[] = result.coefficients ?? [];
+export function PredictionPanel({ result }: { result: PredictionResult }) {
+  const predictorInfo: Record<string, PredictorInfo> = result.predictor_info ?? {};
+  const coefs: Coefficient[] = result.coefficients ?? [];
   const outcome: string = result.outcome ?? "";
   const residualSe: number = result.residual_se ?? 0;
   const dfResid: number = result.df_resid ?? 100;
@@ -69,7 +71,7 @@ export function PredictionPanel({ result }: { result: any }) {
   const exportCSV = () => {
     const rows: string[][] = [
       ["Variable", "Coefficient", "SE", "t", "p", "CI_low", "CI_high"],
-      ...coefs.map((c: any) => [c.variable, c.estimate, c.se, c.t, c.p, c.ci_low, c.ci_high].map(String)),
+      ...coefs.map((c: Coefficient) => [c.variable, c.estimate, c.se, c.t, c.p, c.ci_low, c.ci_high].map(String)),
       [],
       ["Outcome", outcome],
       ["R²", result.r_squared?.toFixed(4) ?? ""],
@@ -122,7 +124,7 @@ export function PredictionPanel({ result }: { result: any }) {
           {/* Numeric predictor line charts */}
           {numPreds.map(([col, info]) => {
             const N = 120;
-            const lo = info.min, hi = info.max;
+            const lo = info.min ?? 0, hi = info.max ?? 0;
             const xs = Array.from({ length: N + 1 }, (_, i) => lo + (hi - lo) * i / N);
             const ys = xs.map((x) => predict({ [col]: x }));
             const cx = Number(vals[col]);
@@ -169,8 +171,8 @@ export function PredictionPanel({ result }: { result: any }) {
                   />
                   <input
                     type="range"
-                    min={info.min} max={info.max}
-                    step={(info.max - info.min) / 200}
+                    min={lo} max={hi}
+                    step={(hi - lo) / 200}
                     value={Number(vals[col])}
                     onChange={(e) => setVals((p) => ({ ...p, [col]: Number(e.target.value) }))}
                     className="flex-1 accent-indigo-500"
@@ -269,9 +271,9 @@ export function PredictionPanel({ result }: { result: any }) {
 export function CoefDetailPanel({
   coef, nullHyp, onClose,
 }: {
-  coef: any; nullHyp: string; onClose: () => void;
+  coef: Coefficient; nullHyp: string; onClose: () => void;
 }) {
-  const coefPlotRef = useRef<any>(null);
+  const coefPlotRef = useRef<PlotCaptureHandle | null>(null);
   const beta = coef.log_odds ?? coef.log_irr ?? coef.log_hr ?? coef.estimate ?? 0;
   const se   = coef.se ?? 1;
   const adjP = adjustP(coef.p, beta, nullHyp);
@@ -354,7 +356,7 @@ export function CoefDetailPanel({
 
 // ── Compact SPSS-style Model Summary Table ──────────────────────────────────
 
-export function ModelSummaryTable({ s }: { s: any }) {
+export function ModelSummaryTable({ s }: { s: ModelSummary }) {
   const cl = s.classification;
   const hl = s.hosmer_lemeshow;
   const om = s.omnibus;

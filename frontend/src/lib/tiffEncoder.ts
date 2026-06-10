@@ -148,9 +148,15 @@ export async function plotlyToTiffBlob(
   // Prefer the Plotly instance react-plotly.js already attached to the
   // gd (saves a dynamic import + side-steps the ESM tree-shake bug);
   // fall back to plotly.js/dist/plotly only when _Plotly isn't present.
-  let Plotly: any = (graphDiv as any)._Plotly;
+  interface PlotlyToImage {
+    toImage: (
+      gd: HTMLElement,
+      opts: { format: string; width: number; height: number; scale: number; setBackground: string },
+    ) => Promise<string>;
+  }
+  let Plotly = (graphDiv as HTMLElement & { _Plotly?: PlotlyToImage })._Plotly;
   if (!Plotly?.toImage) {
-    Plotly = (await import("plotly.js/dist/plotly")).default;
+    Plotly = (await import("plotly.js/dist/plotly")).default as unknown as PlotlyToImage;
   }
   const scale = opts.dpi / 72;
   const dataUrl: string = await Plotly.toImage(graphDiv, {
@@ -160,7 +166,7 @@ export async function plotlyToTiffBlob(
     // Runtime supports `scale` even if the published d.ts is missing it.
     scale,
     setBackground: "opaque",
-  } as Parameters<typeof Plotly.toImage>[1] & { scale: number });
+  });
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const el = new Image();

@@ -5,6 +5,53 @@ import { Tip } from "./Tip";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 
+interface WeightedRow {
+  column: string;
+  error?: string;
+  n?: number;
+  ess_kish?: number;
+  w_mean?: number;
+  w_sd?: number;
+  ci_low?: number;
+  ci_high?: number;
+  w_median?: number;
+  w_q1?: number;
+  w_q3?: number;
+  w_proportion?: number | null;
+}
+
+interface WeightedComparison {
+  variable: string;
+  group_a: string;
+  group_b: string;
+  w_mean_a: number | string;
+  w_mean_b: number | string;
+  diff: number | string;
+  ci_low: number | string;
+  ci_high: number | string;
+  p: number;
+}
+
+interface Assumption {
+  name: string;
+  detail: string;
+  met: boolean;
+}
+
+interface WeightedStatsResult {
+  weight_col?: string;
+  n?: number;
+  results: WeightedRow[];
+  comparison?: WeightedComparison;
+  assumptions?: Assumption[];
+  result_text?: string;
+  export_rows?: string[][];
+}
+
+interface ApiErrorDetail {
+  msg?: string;
+}
+
 export default function WeightedStatsPanel() {
   const session = useStore((s) => s.session);
   const columns = session?.columns ?? [];
@@ -15,7 +62,7 @@ export default function WeightedStatsPanel() {
   const [weightCol, setWeightCol] = useState("");
   const [valueCols, setValueCols] = useState<string[]>([]);
   const [groupCol, setGroupCol] = useState("");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<WeightedStatsResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,10 +78,11 @@ export default function WeightedStatsPanel() {
         group_col: groupCol || undefined,
       });
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "Failed")));
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const message = e instanceof Error ? e.message : String(e);
+      setError(Array.isArray(detail) ? detail.map((m: ApiErrorDetail) => m.msg ?? String(m)).join(", ")
+        : (typeof detail === "string" ? detail : (message || "Failed")));
     } finally { setLoading(false); }
   };
 
@@ -114,7 +162,7 @@ export default function WeightedStatsPanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.results.map((r: any) => (
+                    {result.results.map((r: WeightedRow) => (
                       <tr key={r.column} className="border-b border-gray-100 hover:bg-gray-50">
                         <td className="px-2 py-1.5 font-mono text-gray-800">{r.column}</td>
                         {r.error ? (
@@ -161,7 +209,7 @@ export default function WeightedStatsPanel() {
               </div>
             )}
 
-            {result.assumptions?.map((a: any, i: number) => (
+            {result.assumptions?.map((a: Assumption, i: number) => (
               <div key={i} className={`flex items-start gap-2 text-xs px-3 py-1.5 rounded-lg ${a.met ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                 <span>{a.met ? "✓" : "⚠"}</span>
                 <span><span className="font-medium">{a.name}</span> — {a.detail}</span>

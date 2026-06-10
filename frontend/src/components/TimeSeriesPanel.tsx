@@ -5,20 +5,37 @@ import { runArima, runDecompose, runStationarity } from "../api";
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 
 type Mode = "arima" | "decompose" | "stationarity";
+
+/** A point in an ACF/PACF stem plot returned by the stationarity endpoint. */
+interface StemPoint {
+  lag: number;
+  value: number;
+  ci_low: number;
+  ci_high: number;
+}
+
+/** A single ARIMA coefficient row returned by the arima endpoint. */
+interface Coefficient {
+  term: string;
+  estimate?: number;
+  se?: number;
+  p?: number;
+}
 
 export default function TimeSeriesPanel() {
   const session = useStore((s) => s.session);
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const mainRef = useRef<any>(null);
-  const acfRef = useRef<any>(null);
-  const pacfRef = useRef<any>(null);
-  const decompRef = useRef<any>(null);
+  const mainRef = useRef<PlotCaptureHandle | null>(null);
+  const acfRef = useRef<PlotCaptureHandle | null>(null);
+  const pacfRef = useRef<PlotCaptureHandle | null>(null);
+  const decompRef = useRef<PlotCaptureHandle | null>(null);
 
   const columns = session?.columns ?? [];
   const sid = session?.session_id ?? "";
@@ -38,7 +55,7 @@ export default function TimeSeriesPanel() {
   // stationarity
   const [nLags, setNLags] = useState(24);
 
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +64,7 @@ export default function TimeSeriesPanel() {
     setLoading(true); setError(null); setResult(null);
     try {
       const base = { session_id: sid, value_col: valueCol, time_col: timeCol || undefined };
-      let res: any;
+      let res;
       if (mode === "arima") {
         res = await runArima({ ...base, p, d, q, P, D, Q, s, auto, forecast_steps: steps });
       } else if (mode === "decompose") {
@@ -56,10 +73,12 @@ export default function TimeSeriesPanel() {
         res = await runStationarity({ ...base, n_lags: nLags });
       }
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail;
-      setError(Array.isArray(detail) ? detail.map((m: any) => m.msg ?? String(m)).join(", ")
-        : (typeof detail === "string" ? detail : (e?.message ?? "Run failed")));
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+      const fallback = e instanceof Error ? e.message : "Run failed";
+      setError(Array.isArray(detail)
+        ? detail.map((m: { msg?: string }) => m.msg ?? String(m)).join(", ")
+        : (typeof detail === "string" ? detail : fallback));
     } finally { setLoading(false); }
   };
 
@@ -68,13 +87,15 @@ export default function TimeSeriesPanel() {
   // ── ARIMA plot: observed + fitted + forecast band ──
   const arimaPlot = () => {
     if (!result?.fitted) return null;
-    const obsX = result.fitted.map((r: any) => r.x);
-    const obsY = result.fitted.map((r: any) => r.observed);
-    const fitY = result.fitted.map((r: any) => r.fitted);
-    const fcX = result.forecast.map((r: any) => r.x);
-    const fcY = result.forecast.map((r: any) => r.forecast);
-    const fcLo = result.forecast.map((r: any) => r.ci_low);
-    const fcHi = result.forecast.map((r: any) => r.ci_high);
+    const fitted = result.fitted as Array<Record<string, unknown>>;
+    const forecast = result.forecast as Array<Record<string, unknown>>;
+    const obsX = fitted.map((r) => r.x);
+    const obsY = fitted.map((r) => r.observed);
+    const fitY = fitted.map((r) => r.fitted);
+    const fcX = forecast.map((r) => r.x);
+    const fcY = forecast.map((r) => r.forecast);
+    const fcLo = forecast.map((r) => r.ci_low);
+    const fcHi = forecast.map((r) => r.ci_high);
     return (
       <TitledPlot
         plotRefOut={mainRef}
@@ -105,10 +126,10 @@ export default function TimeSeriesPanel() {
     if (!result?.observed) return null;
     const x = result.x;
     const rows: [string, number[], string][] = [
-      ["Observed", result.observed, "#374151"],
-      ["Trend", result.trend, pal[0]],
-      ["Seasonal", result.seasonal, pal[1] ?? "#6366f1"],
-      ["Residual", result.resid, "#9ca3af"],
+      ["Observed", result.observed as number[], "#374151"],
+      ["Trend", result.trend as number[], pal[0]],
+      ["Seasonal", result.seasonal as number[], pal[1] ?? "#6366f1"],
+      ["Residual", result.resid as number[], "#9ca3af"],
     ];
     return (
       <TitledPlot
@@ -140,7 +161,7 @@ export default function TimeSeriesPanel() {
   };
 
   // ── Stationarity: ACF + PACF stem plots ──
-  const stem = (data: any[], title: string, ref: any, exportName: string) => (
+  const stem = (data: StemPoint[], title: string, ref: React.MutableRefObject<PlotCaptureHandle | null>, exportName: string) => (
     <TitledPlot
       plotRefOut={ref}
       storageKey={`ts:stem:${exportName}`}
@@ -275,8 +296,8 @@ export default function TimeSeriesPanel() {
               {mode === "decompose" && decompPlot()}
               {mode === "stationarity" && (
                 <>
-                  {stem(result.acf ?? [], "ACF (autocorrelation)", acfRef, "ACF")}
-                  {stem(result.pacf ?? [], "PACF (partial autocorrelation)", pacfRef, "PACF")}
+                  {stem((result.acf as StemPoint[]) ?? [], "ACF (autocorrelation)", acfRef, "ACF")}
+                  {stem((result.pacf as StemPoint[]) ?? [], "PACF (partial autocorrelation)", pacfRef, "PACF")}
                 </>
               )}
             </div>
@@ -307,8 +328,8 @@ export default function TimeSeriesPanel() {
                   <div className="panel space-y-2">
                     <div className="flex items-center justify-between">
                       <h4 className="text-sm font-semibold text-gray-700">Coefficients</h4>
-                      <ResultExporter title={`ARIMA_${result.value_col}`} headers={["Term", "Estimate", "SE", "p"]}
-                        rows={result.coefficients.map((c: any) => [c.term, c.estimate, c.se, c.p])} />
+                      <ResultExporter title={`ARIMA_${String(result.value_col)}`} headers={["Term", "Estimate", "SE", "p"]}
+                        rows={(result.coefficients as Coefficient[]).map((c) => [c.term, c.estimate, c.se, c.p])} />
                     </div>
                     <div className="overflow-auto rounded-lg border border-gray-200 max-h-60">
                       <table className="w-full text-[11px] border-collapse">
@@ -316,7 +337,7 @@ export default function TimeSeriesPanel() {
                           <tr><th className="text-left px-1.5 py-1">Term</th><th className="text-right px-1.5 py-1">Est</th><th className="text-right px-1.5 py-1">SE</th><th className="text-right px-1.5 py-1">p</th></tr>
                         </thead>
                         <tbody>
-                          {result.coefficients.map((c: any) => (
+                          {(result.coefficients as Coefficient[]).map((c) => (
                             <tr key={c.term} className="border-b border-gray-100">
                               <td className="px-1.5 py-1 font-mono text-gray-700">{c.term}</td>
                               <td className="px-1.5 py-1 font-mono text-right">{c.estimate?.toFixed(3)}</td>

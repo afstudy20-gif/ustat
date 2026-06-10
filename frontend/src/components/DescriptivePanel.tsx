@@ -6,6 +6,64 @@ import api from "../api";
 import ResultExporter from "./ResultExporter";
 import TitledPlot from "./TitledPlot";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
+
+// ── Result shapes returned by the descriptive / column-summary endpoints ─────
+
+interface HistBin { bin_start: number; bin_end: number; count: number }
+interface QQPoint { x: number; y: number }
+interface OutlierPoint { row: number; value: number }
+interface CatRow { value: string | number; count: number; pct?: number }
+interface NormalityDeviant {
+  row: number; value: number; z: number; qq_x: number; abs_residual: number;
+}
+
+interface ColumnSummary {
+  type?: "numeric" | "categorical";
+  histogram: HistBin[];
+  raw_values?: number[];
+  outliers?: OutlierPoint[];
+  normality_deviants?: NormalityDeviant[];
+  qq: QQPoint[];
+  categories?: CatRow[];
+  n?: number;
+  n_categories?: number;
+  missing?: number;
+  display_decimals?: number;
+  mean?: number;
+  std?: number;
+  median?: number;
+  min?: number;
+  max?: number;
+  q1?: number;
+  q3?: number;
+  iqr?: number;
+  whisker_low?: number;
+  whisker_high?: number;
+  skewness?: number;
+  kurtosis?: number;
+  normal?: boolean;
+  normality_label?: string;
+  normality_test?: string;
+  normality_p?: number;
+  shapiro_p?: number;
+}
+
+type ChartTab = "histogram" | "boxplot" | "violin" | "qq";
+
+interface ScatterResult {
+  points: Record<string, unknown>[];
+  color?: unknown;
+  regression: { line_x?: number[]; line_y?: number[] };
+}
+
+interface ColMeta {
+  name: string;
+  kind: string;
+  hist?: null;
+  shapiro_p?: number;
+  top2?: null;
+}
 
 // ── Inline sparkline SVG (real histogram / category bars) ────────────────────
 
@@ -161,25 +219,25 @@ const BASE_LAYOUT = {
 
 // ── Main chart for numeric columns ──────────────────────────────────────────
 
-function NumericView({ summary, loadSummary, selected }: { summary: any; loadSummary: (col: string) => void; selected: string }) {
+function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummary; loadSummary: (col: string) => void; selected: string }) {
   const chartTab = useStore((s) => s.descriptiveTab);
   const showGrid = useStore((s) => s.showGrid);
   const pal = usePalette();
-  const histRef = useRef<any>(null);
-  const boxRef = useRef<any>(null);
-  const violinRef = useRef<any>(null);
-  const qqRef = useRef<any>(null);
+  const histRef = useRef<PlotCaptureHandle | null>(null);
+  const boxRef = useRef<PlotCaptureHandle | null>(null);
+  const violinRef = useRef<PlotCaptureHandle | null>(null);
+  const qqRef = useRef<PlotCaptureHandle | null>(null);
   const P = pal[0]; // primary color
 
   const histData = [{
     type: "bar" as const,
-    x: summary.histogram.map((b: any) => (b.bin_start + b.bin_end) / 2),
-    y: summary.histogram.map((b: any) => b.count),
-    width: summary.histogram.map((b: any) => b.bin_end - b.bin_start),
+    x: summary.histogram.map((b) => (b.bin_start + b.bin_end) / 2),
+    y: summary.histogram.map((b) => b.count),
+    width: summary.histogram.map((b) => b.bin_end - b.bin_start),
     marker: { color: P, opacity: 0.85 },
     name: "Count",
     hovertemplate: "Range: %{customdata[0]}–%{customdata[1]}<br>Count: %{y}<extra></extra>",
-    customdata: summary.histogram.map((b: any) => [b.bin_start.toFixed(2), b.bin_end.toFixed(2)]),
+    customdata: summary.histogram.map((b) => [b.bin_start.toFixed(2), b.bin_end.toFixed(2)]),
   }];
 
   const outliers: { row: number; value: number }[] = summary.outliers ?? [];
@@ -197,13 +255,13 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
   // Give the box an EXPLICIT x category so Plotly uses a category axis.
   // Then scatter traces with the same x value co-locate perfectly.
   // hoverinfo:"none" kills the ugly per-stat labels Plotly shows by default.
-  const boxTrace: any = {
+  const boxTrace: PlotData = {
     type: "box" as const,
     x: rawVals.map(() => "Distribution"),   // explicit category → category axis
     y: rawVals,
     name: "Distribution",
     boxmean: true,
-    boxpoints: false as any,                // we draw outliers ourselves
+    boxpoints: false,                       // we draw outliers ourselves
     marker: { color: P, size: 5 },
     line: { color: P },
     fillcolor: "rgba(99,102,241,0.15)",
@@ -212,7 +270,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
   // ── Invisible summary hover scatter ──────────────────────────────────────
   // Large transparent marker at median; triggers hover anywhere over the box.
-  const summaryScatter: any = {
+  const summaryScatter: PlotData = {
     type: "scatter" as const,
     mode: "markers" as const,
     x: ["Distribution"],
@@ -224,7 +282,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
   // ── Outlier scatter ────────────────────────────────────────────────────────
   // Same x category → overlaid perfectly on the box.
-  const outlierTrace: any[] = outliers.length > 0 ? [{
+  const outlierTrace: PlotData[] = outliers.length > 0 ? [{
     type: "scatter" as const,
     mode: "markers" as const,
     x: outliers.map(() => "Distribution"),
@@ -236,24 +294,24 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
     showlegend: false,
   }] : [];
 
-  const boxData: any[] = [boxTrace, summaryScatter, ...outlierTrace];
+  const boxData: PlotData[] = [boxTrace, summaryScatter, ...outlierTrace];
 
 
-  const normalityDeviants: { row: number; value: number; z: number; qq_x: number; abs_residual: number }[] =
+  const normalityDeviants: NormalityDeviant[] =
     summary.normality_deviants ?? [];
 
   const qqData = [
     {
       type: "scatter" as const, mode: "markers" as const,
-      x: summary.qq.map((p: any) => p.x),
-      y: summary.qq.map((p: any) => p.y),
+      x: summary.qq.map((p) => p.x),
+      y: summary.qq.map((p) => p.y),
       marker: { color: P, size: 4 },
       name: "Observed",
       hovertemplate: "Theoretical: %{x:.3f}<br>Observed: %{y:.3f}<extra></extra>",
     },
     (() => {
-      const xs = summary.qq.map((p: any) => p.x);
-      const ys = summary.qq.map((p: any) => p.y);
+      const xs = summary.qq.map((p) => p.x);
+      const ys = summary.qq.map((p) => p.y);
       const xMin = Math.min(...xs), xMax = Math.max(...xs);
       const yMin = Math.min(...ys), yMax = Math.max(...ys);
       return {
@@ -374,7 +432,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
         <div className="relative">
         <TitledPlot plotRefOut={violinRef} storageKey="desc:violin"
           data={[{
-            type: "violin" as any,
+            type: "violin",
             y: summary.raw_values ?? [],
             name: "Distribution",
             box: { visible: true },
@@ -443,17 +501,17 @@ function NumericView({ summary, loadSummary, selected }: { summary: any; loadSum
 
 // ── Main chart for categorical columns ──────────────────────────────────────
 
-function CategoricalView({ summary }: { summary: any }) {
+function CategoricalView({ summary }: { summary: ColumnSummary }) {
   const showGrid = useStore((s) => s.showGrid);
-  const donutRef = useRef<any>(null);
-  const barRef = useRef<any>(null);
-  const cats = summary.categories.slice(0, 20);
+  const donutRef = useRef<PlotCaptureHandle | null>(null);
+  const barRef = useRef<PlotCaptureHandle | null>(null);
+  const cats: CatRow[] = (summary.categories ?? []).slice(0, 20);
   const colors = ["#7c3aed", "#f59e0b", "#10b981", "#ef4444", "#06b6d4", "#ec4899"];
 
   const donutData = [{
     type: "pie" as const,
-    values: cats.map((c: any) => c.count),
-    labels: cats.map((c: any) => c.value),
+    values: cats.map((c) => c.count),
+    labels: cats.map((c) => c.value),
     hole: 0.5,
     marker: { colors: colors },
     textinfo: "percent" as const,
@@ -462,11 +520,11 @@ function CategoricalView({ summary }: { summary: any }) {
 
   const barData = [{
     type: "bar" as const,
-    x: cats.map((c: any) => c.count),
-    y: cats.map((c: any) => c.value),
+    x: cats.map((c) => c.count),
+    y: cats.map((c) => c.value),
     orientation: "h" as const,
     marker: { color: PALETTES[useStore.getState().plotTheme.palette]?.[0] ?? "#6366f1", opacity: 0.85 },
-    text: cats.map((c: any) => `${c.count}`),
+    text: cats.map((c) => `${c.count}`),
     textposition: "outside" as const,
     hovertemplate: "%{y}: %{x}<extra></extra>",
   }];
@@ -526,11 +584,11 @@ function ScatterView({
   const [yCol,    setYCol]    = usePersistedPanelState<string>("descriptive_numeric", "yCol", numCols.find((c) => c !== defaultX) ?? "");
   const [color,   setColor]   = usePersistedPanelState<string>("descriptive_numeric", "color", "");
   const [shape,   setShape]   = usePersistedPanelState<string>("descriptive_numeric", "shape", "");
-  const [data,    setData]    = useState<any | null>(null);
+  const [data,    setData]    = useState<ScatterResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
   const prevKey = useRef("");
-  const scatterRef = useRef<any>(null);
+  const scatterRef = useRef<PlotCaptureHandle | null>(null);
 
   useEffect(() => {
     if (!xCol || !yCol) { setData(null); return; }
@@ -551,16 +609,16 @@ function ScatterView({
   const fmt = (v: number, d = 3) =>
     typeof v === "number" ? (Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(2) : v.toFixed(d)) : "—";
 
-  const traces: any[] = [];
+  const traces: PlotData[] = [];
   if (data) {
-    const pts = data.points as Record<string, any>[];
+    const pts = data.points;
     const shapeUniq: string[] = shape
       ? Array.from(new Set(pts.map((p) => String(p[shape] ?? "null"))))
       : [];
     const symbolOf = (v: string) => SYMBOLS[shapeUniq.indexOf(v) % SYMBOLS.length] ?? "circle";
 
     if (color && data.color) {
-      const groups: Record<string, { x: any[]; y: any[]; shapeLabels: string[] }> = {};
+      const groups: Record<string, { x: unknown[]; y: unknown[]; shapeLabels: string[] }> = {};
       pts.forEach((p) => {
         const g = String(p[color] ?? "null");
         if (!groups[g]) groups[g] = { x: [], y: [], shapeLabels: [] };
@@ -586,7 +644,7 @@ function ScatterView({
         });
       });
     } else if (shape) {
-      const groups: Record<string, { x: any[]; y: any[] }> = {};
+      const groups: Record<string, { x: unknown[]; y: unknown[] }> = {};
       pts.forEach((p) => {
         const g = String(p[shape] ?? "null");
         if (!groups[g]) groups[g] = { x: [], y: [] };
@@ -787,10 +845,10 @@ export default function DescriptivePanel() {
   const columnDecimals = useStore((s) => s.columnDecimals);
   const [dragIdx,  setDragIdx]  = useState<number | null>(null);
   const [dropIdx,  setDropIdx]  = useState<number | null>(null);
-  const [colMeta, setColMeta] = useState<any[]>([]);
+  const [colMeta, setColMeta] = useState<ColMeta[]>([]);
   const [sparklines, setSparklines] = useState<Record<string, SparkData>>({});
   const [selected, setSelected] = useState<string | null>(null);
-  const [summary, setSummary] = useState<any | null>(null);
+  const [summary, setSummary] = useState<ColumnSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [view, setView] = usePersistedPanelState<"distribution" | "scatter">("descriptive", "view", "distribution");
@@ -943,8 +1001,8 @@ export default function DescriptivePanel() {
       setSparklines(r.data as Record<string, SparkData>);
     });
     api.get(`/api/stats/${session.session_id}/descriptive`).then((r) => {
-      const numStats = r.data as Record<string, any>;
-      const metas = session.columns.map((c) => {
+      const numStats = r.data as Record<string, { normality_p?: number }>;
+      const metas: ColMeta[] = session.columns.map((c) => {
         if (c.kind === "numeric" && numStats[c.name]) {
           const s = numStats[c.name];
           return { name: c.name, kind: "numeric", hist: null, shapiro_p: s.normality_p };
@@ -963,12 +1021,12 @@ export default function DescriptivePanel() {
     setSummaryLoading(true);
     api.get(`/api/stats/${session.session_id}/column_summary`, { params: { column: colName, kind } })
       .then((r) => {
-        const rawSummary = r.data;
+        const rawSummary = r.data as ColumnSummary;
         if (rawSummary && rawSummary.type === "categorical" && rawSummary.categories) {
           const colMeta = session.columns.find((c) => c.name === colName);
           const vLabels = colMeta?.value_labels ?? {};
-          
-          rawSummary.categories = rawSummary.categories.map((c: any) => ({
+
+          rawSummary.categories = rawSummary.categories.map((c) => ({
             ...c,
             value: vLabels[String(c.value)] ?? c.value,
           }));
@@ -1107,7 +1165,7 @@ export default function DescriptivePanel() {
                     setView("scatter");
                   } else {
                     setView("distribution");
-                    setChartTab(id as any);
+                    setChartTab(id as ChartTab);
                   }
                 }}
                 className={`px-3 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors
@@ -1217,7 +1275,7 @@ export default function DescriptivePanel() {
                                 fmtP(summary.normality_p ?? summary.shapiro_p)],
                             ];
                           })()
-                        : (summary.categories ?? []).map((c: any) => [
+                        : (summary.categories ?? []).map((c) => [
                             c.value, c.count,
                             c.pct != null ? `${c.pct.toFixed(1)}%` : "",
                           ])}

@@ -2,28 +2,28 @@ import ResultExporter from "../ResultExporter";
 import { StyledTableExporter } from "../StyledTableExporter";
 import type { StyledTableData } from "../../lib/styledTable";
 import { fmtP, fmtPubP } from "../../lib/format";
-import { adjustP, MiniNormalSVG, SigBar } from "./shared";
+import { adjustP, MiniNormalSVG, SigBar, type Coefficient, type ORRow } from "./shared";
 
 export function CoefTable({
   coefs, hrMode = false, allColumns = [], selectedIdx = null, onSelect, nullHyp = "eq",
 }: {
-  coefs: any[]; hrMode?: boolean; allColumns?: string[];
+  coefs: Coefficient[]; hrMode?: boolean; allColumns?: string[];
   selectedIdx?: number | null; onSelect?: (i: number) => void; nullHyp?: string;
 }) {
   const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
 
   const isConst   = (n: string) => n === "const" || n === "Intercept";
   const isDummy   = (n: string) => !isConst(n) && allColumns.length > 0 && !allColumns.includes(n);
-  const getBeta   = (c: any) => hrMode ? (c.log_hr ?? c.estimate) : (c.log_odds ?? c.estimate);
+  const getBeta   = (c: Coefficient) => hrMode ? (c.log_hr ?? c.estimate) : (c.log_odds ?? c.estimate);
 
-  const renderViz = (c: any) => {
+  const renderViz = (c: Coefficient) => {
     if (isConst(c.variable)) return <span className="text-gray-300 text-xs">—</span>;
     if (isDummy(c.variable)) return <span className="text-amber-400 text-xs" title="Categorical indicator variable">⚠</span>;
     const beta = getBeta(c);
     if (beta == null || c.se == null) return null;
     return <MiniNormalSVG beta={beta} se={c.se} p={adjustP(c.p, beta, nullHyp)} />;
   };
-  const renderSig = (c: any) => {
+  const renderSig = (c: Coefficient) => {
     if (isConst(c.variable)) return null;
     const beta = getBeta(c) ?? 0;
     return <SigBar p={adjustP(c.p, beta, nullHyp)} />;
@@ -47,7 +47,7 @@ export function CoefTable({
       : hrMode
         ? ["Variable", "HR", "SE", "z", "p-value", "CI_low", "CI_high"]
         : ["Variable", "Estimate", "SE", "t", "p-value", "CI_low", "CI_high"];
-  const coefExportRows = coefs.map((c: any) => {
+  const coefExportRows = coefs.map((c: Coefficient) => {
     if (isPoisson) return [c.variable, c.log_irr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", fmtP(c.p), c.irr?.toFixed(3) ?? "", c.irr_ci_low?.toFixed(3) ?? "", c.irr_ci_high?.toFixed(3) ?? ""];
     if (isLogistic) return [c.variable, c.log_odds?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", c.z?.toFixed(3) ?? "", fmtP(c.p), c.odds_ratio?.toFixed(3) ?? "", c.or_ci_low?.toFixed(3) ?? "", c.or_ci_high?.toFixed(3) ?? ""];
     if (hrMode) return [c.variable, c.hr?.toFixed(4) ?? "", c.se?.toFixed(4) ?? "", (c.t ?? c.z)?.toFixed(3) ?? "", fmtP(c.p), c.hr_ci_low?.toFixed(3) ?? "", c.hr_ci_high?.toFixed(3) ?? ""];
@@ -57,7 +57,7 @@ export function CoefTable({
 
   // ── Publication-styled export (effect + 95% CI + p in one cell) ───────────
   const effLabel = isPoisson ? "IRR" : isLogistic ? "OR" : hrMode ? "HR" : "Estimate";
-  const effCell = (c: any): string => {
+  const effCell = (c: Coefficient): string => {
     const [v, lo, hi] = isPoisson
       ? [c.irr, c.irr_ci_low, c.irr_ci_high]
       : isLogistic
@@ -72,7 +72,7 @@ export function CoefTable({
   const styledExport = (): StyledTableData => ({
     title: coefTitle.replace(/_/g, " "),
     columns: ["Variable", `${effLabel} (95% CI)`, "p"],
-    rows: coefs.map((c: any) => [c.variable, effCell(c), fmtPubP(c.p)]),
+    rows: coefs.map((c: Coefficient) => [c.variable, effCell(c), fmtPubP(c.p)]),
     filename: coefTitle,
   });
 
@@ -100,7 +100,7 @@ export function CoefTable({
             </tr>
           </thead>
           <tbody>
-            {coefs.map((c: any, i: number) => {
+            {coefs.map((c: Coefficient, i: number) => {
               const adjP = adjustP(c.p, c.log_irr ?? 0, nullHyp);
               return (
                 <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
@@ -150,7 +150,7 @@ export function CoefTable({
             </tr>
           </thead>
           <tbody>
-            {coefs.map((c: any, i: number) => {
+            {coefs.map((c: Coefficient, i: number) => {
               const adjP = adjustP(c.p, c.log_odds ?? 0, nullHyp);
               return (
                 <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
@@ -198,7 +198,7 @@ export function CoefTable({
           </tr>
         </thead>
         <tbody>
-          {coefs.map((c: any, i: number) => {
+          {coefs.map((c: Coefficient, i: number) => {
             const est  = hrMode ? c.hr : (c.estimate ?? c.log_hr);
             const beta = getBeta(c) ?? 0;
             const adjP = adjustP(c.p, beta, nullHyp);
@@ -227,20 +227,20 @@ export function CoefTable({
 }
 
 export function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
-  rows: any[];
+  rows: ORRow[];
   outcome: string;
   selectionMethod?: string;
   nMulti?: number;
   nTotal?: number;
 }) {
-  const sig   = (p: number) => p == null ? "" : p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
-  const fmtOR = (or: number | null, low: number | null, high: number | null) =>
+  const sig   = (p: number | null) => p == null ? "" : p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
+  const fmtOR = (or: number | null | undefined, low: number | null | undefined, high: number | null | undefined) =>
     or == null ? "–" : `${or.toFixed(2)} (${low?.toFixed(2)}–${high?.toFixed(2)})`;
 
-  const notEntered = (r: any) => r.multi_or == null && r.uni_or != null;
+  const notEntered = (r: ORRow) => r.multi_or == null && r.uni_or != null;
 
   const orExportHeaders = ["Variable", "Uni OR", "Uni CI low", "Uni CI high", "Uni p", "Multi OR", "Multi CI low", "Multi CI high", "Multi p"];
-  const orExportRows = rows.map((r: any) => [
+  const orExportRows = rows.map((r: ORRow) => [
     r.variable,
     r.uni_or?.toFixed(4) ?? "",
     r.uni_ci_low?.toFixed(4) ?? "",
@@ -253,13 +253,18 @@ export function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
   ]);
 
   // Publication-styled export: OR (95% CI), p merged per model.
-  const orCell = (or: number | null, lo: number | null, hi: number | null, p: number | null): string =>
+  const orCell = (
+    or: number | null | undefined,
+    lo: number | null | undefined,
+    hi: number | null | undefined,
+    p: number | null | undefined,
+  ): string =>
     or == null ? "—" : `${fmtOR(or, lo, hi)}${p != null ? `, ${fmtPubP(p)}` : ""}`;
   const styledExport = (): StyledTableData => ({
     title: `Univariate & multivariate logistic regression — ${outcome}`,
     caption: `Outcome: ${outcome}. OR = odds ratio; CI = confidence interval.`,
     columns: ["Variable", "Univariable OR (95% CI), p", "Multivariable OR (95% CI), p"],
-    rows: rows.map((r: any) => [
+    rows: rows.map((r: ORRow) => [
       r.variable,
       orCell(r.uni_or, r.uni_ci_low, r.uni_ci_high, r.uni_p),
       orCell(r.multi_or, r.multi_ci_low, r.multi_ci_high, r.multi_p),

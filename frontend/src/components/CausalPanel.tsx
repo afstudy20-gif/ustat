@@ -6,6 +6,87 @@ import { fmtP } from "../lib/format";
 
 type Method = "iv" | "mediation" | "target" | "did" | "rdd" | "dag";
 
+function getErrorDetail(e: unknown, fallback: string): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  return typeof detail === "string" ? detail : fallback;
+}
+
+interface IVResult {
+  result_text: string;
+  n: number;
+  iv_estimate: { estimate: number; ci_low: number; ci_high: number; p: number | null };
+  ols_estimate: { estimate: number; p: number | null };
+  first_stage: { f_stat: number; weak_instruments: boolean };
+  wu_hausman: { p: number | null; endogenous: boolean };
+  sargan?: { stat: number | string; df: number; p: number | null; valid: boolean } | null;
+}
+
+interface MediationResult {
+  result_text: string;
+  n: number;
+  acme_significant: boolean;
+  effects: {
+    acme: number; acme_ci?: [number, number] | null;
+    ade: number; ade_ci?: [number, number] | null;
+    total: number; proportion_mediated?: number | null;
+  };
+  sobel: { p: number | null };
+  paths: { a: number; b: number; c_prime: number };
+}
+
+interface TargetTrialResult {
+  result_text: string;
+  n_analyzed: number;
+  n_screened: number;
+  balanced: boolean;
+  effect: {
+    significant: boolean;
+    risk_difference: number;
+    rd_ci?: [number, number] | null;
+    risk_ratio?: number | null;
+    rr_ci?: [number, number] | null;
+    risk_treated: number;
+    risk_control: number;
+  };
+  protocol: Record<string, unknown>;
+  caveats: string[];
+}
+
+interface DiDResult {
+  result_text: string;
+  significant: boolean;
+  did_estimate: number;
+  ci_low: number;
+  ci_high: number;
+  p: number | null;
+  treated_change: number;
+  control_change: number;
+  cell_means: {
+    control_pre: number; control_post: number;
+    treated_pre: number; treated_post: number;
+  };
+}
+
+interface RDDResult {
+  result_text: string;
+  significant: boolean;
+  late: number;
+  ci_low: number;
+  ci_high: number;
+  p: number | null;
+  bandwidth: number;
+  n_in_bandwidth: number;
+  n_left: number;
+  n_right: number;
+}
+
+interface DAGResult {
+  result_text: string;
+  adjustment_set: string[];
+  do_not_adjust: string[];
+  roles: Record<string, string>;
+}
+
 function MultiPick({ label, accent, exclude, value, onChange, columns }: {
   label: string; accent: string; exclude: string[]; value: string[];
   onChange: (v: string[]) => void; columns: string[];
@@ -35,7 +116,7 @@ function IVTab() {
   const [endogenous, setEndogenous] = useState("");
   const [instruments, setInstruments] = useState<string[]>([]);
   const [covariates, setCovariates] = useState<string[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<IVResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -43,9 +124,9 @@ function IVTab() {
     setLoading(true); setError(null); setResult(null);
     try {
       const r = await runIV2SLS({ session_id: sid, outcome, endogenous, instruments, covariates });
-      setResult(r.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "IV estimation failed.");
+      setResult(r.data as IVResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e, "IV estimation failed."));
     } finally { setLoading(false); }
   };
   const canRun = sid && outcome && endogenous && instruments.length > 0 && !loading;
@@ -140,7 +221,7 @@ function MediationTab() {
   const [treatment, setTreatment] = useState("");
   const [mediator, setMediator] = useState("");
   const [covariates, setCovariates] = useState<string[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<MediationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -148,9 +229,9 @@ function MediationTab() {
     setLoading(true); setError(null); setResult(null);
     try {
       const r = await runMediation({ session_id: sid, outcome, treatment, mediator, covariates, bootstrap: 1000 });
-      setResult(r.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Mediation analysis failed.");
+      setResult(r.data as MediationResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e, "Mediation analysis failed."));
     } finally { setLoading(false); }
   };
   const distinct = new Set([outcome, treatment, mediator].filter(Boolean)).size === 3;
@@ -246,7 +327,7 @@ function TargetTrialTab() {
   const [outcome, setOutcome] = useState("");
   const [confounders, setConfounders] = useState<string[]>([]);
   const [elig, setElig] = useState<{ column: string; op: string; value: string }[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<TargetTrialResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -257,9 +338,9 @@ function TargetTrialTab() {
         .filter((e) => e.column && e.value !== "")
         .map((e) => ({ column: e.column, op: e.op, value: Number(e.value) }));
       const r = await runTargetTrial({ session_id: sid, treatment, outcome, confounders, eligibility, bootstrap: 400 });
-      setResult(r.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Target-trial emulation failed.");
+      setResult(r.data as TargetTrialResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e, "Target-trial emulation failed."));
     } finally { setLoading(false); }
   };
   const canRun = sid && treatment && outcome && treatment !== outcome && confounders.length > 0 && !loading;
@@ -382,15 +463,15 @@ function DiDTab() {
   const [groupCol, setGroupCol] = useState("");
   const [timeCol, setTimeCol] = useState("");
   const [covariates, setCovariates] = useState<string[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<DiDResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
       const r = await runDiD({ session_id: sid, outcome, group_col: groupCol, time_col: timeCol, covariates });
-      setResult(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? "DiD failed."); } finally { setLoading(false); }
+      setResult(r.data as DiDResult);
+    } catch (e: unknown) { setError(getErrorDetail(e, "DiD failed.")); } finally { setLoading(false); }
   };
   const canRun = sid && new Set([outcome, groupCol, timeCol].filter(Boolean)).size === 3 && !loading;
   return (
@@ -449,15 +530,15 @@ function RDDTab() {
   const [running, setRunning] = useState("");
   const [cutoff, setCutoff] = useState("");
   const [bandwidth, setBandwidth] = useState("");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<RDDResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
       const r = await runRDD({ session_id: sid, outcome, running, cutoff: Number(cutoff), bandwidth: bandwidth ? Number(bandwidth) : null });
-      setResult(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? "RDD failed."); } finally { setLoading(false); }
+      setResult(r.data as RDDResult);
+    } catch (e: unknown) { setError(getErrorDetail(e, "RDD failed.")); } finally { setLoading(false); }
   };
   const canRun = sid && outcome && running && outcome !== running && cutoff !== "" && !loading;
   return (
@@ -510,7 +591,7 @@ function DAGTab() {
   const [edgeText, setEdgeText] = useState("Z -> T\nZ -> Y\nT -> M\nM -> Y\nT -> C\nY -> C");
   const [treatment, setTreatment] = useState("T");
   const [outcome, setOutcome] = useState("Y");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<DAGResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const run = async () => {
@@ -519,8 +600,8 @@ function DAGTab() {
       const edges = edgeText.split("\n").map((l) => l.trim()).filter(Boolean)
         .map((l) => l.split(/->|→/).map((s) => s.trim())).filter((e) => e.length === 2 && e[0] && e[1]);
       const r = await runDAGAdjustment({ edges, treatment, outcome });
-      setResult(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? "DAG analysis failed."); } finally { setLoading(false); }
+      setResult(r.data as DAGResult);
+    } catch (e: unknown) { setError(getErrorDetail(e, "DAG analysis failed.")); } finally { setLoading(false); }
   };
   const roleColor = (r: string) => r === "confounder" ? "text-amber-600" : r === "mediator" ? "text-blue-600" : r === "collider" ? "text-red-600" : "text-gray-500";
   return (

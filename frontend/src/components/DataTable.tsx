@@ -367,8 +367,8 @@ function DataTableBody({ session }: { session: Session }) {
       await api.post(`/api/compute/${session.session_id}/add_column`, { name: trimmed, position: position ?? -1 });
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
       useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
-    } catch (e: any) {
-      alert(e?.response?.data?.detail ?? "Failed to add column");
+    } catch (e: unknown) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Failed to add column");
     }
   };
 
@@ -594,8 +594,8 @@ function DataTableBody({ session }: { session: Session }) {
       useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
       setPasteMsg(`${res.data.pasted} cells pasted`);
       setTimeout(() => setPasteMsg(null), 2500);
-    } catch (err: any) {
-      setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
+    } catch (err: unknown) {
+      setPasteMsg((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Paste failed");
       setTimeout(() => setPasteMsg(null), 3500);
     }
   };
@@ -886,8 +886,8 @@ function DataTableBody({ session }: { session: Session }) {
         useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
         setPasteMsg(`${res.data.n_pasted} rows pasted`);
         setTimeout(() => setPasteMsg(null), 3000);
-      } catch (err: any) {
-        setPasteMsg(err?.response?.data?.detail ?? "Paste failed");
+      } catch (err: unknown) {
+        setPasteMsg((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Paste failed");
         setTimeout(() => setPasteMsg(null), 4000);
       }
       return;

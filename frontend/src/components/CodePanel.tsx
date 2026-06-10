@@ -346,11 +346,12 @@ export default function CodePanel() {
       setOutput(res.data);
       if (res.data.figures.length > 0) setTab("figures");
       else setTab("console");
-    } catch (e: any) {
-      if (e?.code === "ERR_CANCELED" || e?.name === "CanceledError") {
+    } catch (e: unknown) {
+      const err = e as { code?: string; name?: string; response?: { data?: { detail?: string } }; message?: string };
+      if (err?.code === "ERR_CANCELED" || err?.name === "CanceledError") {
         setError("Run cancelled.");
       } else {
-        setError(e?.response?.data?.detail ?? e?.message ?? "Run failed");
+        setError(err?.response?.data?.detail ?? err?.message ?? "Run failed");
       }
     } finally {
       setRunning(false);

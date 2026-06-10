@@ -17,6 +17,71 @@ import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { exportDataset } from "../lib/exportDataset";
+import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
+
+interface OutcomeCoefficient {
+  variable: string;
+  estimate?: number;
+  se?: number;
+  z?: number;
+  p: number;
+  or?: number;
+  or_low?: number;
+  or_high?: number;
+  hr?: number;
+  hr_low?: number;
+  hr_high?: number;
+}
+
+interface OutcomeResult {
+  type?: string;
+  model?: string;
+  n?: number;
+  n_events?: number;
+  concordance?: number;
+  aic?: number;
+  bic?: number;
+  coefficients: OutcomeCoefficient[];
+  method_note?: string;
+  error?: string;
+}
+
+interface IPTWResult {
+  balance_achieved: boolean;
+  estimand?: string;
+  stabilize?: boolean;
+  se_method?: string;
+  score_method?: string;
+  n_total: number;
+  n_treated: number;
+  n_control: number;
+  n_trimmed_common_support: number;
+  matched_session_id?: string;
+  weight_truncation?: { n_trimmed?: number };
+  weight_summary?: {
+    ess_treated?: number;
+    ess_control?: number;
+    min?: number;
+    median?: number;
+    max?: number;
+  };
+  weight_distribution?: { treated: number[]; control: number[] };
+  smd_before: Record<string, number>;
+  smd_after: Record<string, number>;
+  avg_smd_before: number;
+  avg_smd_after: number;
+  reduction_pct: number;
+  variance_ratio_after?: Record<string, number | null>;
+  variance_ratio_before?: Record<string, number | null>;
+  ks_p_after?: Record<string, number | null>;
+  ps_distribution?: {
+    treated_unmatched: number[];
+    control_unmatched: number[];
+    treated_matched: number[];
+    control_matched: number[];
+  };
+  outcome_result?: OutcomeResult;
+}
 
 const smdColor = (smd: number) =>
   smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
@@ -41,12 +106,12 @@ function LovePlot({
   showConnectors: boolean;
   showGrid: boolean;
 }) {
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
   const covariates = Object.keys(smdBefore).reverse(); // bottom-to-top
 
   const xMax = Math.max(0.4, ...Object.values(smdBefore), ...Object.values(smdAfter)) * 1.15;
 
-  const traces: any[] = [
+  const traces: PlotData[] = [
     {
       type: "scatter",
       mode: "markers",
@@ -81,7 +146,7 @@ function LovePlot({
     }
   }
 
-  const layout: any = {
+  const layout: PlotLayout = {
     ...PLOT_BASE,
     autosize: true,
     height: Math.max(260, covariates.length * 52 + 80),
@@ -144,7 +209,7 @@ function PSOverlapPlot({
   psDist: { treated_unmatched: number[]; control_unmatched: number[]; treated_matched: number[]; control_matched: number[] };
   showGrid: boolean;
 }) {
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
   return (
     <TitledPlot
       plotRefOut={plotRef}
@@ -181,7 +246,7 @@ function PSOverlapPlot({
         },
         yaxis: { title: { text: "Count" }, gridcolor: showGrid ? "#e5e7eb" : "transparent" },
         legend: { x: 1, y: 1, xanchor: "right", bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
-      } as any}
+      } as PlotLayout}
       config={{ responsive: true, displaylogo: false, displayModeBar: false }}
       defaultTitle="Propensity Score Overlap"
       defaultSubtitle=""
@@ -237,12 +302,12 @@ function IPTWPanelBody({ session }: { session: Session }) {
   const [bootstrapReps, setBootstrapReps] = usePersistedPanelState<number>("iptw", "bootstrapReps", 500);
 
   // Result & UI
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<IPTWResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [threshold, setThreshold] = useState(0.10);
   const [showConnectors, setShowConnectors] = useState(true);
-  const weightDistRef = useRef<any>(null);
+  const weightDistRef = useRef<PlotCaptureHandle | null>(null);
 
   const toggleCov = (c: string) =>
     setCovariates(covariates.includes(c) ? covariates.filter((x) => x !== c) : [...covariates, c]);
@@ -272,10 +337,10 @@ function IPTWPanelBody({ session }: { session: Session }) {
         se_method: seMethod,
         bootstrap_reps: seMethod === "bootstrap" ? bootstrapReps : undefined,
       });
-      setResult(res.data);
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setError(typeof msg === "string" ? msg : (e.message ?? "IPTW failed"));
+      setResult(res.data as IPTWResult);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      setError(typeof msg === "string" ? msg : (e instanceof Error ? e.message : "IPTW failed"));
     } finally { setLoading(false); }
   };
 
@@ -390,7 +455,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                 <Tip wide text="Model used to estimate propensity scores. Logistic = standard parametric. Probit = probit link. GBM = gradient-boosted trees." />
               </span>
               <select className="select text-[10px] py-0.5" value={scoreMethod}
-                onChange={(e) => setScoreMethod(e.target.value as any)}>
+                onChange={(e) => setScoreMethod(e.target.value as "logistic" | "probit" | "gbm")}>
                 <option value="logistic">Logistic ★</option>
                 <option value="probit">Probit</option>
                 <option value="gbm">GBM</option>
@@ -549,7 +614,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
         {result ? (
           <div
             className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
-            style={{ ["--right-col" as any]: `${rightColW}px` }}
+            style={{ "--right-col": `${rightColW}px` } as React.CSSProperties}
           >
             <div
               role="separator"
@@ -590,7 +655,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                   { label: "Controls", val: result.n_control },
                   { label: "ESS Treated", val: result.weight_summary?.ess_treated, highlight: true },
                   { label: "ESS Control", val: result.weight_summary?.ess_control, highlight: true },
-                ].map(({ label, val, highlight }: any) => (
+                ].map(({ label, val, highlight }) => (
                   <div key={label} className={`rounded-lg px-2 py-2 text-center border ${
                     highlight ? "bg-indigo-50 border-indigo-200" : "bg-white border-gray-200"}`}>
                     <p className="text-[9px] text-gray-400 uppercase tracking-wide">{label}</p>
@@ -623,8 +688,9 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       // Switch to data tab so the user sees the new matched cohort patient list
                       useStore.getState().setActiveTab("data");
                       alert("Successfully loaded weighted cohort! The entire app is now filtered and updated to the weighted sample with IPTW weights.");
-                    } catch (e: any) {
-                      alert("Failed to load weighted cohort: " + (e.response?.data?.detail ?? e.message));
+                    } catch (e: unknown) {
+                      const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+                      alert("Failed to load weighted cohort: " + (typeof detail === "string" ? detail : (e instanceof Error ? e.message : String(e))));
                     } finally {
                       setLoading(false);
                     }
@@ -703,7 +769,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       x: result.weight_distribution.control,
                       opacity: 0.65, marker: { color: "#10b981" },
                     },
-                  ] as any}
+                  ] as PlotData[]}
                   layout={{
                     ...PLOT_BASE,
                     barmode: "overlay",
@@ -889,7 +955,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       ["n (weighted)", result.outcome_result.n],
                       ["Events", result.outcome_result.n_events],
                       ["C-index", result.outcome_result.concordance?.toFixed(3)],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -900,7 +966,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       ["n (weighted)", result.outcome_result.n],
                       ["Estimand", (result.estimand ?? "ate").toUpperCase()],
                       ["SE Method", (result.se_method === "bootstrap" ? "Bootstrap" : "Robust HC1")],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -911,7 +977,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       ["n (weighted)", result.outcome_result.n],
                       ["AIC", result.outcome_result.aic?.toFixed(2)],
                       ["BIC", result.outcome_result.bic?.toFixed(2)],
-                    ].map(([k, v]: any) => (
+                    ].map(([k, v]) => (
                       <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-2 text-center">
                         <p className="text-[10px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-sm">{v}</p>
@@ -932,7 +998,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.outcome_result.coefficients.map((c: any) => {
+                      {result.outcome_result.coefficients.map((c) => {
                         const effect = isCoxKind ? c.hr : c.or;
                         const lo = isCoxKind ? c.hr_low : c.or_low;
                         const hi = isCoxKind ? c.hr_high : c.or_high;

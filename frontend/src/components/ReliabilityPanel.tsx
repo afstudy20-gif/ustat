@@ -3,6 +3,35 @@ import { useStore, isNumericKind, type Session } from "../store";
 import { runCronbach } from "../api";
 import ResultExporter from "./ResultExporter";
 
+interface ItemStat {
+  item: string;
+  mean?: number;
+  sd?: number;
+  item_total_r?: number | null;
+  alpha_if_deleted?: number | null;
+}
+
+interface ScaleSummary {
+  mean: number | string;
+  sd: number | string;
+  min: number | string;
+  max: number | string;
+  skewness: number | string;
+}
+
+interface ReliabilityResult {
+  alpha: number;
+  omega?: number | null;
+  interpretation?: string;
+  k?: number;
+  n?: number;
+  result_text?: string;
+  scale_summary?: ScaleSummary;
+  item_stats?: ItemStat[];
+  r_code?: string;
+  export_rows?: string[][];
+}
+
 export default function ReliabilityPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
@@ -13,7 +42,7 @@ function ReliabilityPanelBody({ session }: { session: Session }) {
   const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   const [items, setItems] = useState<string[]>([]);
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ReliabilityResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,7 +51,7 @@ function ReliabilityPanelBody({ session }: { session: Session }) {
     try {
       const res = await runCronbach({ session_id: session.session_id, items });
       setResult(res.data);
-    } catch (e: any) { setError(e.response?.data?.detail ?? "Error"); }
+    } catch (e: unknown) { setError((e as { response?: { data?: { detail?: string } } }).response?.data?.detail ?? "Error"); }
     finally { setLoading(false); }
   };
 
@@ -102,7 +131,7 @@ function ReliabilityPanelBody({ session }: { session: Session }) {
             </div>
 
             {/* Item analysis table */}
-            {result.item_stats?.length > 0 && (
+            {(result.item_stats?.length ?? 0) > 0 && result.item_stats && (
               <div className="panel">
                 <h4 className="text-sm font-semibold text-gray-700 mb-2">Item Analysis</h4>
                 <div className="overflow-auto rounded border border-gray-200">
@@ -116,7 +145,7 @@ function ReliabilityPanelBody({ session }: { session: Session }) {
                       <th className="px-3 py-1.5 text-center">Flag</th>
                     </tr></thead>
                     <tbody>
-                      {result.item_stats.map((item: any) => {
+                      {result.item_stats.map((item: ItemStat) => {
                         const flagDrop = item.alpha_if_deleted != null && item.alpha_if_deleted > result.alpha;
                         const flagLowR = item.item_total_r != null && item.item_total_r < 0.3;
                         return (

@@ -15,6 +15,42 @@ import { useState } from "react";
 import { Download } from "lucide-react";
 import { plotlyToTiffBlob, downloadBlob } from "../lib/tiffEncoder";
 import { withRegisteredPlotCapture } from "../lib/plotCapture";
+import type { PlotRef, PlotCaptureHandle } from "../lib/plotTypes";
+
+/** Minimal shape of the Plotly module / graph-div fields we call. */
+interface PlotlyToImage {
+  toImage?: (gd: HTMLElement, opts: Record<string, unknown>) => Promise<string>;
+}
+
+/** Resolve the mounted Plotly graph div from a duck-typed plot handle. */
+function resolveGraphDiv(plotRef: PlotRef): HTMLElement | undefined {
+  const candidates: unknown[] = [];
+  const r: PlotCaptureHandle | null = plotRef.current;
+  if (r) {
+    candidates.push(r.el);
+    candidates.push(r);
+    candidates.push(r.elRef?.current);
+    const qs = r.querySelector;
+    if (typeof qs === "function") {
+      const query = qs as (selector: string) => Element | null;
+      candidates.push(query.call(r, ".plotly-graph-div") || query.call(r, ".js-plotly-plot"));
+    }
+  }
+  return candidates.find(
+    (c): c is HTMLElement => !!c && !!(c as { _fullLayout?: unknown })._fullLayout,
+  );
+}
+
+/** Resolve the Plotly `toImage` implementation for a mounted graph div. */
+async function resolvePlotly(el: HTMLElement): Promise<PlotlyToImage> {
+  let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
+  if (!Plotly?.toImage) {
+    const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
+    Plotly = mod?.toImage ? mod : mod?.default;
+  }
+  if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
+  return Plotly;
+}
 
 interface Props {
   title: string;
@@ -23,7 +59,7 @@ interface Props {
   /** Table rows for CSV/XLSX export */
   rows?: (string | number | null | undefined)[][];
   /** Plotly chart element ref for PNG export */
-  plotRef?: React.RefObject<any>;
+  plotRef?: PlotRef;
   className?: string;
 }
 
@@ -41,8 +77,17 @@ function downloadCSV(filename: string, headers: string[], rows: (string | number
 async function downloadXLSX(filename: string, headers: string[], rows: (string | number | null | undefined)[][]) {
   // xlsx package ships both ESM (named exports) and CJS (default export) builds.
   // Resolve whichever shape Vite delivers in this environment.
-  const mod: any = await import("xlsx");
-  const XLSX: any = mod?.utils ? mod : mod?.default;
+  interface XlsxUtils {
+    aoa_to_sheet: (data: unknown[][]) => unknown;
+    book_new: () => unknown;
+    book_append_sheet: (wb: unknown, ws: unknown, name: string) => void;
+  }
+  interface XlsxModule {
+    utils?: XlsxUtils;
+    write: (wb: unknown, opts: Record<string, unknown>) => ArrayBuffer;
+  }
+  const mod = (await import("xlsx")) as XlsxModule & { default?: XlsxModule };
+  const XLSX: XlsxModule | undefined = mod?.utils ? mod : mod?.default;
   if (!XLSX?.utils?.aoa_to_sheet) {
     throw new Error("xlsx module loaded but utils.aoa_to_sheet not available");
   }
@@ -59,22 +104,12 @@ async function downloadXLSX(filename: string, headers: string[], rows: (string |
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
-async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
+async function downloadPNG(plotRef: PlotRef, filename: string) {
   // Resolve to a Plotly graph div. react-plotly.js exposes `.el`; raw refs
   // give the DOM node directly; some wrappers nest it one deeper. A graph
   // div is recognisable by the `_fullLayout` property Plotly attaches at
   // mount time.
-  const candidates: any[] = [];
-  const r = plotRef.current;
-  if (r) {
-    candidates.push(r.el);
-    candidates.push(r);
-    candidates.push(r.elRef?.current);
-    if (typeof r.querySelector === "function") {
-      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
-    }
-  }
-  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+  const el = resolveGraphDiv(plotRef);
   if (!el) {
     throw new Error("plot is not mounted yet — wait for the chart to render and try again");
   }
@@ -82,18 +117,11 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
   // gd — reuses the exact bundle that drew the chart and bypasses the
   // ESM tree-shake bug entirely. Fall back to the dist subpath only when
   // _Plotly isn't present.
-  let Plotly: any = (el as any)._Plotly;
-  if (!Plotly?.toImage) {
-    const mod: any = await import("plotly.js/dist/plotly");
-    Plotly = mod?.toImage ? mod : mod?.default;
-  }
-  if (!Plotly?.toImage) {
-    throw new Error("plotly.js toImage not available");
-  }
+  const Plotly = await resolvePlotly(el);
   // scale 3.125 ≈ 300 DPI (96 PPI × 3.125 = 300). Plotly.downloadImage
   // crashes on plotly.js@3 in production builds (tree-shaking strips an
   // internal dep) — use toImage + anchor-click instead.
-  const dataUrl: string = await Plotly.toImage(el, {
+  const dataUrl: string = await Plotly.toImage!(el, {
     format: "png",
     width: 1200,
     height: 700,
@@ -112,19 +140,9 @@ async function downloadPNG(plotRef: React.RefObject<any>, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function downloadTIFF(plotRef: React.RefObject<any>, filename: string) {
+async function downloadTIFF(plotRef: PlotRef, filename: string) {
   // Resolve the Plotly graph div the same way downloadPNG does.
-  const candidates: any[] = [];
-  const r = plotRef.current;
-  if (r) {
-    candidates.push(r.el);
-    candidates.push(r);
-    candidates.push(r.elRef?.current);
-    if (typeof r.querySelector === "function") {
-      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
-    }
-  }
-  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+  const el = resolveGraphDiv(plotRef);
   if (!el) {
     throw new Error("plot is not mounted yet — wait for the chart to render and try again");
   }
@@ -133,26 +151,11 @@ async function downloadTIFF(plotRef: React.RefObject<any>, filename: string) {
 }
 
 /** Render the chart to a PNG blob — shared by copy + download paths. */
-async function renderPlotPngBlob(plotRef: React.RefObject<any>): Promise<Blob> {
-  const candidates: any[] = [];
-  const r = plotRef.current;
-  if (r) {
-    candidates.push(r.el);
-    candidates.push(r);
-    candidates.push(r.elRef?.current);
-    if (typeof r.querySelector === "function") {
-      candidates.push(r.querySelector(".plotly-graph-div") || r.querySelector(".js-plotly-plot"));
-    }
-  }
-  const el = candidates.find((c) => c && (c as any)._fullLayout) as HTMLElement | undefined;
+async function renderPlotPngBlob(plotRef: PlotRef): Promise<Blob> {
+  const el = resolveGraphDiv(plotRef);
   if (!el) throw new Error("plot is not mounted yet — wait for the chart to render and try again");
-  let Plotly: any = (el as any)._Plotly;
-  if (!Plotly?.toImage) {
-    const mod: any = await import("plotly.js/dist/plotly");
-    Plotly = mod?.toImage ? mod : mod?.default;
-  }
-  if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
-  const dataUrl: string = await Plotly.toImage(el, {
+  const Plotly = await resolvePlotly(el);
+  const dataUrl: string = await Plotly.toImage!(el, {
     format: "png",
     width: 1200,
     height: 700,
@@ -164,7 +167,7 @@ async function renderPlotPngBlob(plotRef: React.RefObject<any>): Promise<Blob> {
 }
 
 /** Copy the chart to the clipboard as PNG (system clipboard). */
-async function copyPlotToClipboard(plotRef: React.RefObject<any>) {
+async function copyPlotToClipboard(plotRef: PlotRef) {
   if (typeof ClipboardItem === "undefined" || !navigator.clipboard?.write) {
     throw new Error("Clipboard API not available in this browser");
   }
@@ -201,20 +204,20 @@ export default function ResultExporter({ title, headers, rows, plotRef, classNam
     setBusy(format);
     setErr(null);
     try {
-      if (format === "csv" && hasTable) downloadCSV(safeTitle, headers, rows);
-      if (format === "xlsx" && hasTable) await downloadXLSX(safeTitle, headers, rows);
-      if (format === "png" && hasPlot) {
+      if (format === "csv" && headers && rows) downloadCSV(safeTitle, headers, rows);
+      if (format === "xlsx" && headers && rows) await downloadXLSX(safeTitle, headers, rows);
+      if (format === "png" && plotRef) {
         await withRegisteredPlotCapture(plotRef, () => downloadPNG(plotRef, safeTitle));
       }
-      if (format === "tiff" && hasPlot) {
+      if (format === "tiff" && plotRef) {
         await withRegisteredPlotCapture(plotRef, () => downloadTIFF(plotRef, safeTitle));
       }
-      if (format === "copy-table" && hasTable) {
+      if (format === "copy-table" && headers && rows) {
         await copyTableToClipboard(headers, rows);
         setCopyToast("Table copied — paste into Excel / Word");
         setTimeout(() => setCopyToast(null), 1500);
       }
-      if (format === "copy-plot" && hasPlot) {
+      if (format === "copy-plot" && plotRef) {
         await withRegisteredPlotCapture(plotRef, () => copyPlotToClipboard(plotRef));
         setCopyToast("Chart copied to clipboard");
         setTimeout(() => setCopyToast(null), 1500);

@@ -9,6 +9,7 @@ import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { CoefTable, ORTable, ForestPlot, PredictionPanel, CoefDetailPanel, ModelSummaryTable } from "./models/resultViews";
 import CoxHRTable from "./models/CoxHRTable";
 import { useModelData } from "./models/useModelData";
+import type { ModelResult } from "./models/shared";
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 

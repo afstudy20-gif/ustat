@@ -5,8 +5,52 @@ import { runFactorPCA } from "../api";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
+import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
 
 type ActiveResultTab = "suitability" | "loadings" | "scree" | "biplot";
+
+type LoadingRow = Record<string, number | string> & {
+  variable: string;
+  h2: number;
+  u2: number;
+};
+
+interface ScreeCoord {
+  component: number;
+  eigenvalue: number;
+}
+
+interface BiplotPoint {
+  variable: string;
+  x: number;
+  y: number;
+}
+
+interface VarianceRow {
+  component: number;
+  eigenvalue: number;
+  pct_variance: number;
+  cum_variance: number;
+}
+
+interface FactorPCAResult {
+  factors: string[];
+  rotation_method: string;
+  n_factors: number;
+  loadings: LoadingRow[];
+  scree_coords: ScreeCoord[];
+  biplot: BiplotPoint[];
+  variance_explained: VarianceRow[];
+  export_rows?: string[][];
+  r_code?: string;
+  suitability: {
+    bartlett_chi2: number;
+    bartlett_df: number;
+    bartlett_p: number;
+    overall_kmo: number;
+    kmo_rating: string;
+  };
+}
 
 export default function FactorPCAPanel() {
   const session = useStore((s) => s.session);
@@ -18,8 +62,8 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
-  const screeRef = useRef<any>(null);
-  const biplotRef = useRef<any>(null);
+  const screeRef = useRef<PlotCaptureHandle | null>(null);
+  const biplotRef = useRef<PlotCaptureHandle | null>(null);
 
   const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
@@ -31,10 +75,10 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
   const [nFactors, setNFactors] = useState<number>(1);
   const [imputation, setImputation] = useState<"listwise" | "mean" | "median">("listwise");
 
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<FactorPCAResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
   // Custom display settings
   const [resultTab, setResultTab] = useState<ActiveResultTab>("suitability");
   const [cutoff, setCutoff] = useState<number>(0.3);
@@ -55,7 +99,7 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
         n_factors: nFactorsMode === "manual" ? nFactors : null,
         imputation
       });
-      setResult(res.data);
+      setResult(res.data as FactorPCAResult);
       // Track this action for R replication
       useStore.getState().logAction("factor_pca", {
         variables: items,
@@ -64,8 +108,9 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
         n_factors: nFactorsMode === "manual" ? nFactors : "auto",
         imputation
       });
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? "Factor analysis computation failed.");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      setError(typeof detail === "string" ? detail : "Factor analysis computation failed.");
     } finally {
       setLoading(false);
     }
@@ -91,9 +136,9 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
     if (!sortLoadings) return result.loadings;
     
     // Sort by primary loading factor (first column factor with absolute max loading)
-    return [...result.loadings].sort((a: any, b: any) => {
-      const maxA = Math.max(...result.factors.map((f: string) => Math.abs(a[f])));
-      const maxB = Math.max(...result.factors.map((f: string) => Math.abs(b[f])));
+    return [...result.loadings].sort((a, b) => {
+      const maxA = Math.max(...result.factors.map((f) => Math.abs(Number(a[f]))));
+      const maxB = Math.max(...result.factors.map((f) => Math.abs(Number(b[f]))));
       return maxB - maxA;
     });
   };
@@ -102,12 +147,12 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
   const screePlot = () => {
     if (!result?.scree_coords) return null;
     const coords = result.scree_coords;
-    const data: any[] = [
+    const data: PlotData[] = [
       {
         type: "scatter",
         mode: "lines+markers",
-        x: coords.map((c: any) => c.component),
-        y: coords.map((c: any) => c.eigenvalue),
+        x: coords.map((c) => c.component),
+        y: coords.map((c) => c.eigenvalue),
         marker: { color: pal[0], size: 8 },
         line: { color: pal[0], width: 2 },
         name: "Eigenvalue"
@@ -152,19 +197,19 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
     const points = result.biplot;
     
     // Draw scatter points for variable coordinates
-    const scatterData: any = {
+    const scatterData: PlotData = {
       type: "scatter",
       mode: "markers+text",
-      x: points.map((p: any) => p.x),
-      y: points.map((p: any) => p.y),
-      text: points.map((p: any) => p.variable),
+      x: points.map((p) => p.x),
+      y: points.map((p) => p.y),
+      text: points.map((p) => p.variable),
       textposition: "top right",
       marker: { color: "#4f46e5", size: 8 },
       name: "Variables"
     };
 
     // Draw origin vectors/arrows using plotly layout shapes
-    const shapes = points.map((p: any) => ({
+    const shapes: PlotData[] = points.map((p) => ({
       type: "line",
       x0: 0,
       y0: 0,
@@ -196,7 +241,7 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
             ...baseLayout,
             xaxis: { ...(baseLayout.xaxis as object), showgrid: showGrid, title: { text: result.factors[0] }, range: [-1.1, 1.1] },
             yaxis: { ...(baseLayout.yaxis as object), showgrid: showGrid, title: { text: result.factors[1] ?? "PC2" }, range: [-1.1, 1.1] },
-            shapes: shapes as any,
+            shapes,
             margin: { t: 36, r: 24, b: 44, l: 60 }
           }}
           config={{ responsive: true, displaylogo: false, displayModeBar: false }}
@@ -462,7 +507,7 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {result.variance_explained.map((row: any) => {
+                        {result.variance_explained.map((row) => {
                           const isRetained = row.component <= result.n_factors;
                           return (
                             <tr
@@ -506,11 +551,11 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {getSortedLoadings().map((row: any) => (
+                      {getSortedLoadings().map((row) => (
                         <tr key={row.variable} className="border-t border-gray-100 hover:bg-gray-50 transition-colors">
                           <td className="px-4 py-2 font-mono text-gray-700">{row.variable}</td>
                           {result.factors.map((f: string) => {
-                            const val = row[f];
+                            const val = Number(row[f]);
                             const isStrong = Math.abs(val) >= 0.4;
                             return (
                               <td

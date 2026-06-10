@@ -209,7 +209,7 @@ export const saveSession   = (sessionId: string) => api.get(`/api/sessions/${ses
 export const getSessionInfo = (sessionId: string) => api.get(`/api/sessions/${sessionId}`);
 export const loadSession   = (file: File) => { const fd = new FormData(); fd.append("file", file); return api.post("/api/sessions/load_session", fd); };
 export const getAuditTrail = (sessionId: string) => api.get(`/api/sessions/${sessionId}/audit`);
-export const saveMetadata  = (sessionId: string, columns: Record<string, any>) => api.post(`/api/sessions/${sessionId}/metadata`, { columns });
+export const saveMetadata  = (sessionId: string, columns: Record<string, unknown>) => api.post(`/api/sessions/${sessionId}/metadata`, { columns });
 export const setColumnKind = (sessionId: string, column: string, kind: string) => api.post(`/api/sessions/${sessionId}/kind`, { column, kind });
 export const setColumnDecimalsApi = (sessionId: string, column: string, decimals: number | null) =>
   api.post(`/api/sessions/${sessionId}/decimals`, { column, decimals });
