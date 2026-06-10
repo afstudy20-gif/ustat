@@ -961,7 +961,7 @@ async def rcs_regression(req: RCSRequest):
         if model_type == "logistic":
             unique_y = sorted(set(y.tolist()))
             if set(unique_y) - {0.0, 1.0}:
-                raise HTTPException(status_code=422, detail=f"Logistic RCS requires binary 0/1 outcome.")
+                raise HTTPException(status_code=422, detail="Logistic RCS requires binary 0/1 outcome.")
 
     try:
         knots = _resolve_knots(x_raw, req.n_knots, req.knot_positions, req.predictor)
@@ -1009,7 +1009,7 @@ async def rcs_regression(req: RCSRequest):
 
     try:
         if is_cox:
-            feat_cols = [f"_x_lin"] + [f"_spl_{i}" for i in range(spline_cols.shape[1])]
+            feat_cols = ["_x_lin"] + [f"_spl_{i}" for i in range(spline_cols.shape[1])]
             fit_df = pd.DataFrame(
                 np.column_stack([x_raw, spline_cols]),
                 columns=feat_cols,
@@ -1190,7 +1190,7 @@ async def rcs_regression(req: RCSRequest):
     if cov_names or interaction_extra_names:
         try:
             if is_cox:
-                feat_cols_c = [f"_x_lin"] + [f"_spl_{i}" for i in range(spline_cols.shape[1])]
+                feat_cols_c = ["_x_lin"] + [f"_spl_{i}" for i in range(spline_cols.shape[1])]
                 fit_df_c = pd.DataFrame(
                     np.column_stack([x_raw, spline_cols]),
                     columns=feat_cols_c,

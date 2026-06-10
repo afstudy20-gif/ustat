@@ -1,6 +1,5 @@
 """Publication export: Word document tables and figure captions."""
 import io
-import json
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional

@@ -698,7 +698,8 @@ async def get_session_info(session_id: str):
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
     _attach_value_labels(columns, session_id)
 
-    import numpy as np, json as _json
+    import numpy as np
+    import json as _json
     preview = _json.loads(
         df.head(2000).replace([np.inf, -np.inf], np.nan).to_json(
             orient="records", default_handler=str, date_format="iso", date_unit="s"
@@ -707,7 +708,7 @@ async def get_session_info(session_id: str):
 
     return {
         "session_id": session_id,
-        "filename": f"iptw_weighted_cohort.csv" if session_id.endswith("_iptw") else f"psm_matched_cohort.csv" if session_id.endswith("_psm") else f"session_{session_id[:8]}.csv",
+        "filename": "iptw_weighted_cohort.csv" if session_id.endswith("_iptw") else "psm_matched_cohort.csv" if session_id.endswith("_psm") else f"session_{session_id[:8]}.csv",
         "rows": len(df),
         "columns": columns,
         "preview": preview,

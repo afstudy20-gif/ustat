@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, List, Literal, Optional
 import pandas as pd
-import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from loguru import logger

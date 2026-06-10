@@ -247,7 +247,7 @@ def calibration(req: CalibrationRequest):
                 for i, b in enumerate(bins)
             ],
         ],
-        "r_code": f"library(rms)\nval.prob(predicted, observed)",
+        "r_code": "library(rms)\nval.prob(predicted, observed)",
     }
 
 

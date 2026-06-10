@@ -6,7 +6,6 @@ import pandas as pd
 import statsmodels.api as sm
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from sklearn.preprocessing import LabelEncoder
 from loguru import logger
 
 from services import store

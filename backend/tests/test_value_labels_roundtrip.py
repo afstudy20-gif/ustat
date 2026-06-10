@@ -8,7 +8,6 @@ after a refresh.
 """
 
 import io
-import json
 import pandas as pd
 from fastapi.testclient import TestClient
 

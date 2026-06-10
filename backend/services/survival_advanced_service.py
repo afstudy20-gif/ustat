@@ -1099,7 +1099,7 @@ def fit_evalue(req):
         f"library(EValue)\n\n"
         f"# E-value calculation\n"
         f'evalues.{req.measure_type}({est}, lo = {ci_lo}, hi = {ci_hi}'
-        + (f', rare = FALSE)' if req.measure_type.upper() == "OR" else ')')
+        + (', rare = FALSE)' if req.measure_type.upper() == "OR" else ')')
         + f"\n\n"
         f"# Interpretation: An unmeasured confounder would need\n"
         f"# RR >= {e_point} with both treatment & outcome to explain\n"

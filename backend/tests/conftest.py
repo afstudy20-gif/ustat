@@ -1,7 +1,8 @@
 import pytest
 import pandas as pd
 from fastapi.testclient import TestClient
-import sys, os
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from main import app
 from services import store

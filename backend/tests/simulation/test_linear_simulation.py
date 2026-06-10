@@ -10,7 +10,6 @@ import pytest
 
 import sys
 import os
-import pytest
 
 # Ensure project root is importable
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))

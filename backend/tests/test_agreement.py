@@ -1,7 +1,6 @@
 """Tests for agreement and reliability endpoints."""
 import numpy as np
 import pandas as pd
-import pytest
 from conftest import make_session
 
 

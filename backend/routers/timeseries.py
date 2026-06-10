@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import math
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -200,7 +200,7 @@ async def arima(req: ARIMARequest):
     interp = (
         f"SARIMA{chosen_order}×{seasonal} on n = {len(y)}. "
         f"AIC = {fit.aic:.1f}, BIC = {fit.bic:.1f}. "
-        + (f"Auto-selected order by minimum AIC. " if grid_searched else "")
+        + ("Auto-selected order by minimum AIC. " if grid_searched else "")
         + (f"Ljung-Box p = {lb_p}: residuals "
            + ("show no significant autocorrelation (good)." if (lb_p is not None and lb_p >= 0.05)
               else "retain autocorrelation — consider a different order." if lb_p is not None else "n/a.")

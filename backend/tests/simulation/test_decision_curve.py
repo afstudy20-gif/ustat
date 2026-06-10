@@ -10,7 +10,6 @@ Covers:
 
 import pytest
 import numpy as np
-import pandas as pd
 
 from services.simulation_generators import generate_dca_binary_data
 from services.decision_curve import decision_curve_analysis_binary, decision_curve_analysis_survival

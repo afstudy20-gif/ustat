@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional
 import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from loguru import logger
 
 from services import store
@@ -510,7 +510,7 @@ def noninferiority(req: NonInferiorityRequest):
             "outcome_col": req.outcome_col, "group_col": req.group_col,
             "effect": eff, "margin": req.margin, "bound": req.bound, "alpha": req.alpha,
         })
-    except Exception as exc:
+    except Exception:
         logger.exception("Logging non-inferiority action failed")
 
     return _sanitize({
@@ -772,7 +772,7 @@ def run_power(req: PowerRequest):
                 label  = f"Minimum detectable OR = {result:.3f}"
                 ll = float(or_solved)
                 curve = _curve(lambda n_: _power_from_n(ll, req.p_event, n_, a, r2, req.tails), max(int(req.n)*4, 200))
-            except Exception as exc:
+            except Exception:
                 logger.exception("Solving OR in power analysis failed")
                 result = None
                 label = "Could not solve for OR — try different power / n combination."

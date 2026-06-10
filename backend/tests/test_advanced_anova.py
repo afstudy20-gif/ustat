@@ -1,7 +1,6 @@
 """Tests for advanced ANOVA endpoints: ANCOVA, two-way ANOVA."""
 import numpy as np
 import pandas as pd
-import pytest
 from conftest import make_session
 
 

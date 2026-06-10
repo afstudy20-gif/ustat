@@ -1,10 +1,9 @@
 """Reliability analysis: Cronbach's alpha with item diagnostics."""
 import numpy as np
 import pandas as pd
-from scipy import stats as sp
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 from services import store
 

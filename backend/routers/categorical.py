@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from services import store
-from services.stat_utils import cohens_h, adjust_pvalues, group_summary, kendalls_w, sorted_groups
+from services.stat_utils import cohens_h, adjust_pvalues, kendalls_w, sorted_groups
 
 router = APIRouter()
 
@@ -368,7 +368,7 @@ def mcnemar_test(req: McnemarRequest):
             ["d (both -)", int(d)],
             ["OR (b/c)", or_str],
         ],
-        "r_code": f"mcnemar.test(table)",
+        "r_code": "mcnemar.test(table)",
     }
 
 
@@ -591,7 +591,7 @@ def mantel_haenszel_test(req: MantelHaenszelRequest):
             ["Number of strata", len(strata)],
             ["Total n", int(len(sub))],
         ],
-        "r_code": f"mantelhaen.test(table_array)",
+        "r_code": "mantelhaen.test(table_array)",
     }
 
 

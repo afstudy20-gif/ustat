@@ -9,7 +9,6 @@ TDD approach:
 """
 
 import pytest
-import numpy as np
 
 from services.causal_sensitivity import (
     e_value,

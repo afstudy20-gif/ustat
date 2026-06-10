@@ -1,5 +1,4 @@
 import pytest
-import numpy as np
 import pandas as pd
 from tests.conftest import make_session
 

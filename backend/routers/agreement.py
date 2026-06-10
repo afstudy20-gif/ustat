@@ -4,7 +4,6 @@ import pandas as pd
 from scipy import stats as sp
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
 
 from services import store
 from services.stat_utils import lins_ccc, group_summary

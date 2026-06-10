@@ -7,7 +7,7 @@ import statsmodels.api as sm
 from scipy import stats as scipy_stats
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 from services import store
 from services.impute import apply_imputation

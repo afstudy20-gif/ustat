@@ -15,7 +15,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -211,8 +211,8 @@ def iv_2sls(req: IV2SLSRequest):
             + (f' + {" + ".join(req.covariates)}' if req.covariates else "")
             + f' | {" + ".join(req.instruments)}'
             + (f' + {" + ".join(req.covariates)}' if req.covariates else "")
-            + f', data = data)\n'
-            f'summary(iv, diagnostics = TRUE)  # weak instruments, Wu-Hausman, Sargan'
+            + ', data = data)\n'
+            'summary(iv, diagnostics = TRUE)  # weak instruments, Wu-Hausman, Sargan'
         ),
     }
 
@@ -639,7 +639,7 @@ def difference_in_differences(req: DiDRequest):
         "r_code": (
             f'did <- lm({req.outcome} ~ {req.group_col} * {req.time_col}'
             + (f' + {" + ".join(req.covariates)}' if req.covariates else "") + ', data = data)\n'
-            f'lmtest::coeftest(did, vcov = sandwich::vcovHC(did, "HC1"))  # group:time = DiD'
+            'lmtest::coeftest(did, vcov = sandwich::vcovHC(did, "HC1"))  # group:time = DiD'
         ),
     }
 

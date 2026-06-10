@@ -1,20 +1,16 @@
 """Advanced ANOVA: ANCOVA, two-way ANOVA with interaction + estimated marginal means."""
 import numpy as np
 import pandas as pd
-from scipy import stats as sp
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
-import statsmodels.api as sm
+from typing import List
 import statsmodels.formula.api as smf
 from statsmodels.stats.anova import anova_lm
 
 from services import store
 from services.impute import apply_imputation
 from services.stat_utils import (
-    partial_eta_squared, check_normality, check_equal_variances,
-    group_summary, tukey_hsd, games_howell, adjust_pvalues, cohen_d,
-    sorted_groups,
+    partial_eta_squared, check_normality, group_summary, tukey_hsd, sorted_groups,
 )
 
 router = APIRouter()
@@ -488,7 +484,7 @@ def mancova(req: MancovaRequest):
             f'library(car)\n'
             f'model <- lm(cbind({", ".join(req.outcomes)}) ~ {req.group_col}'
             + (f' + {" + ".join(req.covariates)}' if req.covariates else "")
-            + f', data = data)\n'
-            f'Manova(model, type = "II")  # Pillai by default'
+            + ', data = data)\n'
+            'Manova(model, type = "II")  # Pillai by default'
         ),
     }

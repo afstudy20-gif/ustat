@@ -12,10 +12,9 @@ This module is designed to support mid-to-advanced biostatistical practice.
 
 from __future__ import annotations
 
-from typing import Dict, Any, List, Literal, Optional
+from typing import Dict, Any, List, Optional
 import numpy as np
 import pandas as pd
-from scipy import stats as scipy_stats
 
 
 def compute_calibration_slope_intercept(

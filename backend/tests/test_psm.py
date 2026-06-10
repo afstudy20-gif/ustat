@@ -12,13 +12,11 @@ these tests should continue to pass with only minimal tolerance adjustments.
 
 import numpy as np
 import pandas as pd
-import pytest
 from conftest import make_session
 
 from services.psm import (
     _compute_smd,
     _variance_ratio,
-    _ks_p,
     _rosenbaum_bounds,
     _fit_propensity_scores,
 )

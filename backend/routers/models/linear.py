@@ -21,8 +21,6 @@ from services.regression import (
     stepwise_forward as _stepwise_forward,
     stepwise_backward as _stepwise_backward,
     _compute_aic,
-    _p_for_pred,
-    _uni_p_for_pred,
 )
 from services.assumptions import (
     check_linear_assumptions,
@@ -65,7 +63,7 @@ def _compute_vif(X: pd.DataFrame) -> dict:
             v = float(variance_inflation_factor(arr, i))
             if not np.isfinite(v):
                 v = None
-        except Exception as e:
+        except Exception:
             logger.exception("VIF calculation failed for a column")
             v = None
         out[str(col)] = v
@@ -350,7 +348,7 @@ def stepwise_selection(req: StepwiseRequest):
             else:
                 m = sm.OLS(y, Xc).fit()
             return m, _compute_aic(m)
-        except Exception as e:
+        except Exception:
             logger.exception("Stepwise model fit failed")
             return None, float("inf")
 

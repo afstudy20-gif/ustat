@@ -15,7 +15,6 @@ one row (median, Q1, Q3) shares the same precision.
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 DASH = "—"  # em dash for missing
 

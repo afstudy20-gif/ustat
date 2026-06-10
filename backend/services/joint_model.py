@@ -18,11 +18,9 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
-import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from lifelines import CoxPHFitter
 from sklearn.mixture import GaussianMixture
-from patsy import dmatrix
 
 def _safe(v: Any) -> Any:
     if v is None:

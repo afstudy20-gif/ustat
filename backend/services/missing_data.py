@@ -14,7 +14,7 @@ suitable for mid-to-advanced biostatistics work.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 
 import numpy as np
 import pandas as pd

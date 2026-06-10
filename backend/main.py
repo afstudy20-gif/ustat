@@ -12,7 +12,6 @@ try:
 except ImportError:
     psutil = None  # type: ignore
 
-from services import logging_config
 from routers import (
     upload, stats, charts, models, session, compute, repeated, advanced_anova,
     pub_tables, categorical, agreement, reliability, missing_data, decision_curve,

@@ -4,7 +4,6 @@ These cover endpoint registration, response shape, and a sanity check on
 the numbers. Heavier statistical correctness lives in the per-test files
 (test_diagnostics.py, etc).
 """
-import io
 import numpy as np
 import pandas as pd
 import pytest

@@ -7,7 +7,7 @@ from services.missing_data_sensitivity import (
     simulate_missingness,
     delta_adjustment_sensitivity,
 )
-from services.simulation_generators import generate_logistic_data, generate_linear_data
+from services.simulation_generators import generate_logistic_data
 
 
 @pytest.mark.simulation

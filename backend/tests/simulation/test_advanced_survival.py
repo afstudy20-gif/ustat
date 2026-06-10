@@ -170,7 +170,6 @@ def test_rmst_detects_difference_when_ph_violated():
         "group": group
     })
 
-    from services.simulation_generators import generate_survival_data  # not used, just for style
 
     # We don't have a direct RMST function exposed in services yet,
     # so we test the concept: the data structure is usable and RMST would be

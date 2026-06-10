@@ -6,7 +6,7 @@ from scipy import stats as sp
 from sklearn.metrics import brier_score_loss, roc_auc_score
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 from services import store
 from services.impute import apply_imputation

@@ -4,10 +4,9 @@ import pandas as pd
 from scipy import stats as sp
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 
 from services import store
-from services.impute import apply_imputation
 from services.stat_utils import (
     cohen_d_paired, matched_rank_biserial, kendalls_w, partial_eta_squared,
     check_normality, group_summary, adjust_pvalues,
@@ -236,7 +235,7 @@ def friedman(req: FriedmanRequest):
             ["n", n],
             ["k (conditions)", k],
         ],
-        "r_code": f'friedman.test(y ~ timepoint | subject, data = data_long)',
+        "r_code": 'friedman.test(y ~ timepoint | subject, data = data_long)',
     }
 
 

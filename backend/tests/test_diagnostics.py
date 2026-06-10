@@ -1,7 +1,6 @@
 """Tests for diagnostics, model_diagnostics, decision_curve, model_compare."""
 import numpy as np
 import pandas as pd
-import pytest
 from conftest import make_session
 
 
@@ -195,7 +194,7 @@ def test_compare_models(client):
 # ── Bootstrap/permutation ────────────────────────────────────────────────────
 
 def test_bootstrap_ci():
-    from services.stat_utils import bootstrap_ci, permutation_test
+    from services.stat_utils import bootstrap_ci
     data = np.random.RandomState(42).normal(10, 2, 50)
     result = bootstrap_ci(data, np.mean, n_boot=500)
     assert 9 < result["ci_low"] < result["ci_high"] < 11

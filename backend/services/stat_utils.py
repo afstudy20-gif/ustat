@@ -11,7 +11,7 @@ Provides:
 import numpy as np
 import pandas as pd
 from scipy import stats as sp
-from typing import Any, Optional
+from typing import Optional
 from dataclasses import dataclass, field, asdict
 
 

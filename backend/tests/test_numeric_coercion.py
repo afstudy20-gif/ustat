@@ -8,7 +8,6 @@ array also pinned that stale 'text' kind as an override on reload.
 """
 
 import io
-import json
 import pandas as pd
 from fastapi.testclient import TestClient
 

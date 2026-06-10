@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict
 import numpy as np
 import pandas as pd
 import json as _json
 from scipy import stats as scipy_stats
-from fastapi import APIRouter, HTTPException, Response, Query
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from loguru import logger
 
 from services import store
@@ -733,7 +733,7 @@ def table1(req: Table1Request):
                             test_name_str = "Kruskal-Wallis"
                     p_value_str = _fmt_p(float(p_t))
                     significant = bool(float(p_t) < 0.05)
-                except Exception as exc:
+                except Exception:
                     logger.exception("Table 1 statistical test failed")
                     p_value_str = "N/A"
 
@@ -755,7 +755,7 @@ def table1(req: Table1Request):
                             pair_smds.append(s_smd)
                     if pair_smds:
                         smd_val = round(max(pair_smds), 4)
-                except Exception as exc:
+                except Exception:
                     logger.exception("SMD numerical calculation failed")
 
             row: dict = {
@@ -803,7 +803,7 @@ def table1(req: Table1Request):
                     ct = pd.crosstab(df[var].astype(str), df[req.group_column])
                     p_chi_raw, test_name = _categorical_p_with_rule(ct.values)
                     p_val = _fmt_p(float(p_chi_raw))
-                except Exception as exc:
+                except Exception:
                     logger.exception("Categorical test failed in Table 1")
                     p_val = "N/A"
 
@@ -843,7 +843,7 @@ def table1(req: Table1Request):
                             pair_smds.append(s_smd)
                     if pair_smds:
                         cat_smd = round(max(pair_smds), 4)
-                except Exception as exc:
+                except Exception:
                     logger.exception("SMD categorical calculation failed")
 
             row = {
@@ -990,7 +990,7 @@ def weighted_descriptive(req: WeightedDescriptiveRequest):
             "weight_col": req.weight_col, "n_value_cols": len(req.value_cols),
             "group_col": req.group_col,
         })
-    except Exception as exc:
+    except Exception:
         logger.exception("Logging weighted descriptive action failed")
 
     return _sanitize({

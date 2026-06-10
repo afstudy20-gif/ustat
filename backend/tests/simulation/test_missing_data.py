@@ -3,10 +3,8 @@ Phase 3 - Missing Data & Multiple Imputation Simulation Tests
 """
 
 import numpy as np
-import pandas as pd
 import pytest
 
-from services.missing_data import mice_multiple, pool_linear_results, missing_pattern_summary
 from services.simulation_generators import generate_linear_data
 from tests.conftest import make_session
 

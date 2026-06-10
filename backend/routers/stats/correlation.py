@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from loguru import logger
 
 from services import store
@@ -59,7 +59,7 @@ def correlation(session_id: str, method: str = "pearson"):
                     else:
                         _, p = scipy_stats.kendalltau(s1, s2)
                     p_values[c1][c2] = float(p)
-                except Exception as exc:
+                except Exception:
                     logger.exception("Correlation matrix p-value calculation failed")
                     p_values[c1][c2] = None
     return {
@@ -268,7 +268,7 @@ def correlation_matrix_post(req: CorrelationMatrixRequest):
                     else:
                         _, pv = scipy_stats.pearsonr(pair[c1], pair[c2])
                     p_matrix[c1][c2] = float(pv)
-                except Exception as exc:
+                except Exception:
                     logger.exception("Correlation matrix post p-value calculation failed")
                     p_matrix[c1][c2] = None
 

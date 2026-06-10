@@ -5,7 +5,6 @@ this one applies a value→value map to ONE column, auto-casts the result to
 numeric when every value is a number, and remaps existing value labels.
 """
 
-import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 

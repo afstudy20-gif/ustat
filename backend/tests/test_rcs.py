@@ -15,7 +15,6 @@ from services.rcs_basis import (
     rcs_basis,
     resolve_knots,
     harrell_knots,
-    KNOT_PERCENTILES,
 )
 
 

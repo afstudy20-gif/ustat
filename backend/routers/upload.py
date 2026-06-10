@@ -176,7 +176,8 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
 
     # Use pandas to_json → loads to guarantee NaN/Inf become null
-    import numpy as np, json as _json
+    import numpy as np
+    import json as _json
     preview_df = df.head(2000).replace([np.inf, -np.inf], np.nan)
     preview = _json.loads(preview_df.to_json(orient="records", default_handler=str, date_format="iso", date_unit="s"))
 

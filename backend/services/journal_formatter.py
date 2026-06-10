@@ -4,7 +4,6 @@ Converts raw Table 1 result data into publication-ready HTML, Excel, and Word.
 """
 import io
 import re
-import numpy as np
 import pandas as pd
 from typing import Optional
 

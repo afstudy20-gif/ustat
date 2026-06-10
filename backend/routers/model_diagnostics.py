@@ -17,14 +17,12 @@ from services.missing_data_sensitivity import (
 from services.model_validation import (
     bootstrap_performance,
     optimism_corrected_metrics,
-    add_validation_to_result,
     compute_cox_calibration_slope,
     compute_calibration_slope_intercept,
 )
 from services.causal_sensitivity import (
     e_value,
     quantitative_bias_analysis,
-    e_value_from_psm_or_iptw,
 )
 
 router = APIRouter()

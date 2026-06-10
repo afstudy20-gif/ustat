@@ -11,10 +11,9 @@ from __future__ import annotations
 import io
 import math
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, HTTPException, UploadFile, File
-from pydantic import BaseModel
 
 router = APIRouter()
 
