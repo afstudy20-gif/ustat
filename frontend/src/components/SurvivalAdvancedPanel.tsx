@@ -992,8 +992,11 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
         for (const t of s.terms) {
           if (focusLevel && String(t.category) !== String(focusLevel)) continue;
           // No focus level → prefix the model name so each row is identifiable.
+          // Prepend the exposure column name to each level so the contrast reads
+          // as "LDL-C <100 vs LDL-C >130" rather than the bare "<100 vs >130",
+          // which is meaningless once the row is detached from the panel header.
           const contrast = (!focusLevel && multiTerm && t.kind === "category")
-            ? ` — ${vlab(t.category)} vs ${vlab(t.reference)}` : "";
+            ? ` — ${specExposure} ${vlab(t.category)} vs ${specExposure} ${vlab(t.reference)}` : "";
           rows.push({
             label: `${s.label}${contrast}`,
             est: t.hr ?? null, ci_low: t.hr_ci_low ?? null, ci_high: t.hr_ci_high ?? null,
