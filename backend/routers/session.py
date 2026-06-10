@@ -98,14 +98,13 @@ async def delete_row(session_id: str, row_index: int):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
         
-    # row_index from frontend is 1-based, we need 0-based for pandas index
-    # (or simply exactly matching the internal pd.Index we logged)
-    target_idx = row_index - 1
-    
-    if target_idx < 0:
+    # row_index from the frontend is already a 0-based position (store.delete_row
+    # treats it positionally). The previous "-1" silently deleted the wrong row
+    # (and made the first row undeletable).
+    if row_index < 0:
         raise HTTPException(status_code=400, detail="Invalid row index")
 
-    success = store.delete_row(session_id, target_idx)
+    success = store.delete_row(session_id, row_index)
     if not success:
         raise HTTPException(status_code=400, detail="Row could not be deleted")
         

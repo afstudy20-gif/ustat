@@ -23,6 +23,22 @@ _redo: Dict[str, list] = {}
 _lock = Lock()
 MAX_UNDO = 30
 
+# Every per-session map, so cleanup/delete can drop a session completely
+# (a partial pop leaks the user's kinds/decimals/filename/filters after TTL).
+_SESSION_MAPS: tuple = (_store, _filters, _audit, _metadata, _kinds, _decimals, _filenames, _undo, _redo)
+
+
+def _purge_locked(session_id: str) -> None:
+    """Remove a session from EVERY per-session map. Caller must hold _lock."""
+    for m in _SESSION_MAPS:
+        m.pop(session_id, None)
+
+
+def purge_session(session_id: str) -> None:
+    """Public: fully remove a session and all its metadata."""
+    with _lock:
+        _purge_locked(session_id)
+
 # Session configuration
 SESSION_TTL_SECONDS = 1800  # 30 minutes
 MAX_SESSIONS = 20  # Limit concurrent sessions
@@ -41,25 +57,14 @@ def _cleanup_old_sessions() -> None:
         # Remove expired sessions
         expired = [sid for sid, entry in _store.items() if now - entry["timestamp"] > SESSION_TTL_SECONDS]
         for sid in expired:
-            _store.pop(sid, None)
-            _filters.pop(sid, None)
-            _audit.pop(sid, None)
-            _metadata.pop(sid, None)
-            _kinds.pop(sid, None)
-            _undo.pop(sid, None)
-            _redo.pop(sid, None)
+            _purge_locked(sid)
 
         # If still over limit, remove oldest sessions
         if len(_store) > MAX_SESSIONS:
             sorted_sids = sorted(_store.items(), key=lambda x: x[1]["timestamp"])
             to_remove = len(_store) - MAX_SESSIONS
             for sid, _ in sorted_sids[:to_remove]:
-                _store.pop(sid, None)
-                _filters.pop(sid, None)
-                _audit.pop(sid, None)
-                _kinds.pop(sid, None)
-                _undo.pop(sid, None)
-                _redo.pop(sid, None)
+                _purge_locked(sid)
                 _metadata.pop(sid, None)
 
 
@@ -91,20 +96,23 @@ def save(session_id: str, df: pd.DataFrame, track_undo: bool = True) -> None:
 
 
 def delete_row(session_id: str, row_index: int) -> bool:
-    """Delete a specific row by its pandas index and save to trigger undo tracking."""
+    """Delete a row by its 0-based POSITION (matches the frontend's positional
+    row index) and save to trigger undo tracking. Resets the index afterwards so
+    the stored frame keeps a contiguous RangeIndex — otherwise a later
+    positional ``df.at[pos]`` edit would target a missing label and silently
+    append a phantom row."""
     with _lock:
         entry = _store.get(session_id)
         if entry is None:
             return False
         df = entry["df"]
-        
-        # Verify the index exists to avoid KeyError
-        if row_index not in df.index:
+
+        # row_index is a 0-based position, not a pandas label.
+        if row_index < 0 or row_index >= len(df):
             return False
-            
-    # Drop outside the lock just in case then save through the standard pipeline
-    # to handle undo tracking
-    new_df = df.drop(index=row_index)
+
+    # Drop outside the lock then save through the standard pipeline (undo).
+    new_df = df.drop(df.index[row_index]).reset_index(drop=True)
     save(session_id, new_df)
     log_action(session_id, "row_deleted", {"row_index": row_index})
     return True
@@ -192,12 +200,10 @@ def get_filtered(session_id: str) -> Optional[pd.DataFrame]:
 
 
 def delete(session_id: str) -> None:
-    _store.pop(session_id, None)
-    _filters.pop(session_id, None)
-    _audit.pop(session_id, None)
-    _metadata.pop(session_id, None)
-    _undo.pop(session_id, None)
-    _redo.pop(session_id, None)
+    """Fully remove a session and every per-session map (kinds/decimals/filename
+    included — they used to leak here)."""
+    with _lock:
+        _purge_locked(session_id)
 
 
 def list_sessions() -> list[str]:
