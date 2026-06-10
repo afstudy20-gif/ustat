@@ -343,6 +343,10 @@ function ROCPanelBody({ session }: { session: Session }) {
 
   useEffect(() => {
     if (result) { setSingleStyle({ color: _p0(), width: 2.5, dash: "solid" }); }
+    // Re-seed style only when a *new* curve arrives (auc or n change). Adding
+    // `result` itself would also reset the user's manual style edits on every
+    // unrelated re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result?.auc, result?.n]);
 
   // ── Multi-curve state ──

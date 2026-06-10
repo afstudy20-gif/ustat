@@ -59,6 +59,9 @@ export function SelectCasesModal({
       })
       .catch(() => setColValues((prev) => ({ ...prev, [activeCol]: [] })))
       .finally(() => setValuesLoading(false));
+    // The body GUARDS against re-fetch via `colValues[activeCol] !== undefined`,
+    // so we explicitly omit colValues from deps to avoid an infinite loop.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCol, sessionId]);
 
   const updateCond = (i: number, patch: Partial<CaseCondition>) => {

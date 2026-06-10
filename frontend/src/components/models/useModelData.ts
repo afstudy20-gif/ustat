@@ -47,6 +47,9 @@ export function useModelData(session: Session | null): ModelData {
       ).length;
     }
     return counts;
+    // `session` is read inside the body but we depend on its primitive
+    // sub-fields so we don't re-count on every unrelated session reidentify.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.preview, session?.columns]);
 
   const [sparklines, setSparklines] = useState<Record<string, { type: string; data: number[] }>>({});
@@ -55,6 +58,9 @@ export function useModelData(session: Session | null): ModelData {
     getSparklines(session.session_id)
       .then((r) => setSparklines(r.data))
       .catch(() => {});
+    // Re-fetch only when the dataset changes — depending on `session` itself
+    // would refetch on every cell edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
 
   return { numCols, allCols, binaryCols, missingCounts, sparklines };

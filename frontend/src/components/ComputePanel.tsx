@@ -1028,6 +1028,9 @@ function ClinicalCalcForm({
         setFemaleValue("");
       })
       .catch(() => setUniqueVals([]));
+    // Re-fetch only when the sex-field mapping value (a primitive key) changes,
+    // not on every `mapping`/`sexField` identity change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapping[sexField?.key ?? ""], sessionId]);
 
   const run = async () => {

@@ -788,12 +788,12 @@ export default function SurvivalAdvancedPanel() {
 }
 
 function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
-  const columns = session?.columns ?? [];
+  const columns = session.columns;
   // Columns offered in variable pickers: hide any flagged "exclude from
   // analysis". The full `columns` list is kept for display lookups of
   // already-saved results (value_labels of selected columns).
   const pickCols = useMemo(() => analysisCols(columns), [columns]);
-  const sid = session?.session_id ?? "";
+  const sid = session.session_id;
   // 2-grid layout: left method nav, right active method panel.
   const [activeMethod, setActiveMethod] = usePersistedPanelState<SurvMethod>("survival", "activeMethod", "km");
   // Binary 0/1-like columns for Cox event selectors (the `kind` enum has

@@ -520,6 +520,9 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
       .then((r) => setRawData(r.data))
       .catch(() => {})
       .finally(() => setRawLoading(false));
+    // Use a primitive join of `selected` so we re-fetch only when the column
+    // set actually changes — not on every array identity tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [displayMode, selected.join(","), sessionId]);
 
   const exportMatrix = () => {

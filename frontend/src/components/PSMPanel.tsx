@@ -297,6 +297,9 @@ function PSMPanelBody({ session }: { session: Session }) {
       const vals = new Set(session.preview.map((r) => r[col]).filter((v) => v != null));
       return vals.size === 2 && [...vals].every((v) => v === 0 || v === 1);
     }),
+    // Recompute only per dataset, not on every preview/columns reidentification —
+    // the binary-column shape is a property of the loaded session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [session.session_id]
   );
 

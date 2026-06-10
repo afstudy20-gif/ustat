@@ -600,7 +600,6 @@ function ScatterView({
     const key = `${xCol}|${yCol}|${color}|${shape}`;
     if (key === prevKey.current) return;
     prevKey.current = key;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- canonical async-fetch reset
     setLoading(true); setError(null);
     api.post("/api/charts/scatter", {
       session_id: sessionId, x: xCol, y: yCol,
@@ -979,6 +978,10 @@ export default function DescriptivePanel() {
       });
       setColMeta(metas);
     });
+    // Re-load metadata only on a new dataset — `session` object identity
+    // changes on every cell edit, but the metadata only needs to refresh
+    // when the underlying session_id changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
 
   const loadSummary = useCallback((colName: string, kindOverride?: string) => {
@@ -1006,11 +1009,13 @@ export default function DescriptivePanel() {
         setSummary(rawSummary);
       })
       .finally(() => setSummaryLoading(false));
+    // Same reasoning as the metadata effect above — depend on the stable
+    // session_id, not the constantly-reidentified session object.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
 
   useEffect(() => {
     if (session && !selected && session.columns.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- bootstrap initial column summary
       loadSummary(session.columns[0].name);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

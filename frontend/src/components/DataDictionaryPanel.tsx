@@ -51,6 +51,9 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
       };
     }
     setMeta(m);
+    // Seed metadata only when the dataset itself changes — not on every column
+    // edit (which would clobber the user's in-progress dictionary edits).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.session_id]);
 
   const update = (colName: string, field: keyof ColMeta, value: string) => {
