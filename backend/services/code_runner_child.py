@@ -132,6 +132,20 @@ def _install_import_guard() -> None:
     sys.meta_path.insert(0, _DenyImportFinder())
 
 
+# ── Restricted builtins for user code ───────────────────────────────────────
+
+# Removed from the user namespace: the obvious filesystem / dynamic-exec
+# escapes. The import allowlist (meta_path) still governs modules; this is
+# defense-in-depth ON TOP OF the read-only container filesystem (the real
+# boundary — user code runs as a non-root user that cannot write /app).
+_BLOCKED_BUILTINS = {"open", "exec", "eval", "compile", "input", "breakpoint", "help"}
+
+
+def _restricted_builtins() -> dict:
+    import builtins as _b
+    return {name: getattr(_b, name) for name in dir(_b) if name not in _BLOCKED_BUILTINS}
+
+
 # ── Main entry ──────────────────────────────────────────────────────────────
 
 def _main() -> int:
@@ -176,7 +190,20 @@ def _main() -> int:
     figures: list[str] = []
     err_msg: str | None = None
 
-    user_globals: dict = {"__name__": "__sandbox__", "__builtins__": __builtins__}
+    # Run from an isolated scratch dir under the system temp dir (/tmp), never
+    # the app tree, so a relative-path write can't land in /app/backend. HOME is
+    # NOT used: in the container it points at /home/app which is intentionally
+    # absent/non-writable, so a HOME-based scratch silently fails and leaves cwd
+    # on the read-only app tree. tempfile.gettempdir() is reliably writable.
+    try:
+        import tempfile
+        _scratch = os.path.join(tempfile.gettempdir(), "sandbox_run")
+        os.makedirs(_scratch, exist_ok=True)
+        os.chdir(_scratch)
+    except Exception:
+        pass
+
+    user_globals: dict = {"__name__": "__sandbox__", "__builtins__": _restricted_builtins()}
     if df is not None:
         try:
             import numpy as _np
