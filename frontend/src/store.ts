@@ -124,12 +124,12 @@ interface AppState {
   // Column reordering (drag & drop)
   reorderColumns: (fromIndex: number, toIndex: number) => void;
   // Table 1 persistence across tab switches
-  table1Result: any;
-  setTable1Result: (r: any) => void;
+  table1Result: unknown;
+  setTable1Result: (r: unknown) => void;
   clearTable1: () => void;
   // Generic panel result cache — persists results across tab switches
-  panelCache: Record<string, any>;
-  setPanelCache: (panel: string, data: any) => void;
+  panelCache: Record<string, unknown>;
+  setPanelCache: (panel: string, data: unknown) => void;
   clearPanelCache: (panel: string) => void;
   // Cross-panel forest handoff — one panel (e.g. Cox time-horizon) drops
   // a set of forest rows here, the Forest Builder picks them up on mount
@@ -167,8 +167,8 @@ interface AppState {
   setDescriptiveTab: (tab: "histogram" | "boxplot" | "violin" | "qq") => void;
 
   // Session History for Unified R Replication Code
-  sessionHistory: { action: string; params: any }[];
-  logAction: (action: string, params: any) => void;
+  sessionHistory: { action: string; params: Record<string, unknown> }[];
+  logAction: (action: string, params: Record<string, unknown>) => void;
   clearHistory: () => void;
 }
 

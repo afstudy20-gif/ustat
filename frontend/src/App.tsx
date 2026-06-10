@@ -15,7 +15,6 @@ class ErrorBoundary extends Component<
   static getDerivedStateFromError(error: Error) { return { error }; }
   componentDidCatch(error: Error) {
     // Surface the failure for debugging without taking down the whole app.
-    // eslint-disable-next-line no-console
     console.error("Panel render error:", error);
   }
   private reset = () => this.setState({ error: null });

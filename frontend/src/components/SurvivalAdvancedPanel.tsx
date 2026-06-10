@@ -1389,7 +1389,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(rmstResult.rmst_by_group).map(([g, v]: any) => (
+                      {Object.entries(rmstResult.rmst_by_group).map(([g, v]) => (
                         <tr key={g} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[60px]">{g}</td>
                           <td className="px-1.5 py-1 font-mono text-gray-600">{v.n}</td>
@@ -1415,7 +1415,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {rmstResult.contrasts.map((c: any, i: number) => (
+                      {rmstResult.contrasts.map((c, i) => (
                         <tr key={i} className={`border-b border-indigo-100 ${c.p != null && c.p < 0.05 ? "bg-indigo-50/60" : ""}`}>
                           <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[50px]">{c.group_a}</td>
                           <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[50px]">{c.group_b}</td>
@@ -1510,13 +1510,13 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {lwResult.coefficients.map((c: any) => (
+                        {lwResult.coefficients?.map((c) => (
                           <tr key={c.variable} className="border-b border-gray-100">
                             <td className="px-1.5 py-1 font-mono text-gray-800 truncate max-w-[80px]">{c.variable}</td>
-                            <td className={`px-1.5 py-1 font-mono font-semibold ${c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.rate_ratio?.toFixed(2)}</td>
+                            <td className={`px-1.5 py-1 font-mono font-semibold ${c.p != null && c.p < 0.05 ? "text-indigo-700" : "text-gray-600"}`}>{c.rate_ratio?.toFixed(2)}</td>
                             <td className="px-1.5 py-1 font-mono text-gray-500">[{c.rr_low?.toFixed(2)}, {c.rr_high?.toFixed(2)}]</td>
                             <td className="px-1.5 py-1">
-                              <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"}`}>
+                              <span className={`inline-block font-mono px-1 py-0.5 rounded text-[10px] ${c.p != null && c.p < 0.05 ? "bg-indigo-100 text-indigo-700 font-semibold" : "text-gray-400"}`}>
                                 {fmtP(c.p)}
                               </span>
                             </td>
@@ -1655,12 +1655,12 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {lmResult.cox_results.map((r: any, i: number) => (
+                      {lmResult.cox_results.map((r, i) => (
                         <tr key={i} className="border-t border-gray-100">
                           <td className="px-1.5 py-1 text-gray-700 font-medium truncate max-w-[80px]">{r.variable}</td>
                           <td className="px-1.5 py-1 text-gray-700 font-mono">{r.HR}</td>
                           <td className="px-1.5 py-1 text-gray-500 font-mono">{r.ci_low}–{r.ci_high}</td>
-                          <td className={`px-1.5 py-1 font-mono ${r.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
+                          <td className={`px-1.5 py-1 font-mono ${r.p != null && r.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
                             {fmtP(r.p)}
                           </td>
                           {r.fmi != null && <td className="px-1.5 py-1 text-right text-gray-400 font-mono">{r.fmi}</td>}
@@ -1746,7 +1746,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 const catCols = pickCols.filter((c) => isCategoricalKind(c.kind)).map((c) => c.name);
                 if (catCols.length === 0) return;
                 setKmScanLoading(true);
-                const results: any[] = [];
+                const results: KMScanRow[] = [];
                 for (const col of catCols) {
                   try {
                     const res = await runKM({ session_id: sid, duration_col: kmDuration, event_col: kmEvent, group_col: col });
@@ -1816,7 +1816,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
             kmGroupLabels[raw] ?? vLabels[raw] ?? raw;
 
           // Build legend label per group
-          const legendLabel = (g: any) => {
+          const legendLabel = (g: KMGroup) => {
             const resolved = resolveGroupName(String(g.group));
             const nSuffix = kmShowNInLegend ? ` (n=${g.n})` : "";
             if (!kmGroup) return `${resolved}${nSuffix}`;
@@ -1848,17 +1848,17 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
           // appear in the exported image. Group labels sit in the left margin
           // (resolveGroupName: manual override > value_labels > raw); counts are
           // placed at each risk time under the curve.
-          const riskGroups = kmResult.groups.filter((g: any) => Array.isArray(g.at_risk));
+          const riskGroups = kmResult.groups.filter((g) => Array.isArray(g.at_risk));
           const riskTimes: number[] = Array.isArray(kmResult.risk_times) ? kmResult.risk_times : [];
           const showRisk = kmRiskTable && riskTimes.length > 0 && riskGroups.length > 0;
           const RISK_ROW_PX = 17;
           const RISK_HEADER_Y = 54;   // px below plot area: "NUMBER AT RISK" header
           const RISK_FIRST_ROW_Y = 72; // px below plot area: first group row
-          const riskAnnotations: any[] = [];
+          const riskAnnotations: Record<string, unknown>[] = [];
           let riskLeftMargin = 68;
           let riskBottomMargin = 56;
           if (showRisk) {
-            const riskLabels = riskGroups.map((g: any) => resolveGroupName(String(g.group)));
+            const riskLabels = riskGroups.map((g) => resolveGroupName(String(g.group)));
             const maxLen = riskLabels.reduce((m: number, s: string) => Math.max(m, s.length), 0);
             riskLeftMargin = Math.min(220, Math.max(80, maxLen * 6 + 16));
             riskBottomMargin = RISK_FIRST_ROW_Y + riskGroups.length * RISK_ROW_PX + 18;
@@ -1869,7 +1869,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
               text: "NUMBER AT RISK", showarrow: false,
               font: { size: 10, color: "#6b7280" },
             });
-            riskGroups.forEach((g: any, gi: number) => {
+            riskGroups.forEach((g, gi) => {
               const color = kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[gi % OKABE_ITO.length] : pal[gi % pal.length]);
               const rowShift = -(RISK_FIRST_ROW_Y + gi * RISK_ROW_PX);
               // Group label in the left margin
@@ -1977,7 +1977,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
             {kmGroup && kmResult.groups?.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 mb-2 px-1">
                 <span className="text-[10px] text-gray-400 inline-flex items-center">Legend labels<Tip wide text="Rename each group as it appears in the legend, number-at-risk row, tables, and the auto-narrative — e.g. code '1' → '<100 mg/dL'. Leave blank to keep the original. Also editable by right-clicking a row in the summary table." /></span>
-                {kmResult.groups.map((g: any, i: number) => (
+                {kmResult.groups.map((g, i) => (
                   <span key={g.group} className="inline-flex items-center gap-1">
                     <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]) }} />
                     <input
@@ -2004,9 +2004,9 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
             <div className="relative" ref={kmPlotRef} style={{ width: kmPlotW != null ? kmPlotW : "100%", height: kmPlotH, maxWidth: "100%" }}>
               <Plot
                 data={[
-                  ...kmResult.groups.map((g: any, i: number) => ({
-                    x: g.curve.map((p: any) => p.time),
-                    y: g.curve.map((p: any) => p.survival),
+                  ...kmResult.groups.map((g, i) => ({
+                    x: g.curve.map((p) => p.time),
+                    y: g.curve.map((p) => p.survival),
                     type: "scatter", mode: "lines",
                     name: legendLabel(g),
                     line: {
@@ -2018,12 +2018,12 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   })),
                   // Censor tick marks ('+') overlaid on each curve.
                   ...(kmShowCensors
-                    ? kmResult.groups.flatMap((g: any, i: number) => {
+                    ? kmResult.groups.flatMap((g, i) => {
                         if (!Array.isArray(g.censors) || g.censors.length === 0) return [];
                         const c = kmGroupColors[String(g.group)] ?? (kmColorblind ? OKABE_ITO[i % OKABE_ITO.length] : pal[i % pal.length]);
                         return [{
-                          x: g.censors.map((p: any) => p.time),
-                          y: g.censors.map((p: any) => p.survival),
+                          x: g.censors.map((p) => p.time),
+                          y: g.censors.map((p) => p.survival),
                           type: "scatter", mode: "markers",
                           name: `${legendLabel(g)} (censored)`,
                           marker: { symbol: "cross-thin-open", size: 7, color: c, line: { width: 1.4, color: c } },
@@ -2039,12 +2039,12 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   // it as the figure legend in the manuscript.
                   title: undefined,
                   xaxis: {
-                    ...(baseLayout.xaxis as any),
+                    ...(baseLayout.xaxis as Record<string, unknown>),
                      // Using custom duration title if available
                     title: { text: kmCustomDurationTitle ? kmCustomDurationTitle : `Time (${kmDuration})` },
                   },
                   yaxis: {
-                    ...(baseLayout.yaxis as any),
+                    ...(baseLayout.yaxis as Record<string, unknown>),
                     title: { text: kmYTitle || "Survival probability" },
                     range: yRange,
                     tickformat: kmYAxisAsPct ? ".0%" : ".2f",
@@ -2095,7 +2095,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   </th>
                 </tr></thead>
                 <tbody className="divide-y divide-gray-100">
-                  {kmResult.groups.map((g: any, i: number) => {
+                  {kmResult.groups.map((g, i) => {
                     const label = resolveGroupName(String(g.group));
                     const isRenamed = label !== String(g.group);
                     return (
@@ -2165,10 +2165,10 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {kmResult.groups?.map((g: any) => (
+                      {kmResult.groups?.map((g) => (
                         <tr key={g.group} className="border-t border-gray-50">
-                          <td className="px-3 py-1 text-[11px] text-gray-700">{kmGroupLabels[g.group] ?? g.group}</td>
-                          {(g.survival_at ?? []).map((pt: any, i: number) => {
+                          <td className="px-3 py-1 text-[11px] text-gray-700">{kmGroupLabels[String(g.group)] ?? g.group}</td>
+                          {(g.survival_at ?? []).map((pt, i) => {
                             const unreliable = pt.reliable === false;
                             return (
                               <td key={i} className={`px-3 py-1 text-[11px] text-right tabular-nums ${unreliable ? "text-gray-300" : "text-gray-600"}`}
@@ -2185,7 +2185,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       ))}
                     </tbody>
                   </table>
-                  {kmResult.groups?.some((g: any) => (g.survival_at ?? []).some((p: any) => p.reliable === false)) && (
+                  {kmResult.groups?.some((g) => (g.survival_at ?? []).some((p) => p.reliable === false)) && (
                     <div className="px-3 py-1 text-[9px] text-amber-600 italic">
                       * Unstable estimate — fewer than 10 patients at risk or beyond maximum follow-up. Interpret with caution or omit.
                     </div>
@@ -2207,22 +2207,23 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       <tr className="text-[10px] text-gray-400">
                         <th className="px-3 py-1 text-left font-medium">Comparison</th>
                         <th className="px-3 py-1 text-right font-medium">p (raw)</th>
-                        {kmResult.pairwise.comparisons.some((c: any) => c.p_adj != null) && (
+                        {kmResult.pairwise.comparisons.some((c) => c.p_adj != null) && (
                           <th className="px-3 py-1 text-right font-medium">p (adj)</th>
                         )}
                       </tr>
                     </thead>
                     <tbody>
-                      {kmResult.pairwise.comparisons.map((c: any, i: number) => {
-                        const pShow = (p: number | null) => fmtP(p);
-                        const sig = (c.p_adj ?? c.p) != null && (c.p_adj ?? c.p) < 0.05;
+                      {kmResult.pairwise.comparisons.map((c, i) => {
+                        const pShow = (p: number | null | undefined) => fmtP(p);
+                        const pVal = c.p_adj ?? c.p;
+                        const sig = pVal != null && pVal < 0.05;
                         const la = kmGroupLabels[c.group_a] ?? c.group_a;
                         const lb = kmGroupLabels[c.group_b] ?? c.group_b;
                         return (
                           <tr key={i} className={`border-t border-gray-50 ${sig ? "bg-indigo-50/40" : ""}`}>
                             <td className="px-3 py-1 text-[11px] text-gray-700">{la} vs {lb}</td>
                             <td className="px-3 py-1 text-[11px] text-gray-600 text-right tabular-nums">{pShow(c.p)}</td>
-                            {kmResult.pairwise.comparisons.some((x: any) => x.p_adj != null) && (
+                            {kmResult.pairwise?.comparisons?.some((x) => x.p_adj != null) && (
                               <td className={`px-3 py-1 text-[11px] text-right tabular-nums ${sig ? "font-semibold text-indigo-700" : "text-gray-600"}`}>{pShow(c.p_adj)}</td>
                             )}
                           </tr>
@@ -2351,7 +2352,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
 
         {/* Stratified KM (small-multiples grid) — when stratify_col is set */}
         {kmResult?.strata && (() => {
-          const strata: any[] = kmResult.strata;
+          const strata: KMStratum[] = kmResult.strata;
           const miniH = 420;
 
           const stratColMeta = columns.find((c) => c.name === kmStratify);
@@ -2359,10 +2360,10 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
           const groupColMeta = columns.find((c) => c.name === kmGroup);
           const grpLabels = groupColMeta?.value_labels ?? {};
 
-          const buildTraces = (groups: any[]) =>
-            groups.map((g: any, i: number) => ({
-              x: g.curve.map((p: any) => p.time),
-              y: g.curve.map((p: any) => p.survival),
+          const buildTraces = (groups: KMGroup[]) =>
+            groups.map((g, i) => ({
+              x: g.curve.map((p) => p.time),
+              y: g.curve.map((p) => p.survival),
               type: "scatter" as const, mode: "lines" as const,
               name: kmGroup
                 ? `${kmCustomGroupTitle || kmGroup} = ${grpLabels[String(g.group)] ?? g.group}`
@@ -2380,14 +2381,14 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 <span className="text-xs text-gray-400">{strata.length} strata · {kmResult.n_total ?? "?"} total</span>
               </div>
               <div className="grid gap-4 grid-cols-1">
-                {strata.map((stratum: any) => {
+                {strata.map((stratum) => {
                   const stratLabel = stratLabels[String(stratum.label)] ?? stratum.label;
                   const pAnnot = stratum.logrank?.p != null ? [{
                     xref: "paper", yref: "paper", x: 0.02, y: 0.98,
                     xanchor: "left", yanchor: "top",
                     text: `p = ${fmtP(stratum.logrank.p)}`,
                     showarrow: false,
-                    font: { size: 11, color: stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
+                    font: { size: 11, color: stratum.logrank.p != null && stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
                     bgcolor: "rgba(249,250,251,0.85)", borderpad: 3, bordercolor: "#e5e7eb", borderwidth: 1,
                   }] : [];
                   return (
@@ -2403,10 +2404,10 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                           autosize: true,
                           height: miniH,
                           margin: { t: 10, r: 10, b: 40, l: 50 },
-                          xaxis: { ...(baseLayout.xaxis as any), title: { text: kmCustomDurationTitle || kmDuration } },
-                          yaxis: { ...(baseLayout.yaxis as any), range: [0, 1.05], tickformat: ".0%", title: { text: "Survival" } },
+                          xaxis: { ...(baseLayout.xaxis as Record<string, unknown>), title: { text: kmCustomDurationTitle || kmDuration } },
+                          yaxis: { ...(baseLayout.yaxis as Record<string, unknown>), range: [0, 1.05], tickformat: ".0%", title: { text: "Survival" } },
                           legend: { font: { size: 9 }, orientation: "h", y: -0.22 },
-                          annotations: pAnnot as any,
+                          annotations: pAnnot,
                         }}
                         style={{ width: "100%", height: miniH }}
                         config={{ responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
@@ -2556,7 +2557,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
               disabled={coxScanLoading}
               onClick={async () => {
                 setCoxScanLoading(true);
-                const results: any[] = [];
+                const results: CoxScanRow[] = [];
                 for (const pred of coxPreds) {
                   try {
                     const res = await runCox({ session_id: sid, duration_col: coxDuration, event_col: coxEvent, predictors: [pred] });
@@ -2755,14 +2756,14 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 </tr>
               </thead>
               <tbody>
-                {coxResult.coefficients.map((c: any, i: number) => (
+                {coxResult.coefficients?.map((c, i) => (
                   <tr key={i} className="border-t border-gray-100 hover:bg-gray-50">
                     <td className="px-3 py-1 font-medium text-gray-700">{c.variable}</td>
                     <td className="px-3 py-1 text-gray-600">{c.log_hr?.toFixed(4)}</td>
                     <td className="px-3 py-1 text-gray-600">{c.se?.toFixed(4)}</td>
                     <td className="px-3 py-1 font-semibold text-gray-800">{c.hr?.toFixed(4)}</td>
                     <td className="px-3 py-1 text-gray-500">{c.hr_ci_low?.toFixed(3)} – {c.hr_ci_high?.toFixed(3)}</td>
-                    <td className={`px-3 py-1 ${c.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
+                    <td className={`px-3 py-1 ${c.p != null && c.p < 0.05 ? "text-indigo-600 font-semibold" : "text-gray-500"}`}>
                       {fmtP(c.p)}
                     </td>
                   </tr>
@@ -2900,7 +2901,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {(chResult.forest_rows ?? []).map((row: any, i: number) => (
+                  {(chResult.forest_rows ?? []).map((row, i) => (
                     <tr key={i} className="border-t border-gray-100">
                       <td className="px-3 py-1.5 text-gray-800">{row.label}</td>
                       <td className="px-3 py-1.5 text-right text-gray-500">{(row.extra ?? "").replace(/[()]/g, "").replace(" events", "")}</td>

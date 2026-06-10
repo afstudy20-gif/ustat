@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shared helpers + small components bundled by design */
 // Shared presentational helpers for the model result views.
 
 // ── Shared model result types ────────────────────────────────────────────────

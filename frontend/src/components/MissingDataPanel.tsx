@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useStore, isNumericKind } from "../store";
 import { runMICE, runMCARTest, runImputationCompare, runMissingDiagnostics, fillBlanks } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -10,6 +10,26 @@ interface DiagCol { name: string; n_missing: number; pct: number; kind: string; 
 interface DiagResult { columns: DiagCol[]; overall_hint: string; recommendation: string; any_mar: boolean }
 type MissingSort = "missing-desc" | "missing-asc" | "name-asc" | "name-desc";
 type QuickMethod = "__mean__" | "__median__" | "__mode__" | "__mice__";
+
+interface MiceExportResult {
+  result_text?: string;
+  methods_text?: string;
+  export_rows?: unknown[][];
+}
+interface McarResult {
+  statistic: number | string;
+  df: number;
+  p: number | string;
+  significant: boolean;
+}
+interface CompareColumn {
+  col: string;
+  before?: { mean?: number | string };
+  after?: { mean?: number | string };
+  ks_p?: number | null;
+}
+interface CompareEntry { strategy: string; columns: CompareColumn[] }
+interface CompareResult { comparisons?: CompareEntry[] }
 
 const QUICK_SUFFIX: Record<QuickMethod, string> = {
   __mean__: "mean",
@@ -50,7 +70,7 @@ export default function MissingDataPanel() {
   const [miceIter, setMiceIter] = useState(20);
   const [miceSeed, setMiceSeed] = useState(42);
   const [miceMechanism, setMiceMechanism] = useState<"unknown" | "MCAR" | "MAR" | "MNAR">("unknown");
-  const [miceResult, setMiceResult] = useState<any>(null);
+  const [miceResult, setMiceResult] = useState<MiceExportResult | null>(null);
   const [miceLoading, setMiceLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // per-row action in flight
   const [err, setErr] = useState<string | null>(null);
@@ -58,9 +78,9 @@ export default function MissingDataPanel() {
 
   // Diagnostics state
   const [diag, setDiag] = useState<DiagResult | null>(null);
-  const [mcar, setMcar] = useState<any>(null);
+  const [mcar, setMcar] = useState<McarResult | null>(null);
   const [mcarNote, setMcarNote] = useState<string | null>(null);
-  const [compare, setCompare] = useState<any>(null);
+  const [compare, setCompare] = useState<CompareResult | null>(null);
 
   if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
 
@@ -416,7 +436,10 @@ export default function MissingDataPanel() {
             </div>
             <div className="px-5 py-4 space-y-4">
               <div className="flex gap-4 flex-wrap">
-                {[["Max iterations", miceIter, setMiceIter, 1, 100], ["Seed", miceSeed, setMiceSeed, 0, 999999]].map(([lab, val, set, mn, mx]: any) => (
+                {([
+                  ["Max iterations", miceIter, setMiceIter, 1, 100],
+                  ["Seed", miceSeed, setMiceSeed, 0, 999999],
+                ] as Array<[string, number, (v: number) => void, number, number]>).map(([lab, val, set, mn, mx]) => (
                   <label key={lab} className="flex flex-col gap-1">
                     <span className="text-xs text-gray-500 font-medium">{lab}</span>
                     <input type="number" value={val} onChange={(e) => set(Number(e.target.value))} min={mn} max={mx}
@@ -457,9 +480,9 @@ export default function MissingDataPanel() {
                 <>
                   <div className="overflow-auto rounded-lg border border-gray-200">
                     <table className="text-xs w-full">
-                      <thead><tr className="bg-gray-50">{miceResult.export_rows[0].map((h: string, i: number) => <th key={i} className="px-3 py-1.5 text-left text-gray-500 font-medium">{h}</th>)}</tr></thead>
-                      <tbody>{miceResult.export_rows.slice(1).map((row: any[], ri: number) => (
-                        <tr key={ri} className="border-t border-gray-100">{row.map((v: any, ci: number) => <td key={ci} className="px-3 py-1 text-gray-700">{v ?? "—"}</td>)}</tr>
+                      <thead><tr className="bg-gray-50">{(miceResult.export_rows[0] as unknown[]).map((h, i: number) => <th key={i} className="px-3 py-1.5 text-left text-gray-500 font-medium">{String(h)}</th>)}</tr></thead>
+                      <tbody>{miceResult.export_rows.slice(1).map((row, ri: number) => (
+                        <tr key={ri} className="border-t border-gray-100">{(row as unknown[]).map((v, ci: number) => <td key={ci} className="px-3 py-1 text-gray-700">{(v as ReactNode) ?? "—"}</td>)}</tr>
                       ))}</tbody>
                     </table>
                   </div>
@@ -478,7 +501,7 @@ export default function MissingDataPanel() {
                         <th className="px-3 py-1.5">Mean (obs→after)</th><th className="px-3 py-1.5">KS p</th>
                       </tr></thead>
                       <tbody>
-                        {compare.comparisons.flatMap((cmp: any) => cmp.columns.map((c: any) => (
+                        {compare.comparisons.flatMap((cmp) => cmp.columns.map((c) => (
                           <tr key={`${cmp.strategy}:${c.col}`} className="border-t border-gray-100">
                             <td className="px-3 py-1 text-gray-700">{cmp.strategy}</td>
                             <td className="px-3 py-1 text-gray-700">{c.col}</td>

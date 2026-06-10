@@ -17,12 +17,84 @@ import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import TitledPlot from "./TitledPlot";
 import { fmtP } from "../lib/format";
 import { useResizableRightCol } from "../hooks/useResizableRightCol";
+import type { PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
+
+// ── Local result interfaces ───────────────────────────────────────────────────
+interface Coefficient {
+  variable: string;
+  estimate: number;
+  exp_estimate?: number;
+  irr?: number;
+  odds_ratio?: number;
+  se: number;
+  z?: number;
+  t?: number;
+  p: number;
+}
+
+interface PolynomialResult {
+  model: string;
+  n: number;
+  degree: number;
+  predictor: string;
+  outcome: string;
+  r_squared: number;
+  adj_r_squared: number;
+  aic: number;
+  bic: number;
+  residual_se: number;
+  coefficients: Coefficient[];
+  scatter: { x: number[]; y: number[] };
+  curve?: { x: number[]; y: number[]; ci_low: number[]; ci_high: number[] };
+}
+
+interface LMMResult {
+  model: string;
+  model_type?: string;
+  note?: string;
+  n: number;
+  n_groups: number;
+  group: string;
+  icc?: number;
+  aic?: number;
+  bic?: number;
+  random_effect_variance?: number;
+  residual_variance?: number;
+  coefficients: Coefficient[];
+}
+
+interface GLMResult {
+  model: string;
+  n: number;
+  aic?: number;
+  bic?: number;
+  deviance?: number;
+  scale?: number;
+  coefficients: Coefficient[];
+}
+
+interface DiagnosticsResult {
+  n: number;
+  r_squared: number;
+  residual_se: number;
+  residuals_fitted: { x: number[]; y: number[] };
+  qq: { theoretical: number[]; sample: number[]; line_x: number[]; line_y: number[] };
+  scale_location: { x: number[]; y: number[] };
+}
+
+/** Extract a human-readable error message from an unknown thrown value. */
+function errMsg(e: unknown, fallback = "Error"): string {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (e instanceof Error) return e.message;
+  return fallback;
+}
 
 // ── p-value formatter (centralised in lib/format.ts) ───────────────────────────
 const sig   = (p: number) => p < 0.001 ? "***" : p < 0.01 ? "**" : p < 0.05 ? "*" : "";
 
 // ── CoefRow component ──────────────────────────────────────────────────────────
-function CoefRow({ c, expMode = false }: { c: any; expMode?: boolean }) {
+function CoefRow({ c, expMode = false }: { c: Coefficient; expMode?: boolean }) {
   const est = expMode ? (c.exp_estimate ?? c.irr ?? c.odds_ratio) : c.estimate;
   const adjP = c.p;
   return (
@@ -40,7 +112,7 @@ function CoefRow({ c, expMode = false }: { c: any; expMode?: boolean }) {
   );
 }
 
-function CoefTable({ coefs, expMode = false }: { coefs: any[]; expMode?: boolean }) {
+function CoefTable({ coefs, expMode = false }: { coefs: Coefficient[]; expMode?: boolean }) {
   const hd = "pb-1.5 pr-2 font-medium text-xs text-gray-500";
   return (
     <div className="overflow-auto rounded border border-gray-200 mt-2">
@@ -57,7 +129,7 @@ function CoefTable({ coefs, expMode = false }: { coefs: any[]; expMode?: boolean
           </tr>
         </thead>
         <tbody>
-          {coefs.map((c: any) => <CoefRow key={c.variable} c={c} expMode={expMode} />)}
+          {coefs.map(c => <CoefRow key={c.variable} c={c} expMode={expMode} />)}
         </tbody>
       </table>
     </div>
@@ -65,7 +137,8 @@ function CoefTable({ coefs, expMode = false }: { coefs: any[]; expMode?: boolean
 }
 
 // ── StatCards ─────────────────────────────────────────────────────────────────
-function StatCards({ pairs }: { pairs: [string, any, string?][] }) {
+type StatValue = string | number | null | undefined;
+function StatCards({ pairs }: { pairs: [string, StatValue, string?][] }) {
   return (
     <div className="grid grid-cols-4 gap-3">
       {pairs.filter(([, v]) => v != null).map(([k, v, tip]) => (
@@ -95,18 +168,18 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
   const [covariates, setCovariates] = useState<string[]>([]);
   const [robustSE,   setRobustSE]   = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
-  const [result,     setResult]     = useState<any>(null);
+  const [result,     setResult]     = useState<PolynomialResult | null>(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState("");
-  const plotRef = useRef<any>(null);
+  const plotRef = useRef<PlotCaptureHandle | null>(null);
 
   const run = async () => {
     setLoading(true); setError(""); setResult(null);
     try {
       const r = await runPolynomial({ session_id: sessionId, outcome, predictor, degree, covariates, imputation, robust_se: robustSE });
-      setResult(r.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? e.message ?? "Error");
+      setResult(r.data as PolynomialResult);
+    } catch (e: unknown) {
+      setError(errMsg(e));
     } finally { setLoading(false); }
   };
 
@@ -171,7 +244,7 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
         {result && (
           <div
             className="flex-1 grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
-            style={{ ["--right-col" as any]: `${rightColW}px` }}
+            style={{ "--right-col": `${rightColW}px` } as React.CSSProperties}
           >
             <div
               role="separator"
@@ -222,8 +295,8 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
                   ]}
                   layout={{
                     ...layout, height: 380, autosize: true,
-                    xaxis: { ...layout.xaxis as any, showgrid: showGrid, title: { text: result.predictor } },
-                    yaxis: { ...layout.yaxis as any, showgrid: showGrid, title: { text: result.outcome }, zeroline: false },
+                    xaxis: { ...(layout.xaxis as Record<string, unknown>), showgrid: showGrid, title: { text: result.predictor } },
+                    yaxis: { ...(layout.yaxis as Record<string, unknown>), showgrid: showGrid, title: { text: result.outcome }, zeroline: false },
                     legend: { x: 0.01, y: 0.99, xanchor: "left" as const, yanchor: "top" as const, font: { size: 10 } },
                     margin: { t: 20, r: 20, b: 50, l: 60 },
                   }}
@@ -306,7 +379,7 @@ function LMMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
     return allCols.find(isIdLike) ?? allCols[0] ?? "";
   });
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<LMMResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -335,8 +408,8 @@ function LMMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
     setLoading(true); setError(""); setResult(null);
     try {
       const r = await runLMM({ session_id: sessionId, outcome, fixed_effects: fixedEffects, group_col: groupCol, imputation });
-      setResult(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? e.message ?? "Error"); }
+      setResult(r.data as LMMResult);
+    } catch (e: unknown) { setError(errMsg(e)); }
     finally { setLoading(false); }
   };
 
@@ -358,7 +431,7 @@ function LMMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
         setSession({ ...session, ...refresh.data });
       }
       setShowMelt(false);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? e.message ?? "Melt failed"); }
+    } catch (e: unknown) { setError(errMsg(e, "Melt failed")); }
     finally { setMeltLoading(false); }
   };
 
@@ -508,11 +581,11 @@ function LMMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
             <StatCards pairs={[
               ["n", result.n],
               ["Groups", result.n_groups, "Number of level-2 clusters (random intercepts)"],
-              ...(result.icc != null ? [["ICC", result.icc.toFixed(4), "Intraclass Correlation — proportion of variance explained by grouping"] as [string, any, string]] : []),
+              ...(result.icc != null ? [["ICC", result.icc.toFixed(4), "Intraclass Correlation — proportion of variance explained by grouping"] as [string, StatValue, string]] : []),
               ["AIC", result.aic?.toFixed(2)],
               ["BIC", result.bic?.toFixed(2)],
-              ...(result.random_effect_variance != null ? [["σ² RE", result.random_effect_variance.toFixed(4), "Random effect (between-group) variance"] as [string, any, string]] : []),
-              ...(result.residual_variance != null ? [["σ² Resid", result.residual_variance.toFixed(4), "Within-group residual variance"] as [string, any, string]] : []),
+              ...(result.random_effect_variance != null ? [["σ² RE", result.random_effect_variance.toFixed(4), "Random effect (between-group) variance"] as [string, StatValue, string]] : []),
+              ...(result.residual_variance != null ? [["σ² Resid", result.residual_variance.toFixed(4), "Within-group residual variance"] as [string, StatValue, string]] : []),
             ]} />
 
             <CoefTable coefs={result.coefficients} expMode={result.model_type === "gee_binomial"} />
@@ -542,7 +615,7 @@ function GLMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
   const [link,       setLink]       = useState("log");
   const [robustSE,   setRobustSE]   = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
-  const [result,     setResult]     = useState<any>(null);
+  const [result,     setResult]     = useState<GLMResult | null>(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState("");
 
@@ -555,8 +628,8 @@ function GLMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
       const payload = { session_id: sessionId, outcome, predictors, imputation, robust_se: robustSE, ...(glmType === "gamma" ? { link } : {}) };
       const fn = glmType === "gamma" ? runGamma : runNegBinom;
       const r = await fn(payload);
-      setResult(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? e.message ?? "Error"); }
+      setResult(r.data as GLMResult);
+    } catch (e: unknown) { setError(errMsg(e)); }
     finally { setLoading(false); }
   };
 
@@ -632,7 +705,7 @@ function GLMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
               ["AIC", result.aic?.toFixed(2), "Lower = better"],
               ["BIC", result.bic?.toFixed(2)],
               ["Deviance", result.deviance?.toFixed(2), "Smaller = better fit"],
-              ...(result.scale != null ? [["Scale (dispersion)", result.scale?.toFixed(4)] as [string, any]] : []),
+              ...(result.scale != null ? [["Scale (dispersion)", result.scale?.toFixed(4)] as [string, StatValue]] : []),
             ]} />
             <CoefTable coefs={result.coefficients} expMode={false} />
             {glmType === "gamma" && link === "log" && (
@@ -664,29 +737,29 @@ function DiagnosticsSection({ sessionId, allCols, numCols }: { sessionId: string
   const [outcome,    setOutcome]    = useState(numCols[0] ?? "");
   const [predictors, setPredictors] = useState<string[]>([]);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
-  const [diag,       setDiag]       = useState<any>(null);
+  const [diag,       setDiag]       = useState<DiagnosticsResult | null>(null);
   const [loading,    setLoading]    = useState(false);
   const [error,      setError]      = useState("");
-  const rfRef   = useRef<any>(null);
-  const qqRef   = useRef<any>(null);
-  const slRef   = useRef<any>(null);
-  const histRef = useRef<any>(null);
+  const rfRef   = useRef<PlotCaptureHandle | null>(null);
+  const qqRef   = useRef<PlotCaptureHandle | null>(null);
+  const slRef   = useRef<PlotCaptureHandle | null>(null);
+  const histRef = useRef<PlotCaptureHandle | null>(null);
 
   const run = async () => {
     if (predictors.length === 0) { setError("Select at least one predictor"); return; }
     setLoading(true); setError(""); setDiag(null);
     try {
       const r = await runLinearDiag({ session_id: sessionId, outcome, predictors, imputation });
-      setDiag(r.data);
-    } catch (e: any) { setError(e?.response?.data?.detail ?? e.message ?? "Error"); }
+      setDiag(r.data as DiagnosticsResult);
+    } catch (e: unknown) { setError(errMsg(e)); }
     finally { setLoading(false); }
   };
 
-  const sharedLayout = (title: string, xLabel: string, yLabel: string) => ({
+  const sharedLayout = (title: string, xLabel: string, yLabel: string): PlotLayout => ({
     ...layout,
     height: 300, autosize: true,
-    xaxis: { ...layout.xaxis as any, showgrid: showGrid, title: { text: xLabel, font: { size: 10 } } },
-    yaxis: { ...layout.yaxis as any, showgrid: showGrid, title: { text: yLabel, font: { size: 10 } }, zeroline: false },
+    xaxis: { ...(layout.xaxis as Record<string, unknown>), showgrid: showGrid, title: { text: xLabel, font: { size: 10 } } },
+    yaxis: { ...(layout.yaxis as Record<string, unknown>), showgrid: showGrid, title: { text: yLabel, font: { size: 10 } }, zeroline: false },
     title: { text: title, font: { size: 12, color: "#374151" } },
     margin: { t: 36, r: 16, b: 48, l: 56 },
     showlegend: false,

@@ -20,16 +20,37 @@ import { runDCA } from "../api";
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import ThreeCol from "./ThreeCol";
+import type { PlotCaptureHandle, PlotData } from "../lib/plotTypes";
 
+interface DcaCurveSeries { thresholds?: number[]; net_benefit?: number[] }
+interface DcaCurves {
+  thresholds?: number[];
+  model?: DcaCurveSeries;
+  treat_all?: DcaCurveSeries;
+  treat_none?: DcaCurveSeries;
+  model_net_benefit?: number[];
+  treat_all_net_benefit?: number[];
+  treat_none_net_benefit?: number[];
+}
+interface DcaSummary {
+  max_net_benefit?: number;
+  max_net_benefit_threshold?: number;
+  harm_threshold?: number;
+  positive_nb_range?: [number | string, number | string];
+  interventions_avoided_per_100_at_max?: number;
+}
 interface DcaResult {
-  curves?: any;
-  summary?: any;
+  curves?: DcaCurves;
+  summary?: DcaSummary;
   assumptions?: string[];
   warnings?: string[];
   result_text?: string;
   prevalence?: number;
   mode?: string;
 }
+
+// Plotly request payload — accepts arbitrary extra keys.
+type DcaPayload = Record<string, unknown>;
 
 export default function DecisionCurvePanel() {
   const session = useStore((s) => s.session);
@@ -58,7 +79,7 @@ export default function DecisionCurvePanel() {
   const numericCols = columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
   // Binary outcome can be a 0/1 numeric or a 2-level categorical column.
   const binaryCols = columns.filter((c) => isCategoricalKind(c.kind) || isNumericKind(c.kind)).map((c) => c.name);
-  const dcaPlotRef = useRef<any>(null);
+  const dcaPlotRef = useRef<PlotCaptureHandle | null>(null);
 
   const canRun = sid && (
     (mode === "binary" && probCol && outcomeCol) ||
@@ -73,7 +94,7 @@ export default function DecisionCurvePanel() {
     setResult(null);
 
     try {
-      const payload: any = {
+      const payload: DcaPayload = {
         session_id: sid,
         n_thresholds: 90,
         threshold_range: mode === "survival" ? [0.02, 0.55] : [0.01, 0.80],
@@ -91,8 +112,9 @@ export default function DecisionCurvePanel() {
 
       const res = await runDCA(payload);
       setResult(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Decision curve analysis failed");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Decision curve analysis failed");
     } finally {
       setLoading(false);
     }
@@ -107,7 +129,7 @@ export default function DecisionCurvePanel() {
     const allNB: number[] = result.curves.treat_all?.net_benefit || result.curves.treat_all_net_benefit || [];
     const noneNB: number[] = result.curves.treat_none?.net_benefit || result.curves.treat_none_net_benefit || [];
 
-    const traces: any[] = [];
+    const traces: PlotData[] = [];
 
     // 1. Treat None (reference)
     traces.push({
@@ -211,8 +233,8 @@ export default function DecisionCurvePanel() {
     const harmThreshold = result?.summary?.harm_threshold;
     const maxThreshold = result?.summary?.max_net_benefit_threshold;
 
-    const shapes: any[] = [];
-    const annotations: any[] = [];
+    const shapes: Record<string, unknown>[] = [];
+    const annotations: Record<string, unknown>[] = [];
 
     // Common clinical thresholds (subtle)
     const refThresholds = [0.05, 0.10, 0.20, 0.30];

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- shared hook + component co-located by design */
 /**
  * MissingGuard — Missing-data awareness component.
  *

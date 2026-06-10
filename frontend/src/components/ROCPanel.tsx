@@ -1520,7 +1520,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {multiDelong.pairs.map((pr: any, i: number) => (
+                    {multiDelong.pairs.map((pr: DelongPair, i: number) => (
                       <tr key={i} className={`border-b border-gray-100 ${pr.significant ? "bg-indigo-50/40" : ""}`}>
                         <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.a}</td>
                         <td className="px-1.5 py-1 font-mono text-gray-700 truncate max-w-[80px]">{pr.b}</td>

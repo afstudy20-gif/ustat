@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- label helper co-located with the plot component */
 import { useState, useRef } from "react";
 import Plot from "../../PlotComponent";
 import { useStore } from "../../store";

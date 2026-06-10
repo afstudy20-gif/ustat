@@ -96,16 +96,17 @@ function Sparkline({ spark }: { spark: SparkData }) {
   // categorical → proportional horizontal bars
   const total = data.reduce((a, b) => a + b, 0);
   const CATS = pal;
-  let cx = 0;
+  const segments = data.reduce<{ i: number; x: number; bw: number }[]>((acc, v, i) => {
+    const bw = (v / total) * W;
+    const x = acc.length ? acc[acc.length - 1].x + acc[acc.length - 1].bw : 0;
+    return [...acc, { i, x, bw }];
+  }, []);
   return (
     <svg width={W} height={H} style={{ display: "block", flexShrink: 0 }}>
-      {data.map((v, i) => {
-        const bw = (v / total) * W;
-        const rect = <rect key={i} x={cx} y={0} width={Math.max(bw - 0.5, 0.5)} height={H}
-          fill={CATS[i % CATS.length]} opacity={0.8} />;
-        cx += bw;
-        return rect;
-      })}
+      {segments.map(({ i, x, bw }) => (
+        <rect key={i} x={x} y={0} width={Math.max(bw - 0.5, 0.5)} height={H}
+          fill={CATS[i % CATS.length]} opacity={0.8} />
+      ))}
     </svg>
   );
 }
@@ -162,7 +163,7 @@ function NormalityDeviants({ deviants, onDelete }: { deviants: NormalityDeviant[
               try {
                 await useStore.getState().deleteRow(e.row);
                 onDelete();
-              } catch (err) {}
+              } catch { /* row delete is best-effort */ }
             }}
             onContextMenu={(ev) => handleContextMenu(ev, e.row)}
             title="Click to delete or right-click for menu"
@@ -411,7 +412,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummar
                      try {
                         await useStore.getState().deleteRow(o.row);
                         import("../api").then((api) => api.refreshSession(useStore.getState().session!.session_id));
-                     } catch (err) {}
+                     } catch { /* outlier delete is best-effort */ }
                   }}
                 >
                   <span className="opacity-50 hover:opacity-100 mr-1">🗑</span>
@@ -591,10 +592,15 @@ function ScatterView({
   const scatterRef = useRef<PlotCaptureHandle | null>(null);
 
   useEffect(() => {
-    if (!xCol || !yCol) { setData(null); return; }
+    if (!xCol || !yCol) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clear stale fetch result
+      setData((d) => (d === null ? d : null));
+      return;
+    }
     const key = `${xCol}|${yCol}|${color}|${shape}`;
     if (key === prevKey.current) return;
     prevKey.current = key;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- canonical async-fetch reset
     setLoading(true); setError(null);
     api.post("/api/charts/scatter", {
       session_id: sessionId, x: xCol, y: yCol,
@@ -876,61 +882,28 @@ export default function DescriptivePanel() {
     setScatterPlotWidth(next);
   }, []);
 
-  const onScatterPlotResizeUp = useCallback(() => {
-    const d = scatterPlotResizeRef.current;
-    if (!d) return;
-    scatterPlotResizeRef.current = null;
-    document.removeEventListener("pointermove", onScatterPlotResizeMove);
-    document.removeEventListener("pointerup", onScatterPlotResizeUp);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    try {
-      localStorage.setItem("uStat.scatterPlotW", String(scatterPlotWidth));
-    } catch {}
-  }, [onScatterPlotResizeMove, scatterPlotWidth]);
-
   const startScatterPlotResize = (e: React.PointerEvent) => {
     e.preventDefault();
     scatterPlotResizeRef.current = { startX: e.clientX, startW: scatterPlotWidth };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
+    const onUp = () => {
+      const d = scatterPlotResizeRef.current;
+      scatterPlotResizeRef.current = null;
+      document.removeEventListener("pointermove", onScatterPlotResizeMove);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      if (d) {
+        try {
+          localStorage.setItem("uStat.scatterPlotW", String(scatterPlotWidth));
+        } catch { /* localStorage unavailable in private mode */ }
+      }
+    };
     document.addEventListener("pointermove", onScatterPlotResizeMove);
-    document.addEventListener("pointerup", onScatterPlotResizeUp);
+    document.addEventListener("pointerup", onUp, { once: true });
   };
 
   const resetScatterPlotWidth = () => setScatterPlotWidth(920);
-
-  // For Scatter view: width of the left panel containing the 4 distribution plots (user wants them on the LEFT of the scatter)
-  const [scatterLeftWidth, setScatterLeftWidth] = useState(() => {
-    if (typeof window !== "undefined") {
-      const v = parseInt(localStorage.getItem("uStat.scatterLeftW") || "380", 10);
-      return Math.max(280, Math.min(700, v || 380));
-    }
-    return 380;
-  });
-
-  const scatterLeftResizeRef = useRef<{ startX: number; startW: number } | null>(null);
-
-  const onScatterLeftResizeMove = useCallback((e: PointerEvent) => {
-    const d = scatterLeftResizeRef.current;
-    if (!d) return;
-    const dx = e.clientX - d.startX;
-    const next = Math.max(280, Math.min(700, d.startW + dx));
-    setScatterLeftWidth(next);
-  }, []);
-
-  const onScatterLeftResizeUp = useCallback(() => {
-    const d = scatterLeftResizeRef.current;
-    if (!d) return;
-    scatterLeftResizeRef.current = null;
-    document.removeEventListener("pointermove", onScatterLeftResizeMove);
-    document.removeEventListener("pointerup", onScatterLeftResizeUp);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    try {
-      localStorage.setItem("uStat.scatterLeftW", String(scatterLeftWidth));
-    } catch {}
-  }, [onScatterLeftResizeMove, scatterLeftWidth]);
 
   // 2D resizable container for the main Distribution plot (user wants red drag lines on right + bottom)
   const [distPlotW, setDistPlotW] = useState(() => {
@@ -964,21 +937,6 @@ export default function DescriptivePanel() {
     }
   }, []);
 
-  const onDistResizeUp = useCallback(() => {
-    const d = distResizeRef.current;
-    if (!d) return;
-    distResizeRef.current = null;
-    document.removeEventListener("pointermove", onDistResizeMove);
-    document.removeEventListener("pointerup", onDistResizeUp);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-    // persist
-    try {
-      localStorage.setItem("uStat.distPlotW", String(distPlotW));
-      localStorage.setItem("uStat.distPlotH", String(distPlotH));
-    } catch {}
-  }, [onDistResizeMove, distPlotW, distPlotH]);
-
   const startDistResize = (mode: "right" | "bottom") => (e: React.PointerEvent) => {
     e.preventDefault();
     distResizeRef.current = {
@@ -990,8 +948,18 @@ export default function DescriptivePanel() {
     };
     document.body.style.cursor = mode === "right" ? "col-resize" : "row-resize";
     document.body.style.userSelect = "none";
+    const onUp = () => {
+      distResizeRef.current = null;
+      document.removeEventListener("pointermove", onDistResizeMove);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      try {
+        localStorage.setItem("uStat.distPlotW", String(distPlotW));
+        localStorage.setItem("uStat.distPlotH", String(distPlotH));
+      } catch { /* localStorage unavailable in private mode */ }
+    };
     document.addEventListener("pointermove", onDistResizeMove);
-    document.addEventListener("pointerup", onDistResizeUp);
+    document.addEventListener("pointerup", onUp, { once: true });
   };
 
   useEffect(() => {
@@ -1025,11 +993,15 @@ export default function DescriptivePanel() {
         if (rawSummary && rawSummary.type === "categorical" && rawSummary.categories) {
           const colMeta = session.columns.find((c) => c.name === colName);
           const vLabels = colMeta?.value_labels ?? {};
-
-          rawSummary.categories = rawSummary.categories.map((c) => ({
-            ...c,
-            value: vLabels[String(c.value)] ?? c.value,
-          }));
+          const relabeled: ColumnSummary = {
+            ...rawSummary,
+            categories: rawSummary.categories.map((c) => ({
+              ...c,
+              value: vLabels[String(c.value)] ?? c.value,
+            })),
+          };
+          setSummary(relabeled);
+          return;
         }
         setSummary(rawSummary);
       })
@@ -1038,8 +1010,10 @@ export default function DescriptivePanel() {
 
   useEffect(() => {
     if (session && !selected && session.columns.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- bootstrap initial column summary
       loadSummary(session.columns[0].name);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
 
   if (!session) return null;

@@ -5,7 +5,7 @@ import { runArima, runDecompose, runStationarity } from "../api";
 import { Tip } from "./Tip";
 import TitledPlot from "./TitledPlot";
 import { fmtP } from "../lib/format";
-import type { PlotData, PlotCaptureHandle } from "../lib/plotTypes";
+import type { PlotCaptureHandle } from "../lib/plotTypes";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
 

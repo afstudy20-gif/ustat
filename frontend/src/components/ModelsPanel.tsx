@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { useStore } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti, runOrdinal } from "../api";
@@ -143,8 +143,8 @@ export default function ModelsPanel() {
   const [stratifyCol, setStratifyCol] = usePersistedPanelState<string>("models", "stratifyCol", "");
   const cachedModels = useStore((s) => s.panelCache.models);
   const setCacheModels = useStore((s) => s.setPanelCache);
-  const [result, _setResultRaw] = useState<any>(cachedModels?.result ?? null);
-  const setResult = (r: any) => { _setResultRaw(r); setCacheModels("models", { result: r }); };
+  const [result, _setResultRaw] = useState<ModelResult | null>(cachedModels?.result ?? null);
+  const setResult = (r: ModelResult | null) => { _setResultRaw(r); setCacheModels("models", { result: r }); };
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [imputation, setImputation] = useState<ImputationStrategy>("listwise");
@@ -159,7 +159,7 @@ export default function ModelsPanel() {
   const run = async () => {
     setLoading(true); setError(null); setResult(null); setSelectedCoefIdx(null);
     try {
-      let res: any;
+      let res: { data: ModelResult };
       const sf = buildScaleFactors();
       const interactions = glmInteractions.length > 0 ? glmInteractions : undefined;
       if (model === "linear") res = await runLinear({ session_id: sid, outcome, predictors, imputation, robust_se: robustSE, interactions });
@@ -180,9 +180,10 @@ export default function ModelsPanel() {
       }
       else res = await runCox({ session_id: sid, duration_col: durationCol, event_col: eventCol, predictors, imputation, interactions });
       setResult(res.data);
-    } catch (e: any) {
-      const detail = e.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : (e.message ?? "Unknown error"));
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      const fallback = e instanceof Error ? e.message : String(e);
+      setError(typeof detail === "string" ? detail : (fallback ?? "Unknown error"));
     } finally { setLoading(false); }
   };
 
@@ -649,7 +650,7 @@ export default function ModelsPanel() {
           ) : (
           <div
             className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
-            style={{ ["--right-col" as any]: `${rightColW}px` }}
+            style={{ ["--right-col" as string]: `${rightColW}px` } as CSSProperties}
           >
             {/* Draggable column divider — desktop only */}
             <div
@@ -674,7 +675,9 @@ export default function ModelsPanel() {
                   result.aic != null            && ["AIC",       result.aic?.toFixed(2),            "Akaike Information Criterion — lower is better. Used to compare models: the model with the lowest AIC balances fit and complexity best."],
                   result.bic != null            && ["BIC",       result.bic?.toFixed(2),            "Bayesian Information Criterion — similar to AIC but applies a larger penalty for extra parameters. Prefer the model with the lower BIC."],
                   result.concordance != null    && ["C-index",   result.concordance?.toFixed(4),    "Concordance index for Cox models — equivalent to AUC. Probability that the model ranks a higher-risk patient above a lower-risk patient."],
-                ].filter(Boolean).map(([k, v, tip]: any) => (
+                ].filter(Boolean).map((entry) => {
+                  const [k, v, tip] = entry as [string, string | number, string?];
+                  return (
                   <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
                     <p className="text-xs text-gray-400 flex items-center">
                       {k}
@@ -682,7 +685,8 @@ export default function ModelsPanel() {
                     </p>
                     <p className="text-gray-900 font-semibold">{v}</p>
                   </div>
-                ))}
+                  );
+                })}
               </div>
               {/* Missing-data exclusion notice */}
               {result.n_excluded != null && result.n_excluded > 0 && (
@@ -775,7 +779,7 @@ export default function ModelsPanel() {
 
             {/* Forest plot — logistic or cox */}
             {result.coefficients && (model === "logistic" || model === "firth" || model === "cox" || model === "ordinal") &&
-              result.coefficients.filter((c: any) => c.variable !== "const").length > 0 && (
+              result.coefficients.filter((c) => c.variable !== "const").length > 0 && (
               <div className="panel xl:col-start-1">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot

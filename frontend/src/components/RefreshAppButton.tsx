@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- helper co-located with the button that uses it */
 import { useState } from "react";
 import { RefreshCw } from "lucide-react";
 

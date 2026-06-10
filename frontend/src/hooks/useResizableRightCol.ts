@@ -62,22 +62,20 @@ export function useResizableRightCol(
     setW(next);
   }, [min, max, side]);
 
-  const onUp = useCallback(() => {
-    dragRef.current = null;
-    document.removeEventListener("pointermove", onMove);
-    document.removeEventListener("pointerup", onUp);
-    document.body.style.cursor = "";
-    document.body.style.userSelect = "";
-  }, [onMove]);
-
   const onDragStart = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
     dragRef.current = { startX: e.clientX, startW: w };
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
+    const onUp = () => {
+      dragRef.current = null;
+      document.removeEventListener("pointermove", onMove);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
     document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-  }, [w, onMove, onUp]);
+    document.addEventListener("pointerup", onUp, { once: true });
+  }, [w, onMove]);
 
   // Double-click resets to default width.
   const onReset = useCallback(() => setW(initial), [initial]);

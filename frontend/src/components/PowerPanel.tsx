@@ -4,6 +4,23 @@ import { runPower, parseArticle } from "../api";
 import { useStore, PALETTES } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { Tip } from "./Tip";
+import type { PlotCaptureHandle, PlotData, PlotLayout } from "../lib/plotTypes";
+
+// Article-parser finding shape: only the fields this panel reads from it.
+interface ArticleFinding {
+  type?: string;
+  test_label?: string;
+  power_test?: TestId;
+  effect_size?: number;
+  effect_label?: string;
+  statistic?: string;
+  p?: number;
+  n_approx?: number;
+  k_groups?: number;
+  p1?: number;
+  p2?: number;
+  source?: string;
+}
 
 const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.indigo;
 
@@ -123,7 +140,7 @@ function plainEnglish(
 
 export default function PowerPanel() {
   const showGrid = useStore((s) => s.showGrid);
-  const powerRef = useRef<any>(null);
+  const powerRef = useRef<PlotCaptureHandle | null>(null);
 
   const [test,       setTest]       = usePersistedPanelState<TestId>("power_sel", "test", "t_two");
   const [solveFor,   setSolveFor]   = usePersistedPanelState<SolveFor>("power_sel", "solveFor", "n");
@@ -145,7 +162,7 @@ export default function PowerPanel() {
   const [error,   setError]   = useState<string | null>(null);
 
   // Article import state
-  const [articleFindings, setArticleFindings] = useState<any[] | null>(null);
+  const [articleFindings, setArticleFindings] = useState<ArticleFinding[] | null>(null);
   const [articleLoading, setArticleLoading] = useState(false);
   const [articleError, setArticleError] = useState<string | null>(null);
   const [articleFile, setArticleFile] = useState<string | null>(null);
@@ -162,11 +179,14 @@ export default function PowerPanel() {
         const preview = res.data.text_preview ? `\nPreview: "${res.data.text_preview.slice(0, 200)}…"` : "";
         setArticleError(`No statistical results found (${res.data.n_chars} chars extracted).${preview}`);
       }
-    } catch (e: any) { setArticleError(e?.response?.data?.detail ?? "Failed to parse article"); }
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setArticleError(detail ?? "Failed to parse article");
+    }
     finally { setArticleLoading(false); }
   };
 
-  const applyFinding = (f: any) => {
+  const applyFinding = (f: ArticleFinding) => {
     if (f.power_test) setTest(f.power_test);
     if (f.effect_size != null) setEffectSize(String(f.effect_size));
     if (f.n_approx) setN(String(f.n_approx));
@@ -210,9 +230,10 @@ export default function PowerPanel() {
         else if (solveFor === "power") setPower(res.data.result.toFixed(4));
         else                           setEffectSize(res.data.result.toFixed(4));
       }
-    } catch (e: any) {
-      const msg = e.response?.data?.detail;
-      setError(typeof msg === "string" ? msg : (e.message ?? "Calculation failed"));
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      const fallback = e instanceof Error ? e.message : String(e);
+      setError(typeof msg === "string" ? msg : (fallback ?? "Calculation failed"));
     } finally { setLoading(false); }
   };
 
@@ -329,7 +350,7 @@ export default function PowerPanel() {
               <div className="space-y-2">
                 <p className="text-xs text-gray-500 font-medium">{articleFindings.length} statistical results extracted — click to use:</p>
                 <div className="max-h-64 overflow-y-auto space-y-1.5">
-                  {articleFindings.map((f: any, i: number) => (
+                  {articleFindings.map((f, i: number) => (
                     <button key={i} onClick={() => applyFinding(f)}
                       className="w-full text-left bg-white border border-gray-200 rounded-lg px-3 py-2 hover:border-indigo-300 hover:bg-indigo-50 transition-colors group">
                       <div className="flex items-center justify-between">
@@ -672,7 +693,7 @@ export default function PowerPanel() {
               <TitledPlot
                 plotRefOut={powerRef}
                 storageKey="power:curve"
-                data={plotTraces as any}
+                data={plotTraces as PlotData[]}
                 layout={{
                   ...BASE_LAYOUT,
                   autosize: true, height: 320,
@@ -684,7 +705,7 @@ export default function PowerPanel() {
                     x0: currentN, x1: currentN, y0: 0, y1: 1,
                     line: { color: _pal()[0], width: 1.5, dash: "dot" },
                   }] : [],
-                } as any}
+                } as PlotLayout}
                 config={{ responsive: true, displaylogo: false, displayModeBar: false }}
                 defaultTitle=""
                 defaultSubtitle=""

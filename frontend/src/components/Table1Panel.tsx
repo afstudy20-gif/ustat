@@ -318,7 +318,8 @@ function Table1PanelBody({ session }: { session: Session }) {
       const current = prev[col] ?? base;
       const next = current === "numeric" ? "categorical" : "numeric";
       if (next === base) {
-        const { [col]: _, ...rest } = prev;
+        const rest = { ...prev };
+        delete rest[col];
         return rest;
       }
       return { ...prev, [col]: next };
@@ -329,7 +330,7 @@ function Table1PanelBody({ session }: { session: Session }) {
   const toggle = (col: string) =>
     setSelected((prev) => {
       const s = new Set(prev);
-      s.has(col) ? s.delete(col) : s.add(col);
+      if (s.has(col)) s.delete(col); else s.add(col);
       return s;
     });
 
@@ -441,8 +442,10 @@ function Table1PanelBody({ session }: { session: Session }) {
       }
 
       setResult(rawResult);
-    } catch (e: any) {
-      setError(e.response?.data?.detail ?? e.message ?? "Error running Table 1");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(detail ?? msg ?? "Error running Table 1");
     } finally { setLoading(false); }
   };
 
@@ -456,9 +459,9 @@ function Table1PanelBody({ session }: { session: Session }) {
       ...(showSMD ? ["SMD"] : []),
       "Normality test"];
     const rows: string[][] = [];
-    result.rows.forEach((row: any) => {
+    result.rows.forEach((row) => {
       if (row.type === "numeric") {
-        (row.stat_rows ?? []).forEach((sr: any, i: number) => {
+        (row.stat_rows ?? []).forEach((sr, i: number) => {
           rows.push([
             i === 0 ? row.variable : "",
             sr.label, sr.overall,
@@ -473,7 +476,7 @@ function Table1PanelBody({ session }: { session: Session }) {
         rows.push([row.variable, "n (%)", `n=${row.overall_n}`,
           ...gl.map(() => ""), row.p_value ?? "", row.test ?? "",
           ...(showSMD ? [row.smd != null ? row.smd.toFixed(3) : ""] : []), ""]);
-        (row.sub_rows ?? []).forEach((sr: any) => {
+        (row.sub_rows ?? []).forEach((sr) => {
           rows.push([`  ${sr.category}`, "", sr.overall,
             ...gl.map((g: string) => sr.group_stats[g] ?? ""), "", "",
             ...(showSMD ? [""] : []), ""]);
@@ -974,8 +977,15 @@ function Table1PanelBody({ session }: { session: Session }) {
 // Journal Format Section (AMA style)
 // ═════════════════════════════════════════════════════════════════════════════
 
-function JournalFormatSection({ result }: { result: any }) {
-  const [journalData, setJournalData] = useState<any>(null);
+interface JournalData {
+  html?: string;
+  validation?: Record<string, string> & { status?: string };
+  abbreviations?: Record<string, string>;
+  footnotes?: string[];
+}
+
+function JournalFormatSection({ result }: { result: T1Result }) {
+  const [journalData, setJournalData] = useState<JournalData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [boldP, setBoldP] = useState(true);
@@ -988,8 +998,9 @@ function JournalFormatSection({ result }: { result: any }) {
         options: { bold_significant_p: boldP, table_number: 1 },
       });
       setJournalData(res.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.detail ?? "Format failed");
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setError(detail ?? "Format failed");
     } finally {
       setLoading(false);
     }
@@ -1009,8 +1020,10 @@ function JournalFormatSection({ result }: { result: any }) {
       a.download = `Table_1_AMA.${fmt}`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail ?? e?.message ?? "Unknown error";
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        ?? (e instanceof Error ? e.message : String(e))
+        ?? "Unknown error";
       setError(`${fmt.toUpperCase()} export failed: ${detail}`);
       console.error("Journal export failed:", e);
     }
