@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore, isNumericKind, isCategoricalKind } from "../store";
+import { useStore, isNumericKind, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
@@ -7,10 +7,14 @@ import TitledPlot from "./TitledPlot";
 
 export default function ChartsPanel() {
   const session  = useStore((s) => s.session);
+  if (!session) return null;
+  return <ChartsPanelBody session={session} />;
+}
+
+function ChartsPanelBody({ session }: { session: Session }) {
   const layout   = usePlotLayout();
   const pal      = usePalette();
   const td       = useTraceDefaults();
-  if (!session) return null;
 
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);

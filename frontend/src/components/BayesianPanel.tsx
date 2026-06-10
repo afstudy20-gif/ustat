@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore, isNumericKind, isCategoricalKind } from "../store";
+import { useStore, isNumericKind, isCategoricalKind, type Session } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runBayesian } from "../api";
 import TitledPlot from "./TitledPlot";
@@ -9,12 +9,16 @@ type AnalysisType = "ttest_one" | "ttest_ind" | "ttest_paired" | "correlation" |
 
 export default function BayesianPanel() {
   const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <BayesianPanelBody session={session} />;
+}
+
+function BayesianPanelBody({ session }: { session: Session }) {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
   const plotRef = useRef<any>(null);
 
-  if (!session) return null;
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 

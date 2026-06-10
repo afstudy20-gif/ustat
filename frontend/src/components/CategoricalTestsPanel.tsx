@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore, isNumericKind, isCategoricalKind } from "../store";
+import { useStore, isNumericKind, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runBinomial, runOneProportion, runTwoProportions, runMcNemar, runCochranQ, runMantelHaenszel, runCochranArmitage } from "../api";
 import { fmtP } from "../lib/format";
@@ -96,6 +96,10 @@ function ResultCard({ result }: { result: any }) {
 export default function CategoricalTestsPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
+  return <CategoricalTestsPanelBody session={session} />;
+}
+
+function CategoricalTestsPanelBody({ session }: { session: Session }) {
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const binCols = [...catCols, ...numCols]; // binary cols could be either

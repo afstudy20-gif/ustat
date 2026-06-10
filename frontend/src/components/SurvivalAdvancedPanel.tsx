@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
-import { useStore, analysisCols, isCategoricalKind } from "../store";
+import { useStore, analysisCols, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runFineGray, runEValue, runLandmark, runKM, runCox, runRMST, runRecurrentLWYY, runCoxHorizons, runCoxUniMulti, runCoxModelSpecs } from "../api";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
@@ -572,6 +572,11 @@ function ResultBlock({ result }: { result: any }) {
 
 export default function SurvivalAdvancedPanel() {
   const session = useStore((s) => s.session);
+  if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
+  return <SurvivalAdvancedPanelBody session={session} />;
+}
+
+function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const columns = session?.columns ?? [];
   // Columns offered in variable pickers: hide any flagged "exclude from
   // analysis". The full `columns` list is kept for display lookups of
@@ -850,8 +855,6 @@ export default function SurvivalAdvancedPanel() {
   const [lmResult, setLmResult] = useState<any>(null);
   const [lmLoading, setLmLoading] = useState(false);
   const [lmError, setLmError] = useState<string | null>(null);
-
-  if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
 
   // ── Fine-Gray handler
   const handleFineGray = async () => {

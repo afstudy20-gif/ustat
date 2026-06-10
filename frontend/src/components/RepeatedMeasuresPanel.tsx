@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore, isNumericKind } from "../store";
+import { useStore, isNumericKind, type Session } from "../store";
 import { runPairedTTest, runWilcoxonSR, runFriedman, runRMAnova, runMixedAnova } from "../api";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
@@ -200,7 +200,10 @@ function ResultCard({ result }: { result: any }) {
 export default function RepeatedMeasuresPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
+  return <RepeatedMeasuresPanelBody session={session} />;
+}
 
+function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
   const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
   const allCols = session.columns.map((c) => c.name);
 

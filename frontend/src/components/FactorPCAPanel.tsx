@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useStore, isNumericKind } from "../store";
+import { useStore, isNumericKind, type Session } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runFactorPCA } from "../api";
 import TitledPlot from "./TitledPlot";
@@ -10,13 +10,17 @@ type ActiveResultTab = "suitability" | "loadings" | "scree" | "biplot";
 
 export default function FactorPCAPanel() {
   const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <FactorPCAPanelBody session={session} />;
+}
+
+function FactorPCAPanelBody({ session }: { session: Session }) {
   const showGrid = useStore((s) => s.showGrid);
   const baseLayout = usePlotLayout();
   const pal = usePalette();
   const screeRef = useRef<any>(null);
   const biplotRef = useRef<any>(null);
 
-  if (!session) return null;
   const numCols = session.columns.filter((c) => isNumericKind(c.kind)).map((c) => c.name);
 
   // States

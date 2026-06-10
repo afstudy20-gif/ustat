@@ -1,5 +1,5 @@
 import { useState, useEffect, Fragment } from "react";
-import { useStore, type ColMeta } from "../store";
+import { useStore, type ColMeta, type Session } from "../store";
 import { saveMetadata, getUniqueValues } from "../api";
 
 const ROLES = ["", "outcome", "predictor", "covariate", "id", "time", "event"] as const;
@@ -23,8 +23,12 @@ function autoDetectRole(name: string): string {
 
 export default function DataDictionaryPanel() {
   const session = useStore((s) => s.session);
-  const setSession = useStore((s) => s.setSession);
   if (!session) return null;
+  return <DataDictionaryPanelBody session={session} />;
+}
+
+function DataDictionaryPanelBody({ session }: { session: Session }) {
+  const setSession = useStore((s) => s.setSession);
 
   const [meta, setMeta] = useState<Record<string, Partial<ColMeta>>>({});
   const [saving, setSaving] = useState(false);

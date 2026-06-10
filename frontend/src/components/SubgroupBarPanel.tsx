@@ -1,17 +1,20 @@
 import { useState, useRef, useEffect } from "react";
 import Plot from "../PlotComponent";
-import { useStore, isCategoricalKind } from "../store";
+import { useStore, isCategoricalKind, type Session } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runSubgroupBar, getUniqueValues } from "../api";
 import PlotExporter from "./PlotExporter";
 
 export default function SubgroupBarPanel() {
   const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <SubgroupBarPanelBody session={session} />;
+}
+
+function SubgroupBarPanelBody({ session }: { session: Session }) {
   const layout = usePlotLayout();
   const pal = usePalette();
   const showGrid = useStore((s) => s.showGrid);
-
-  if (!session) return null;
 
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind)).map((c) => c.name);
   const allCols = session.columns.map((c) => c.name);
@@ -835,7 +838,7 @@ function buildPlotlyTraces(
     barPattern = "none"
   } = options;
 
-  let tracesData = [...plotData.traces];
+  const tracesData = [...plotData.traces];
 
   // === 1. Bar Sorting by Value ===
   if (sortBars !== "none") {

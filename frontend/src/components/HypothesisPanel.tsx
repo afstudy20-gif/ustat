@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useStore, isNumericKind, isCategoricalKind } from "../store";
+import { useStore, isNumericKind, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runTTest, runChiSquare, runAnova, runMannWhitney, runFisher, runKruskal, runAncova, runTwoWayAnova, runJonckheereTerpstra, runMancova } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -264,7 +264,10 @@ function ResultCard({ result }: { result: any }) {
 export default function HypothesisPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
+  return <HypothesisPanelBody session={session} />;
+}
 
+function HypothesisPanelBody({ session }: { session: Session }) {
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const catCols = session.columns.filter((c) => isCategoricalKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
 

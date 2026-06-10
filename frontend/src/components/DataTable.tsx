@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect, useLayoutEffect } from "react";
 import type { CSSProperties, RefObject } from "react";
 import { BookOpen, X } from "lucide-react";
 import { useStore } from "../store";
-import type { ColMeta } from "../store";
+import type { ColMeta, Session } from "../store";
 import api from "../api";
 import { renameColumn } from "../api";
 import DataDictionaryPanel from "./DataDictionaryPanel";
@@ -119,7 +119,12 @@ function useViewportContextMenuStyle(
 }
 
 export default function DataTable() {
-  const session          = useStore((s) => s.session);
+  const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <DataTableBody session={session} />;
+}
+
+function DataTableBody({ session }: { session: Session }) {
   const updateColumnKind = useStore((s) => s.updateColumnKind);
   const updatePreviewCell = useStore((s) => s.updatePreviewCell);
   const reorderColumns   = useStore((s) => s.reorderColumns);
@@ -223,7 +228,6 @@ export default function DataTable() {
     setSelAnchor(null); setSelFocus(null);
   }, [session?.session_id]);
 
-  if (!session) return null;
   const { preview, columns } = session;
 
   type IndexedRow = Record<string, unknown> & { _idx: number };

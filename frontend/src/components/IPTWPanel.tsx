@@ -8,7 +8,7 @@
  * 4. Outcome analysis (Weighted GLM or Weighted Cox PH)
  */
 import { useState, useRef, useMemo } from "react";
-import { useStore, analysisCols } from "../store";
+import { useStore, analysisCols, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runIPTW, getSessionInfo } from "../api";
 import { Tip } from "./Tip";
@@ -193,12 +193,16 @@ function PSOverlapPlot({
 
 export default function IPTWPanel() {
   const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <IPTWPanelBody session={session} />;
+}
+
+function IPTWPanelBody({ session }: { session: Session }) {
   const showGrid = useStore((s) => s.showGrid);
   const setSession = useStore((s) => s.setSession);
   const setOriginalSession = useStore((s) => s.setOriginalSession);
   const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
     useResizableRightCol("IPTWPanel.result", 480);
-  if (!session) return null;
 
   const allCols = analysisCols(session.columns).map((c) => c.name);
 

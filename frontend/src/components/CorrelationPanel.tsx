@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import Plot from "../PlotComponent";
 import TitledPlot from "./TitledPlot";
 import PlotExporter from "./PlotExporter";
-import { useStore, PALETTES, isNumericKind } from "../store";
+import { useStore, PALETTES, isNumericKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import ResultExporter from "./ResultExporter";
 import ThreeCol from "./ThreeCol";
@@ -1163,7 +1163,10 @@ function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[]
 export default function CorrelationPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
+  return <CorrelationPanelBody session={session} />;
+}
 
+function CorrelationPanelBody({ session }: { session: Session }) {
   const numColumns = session.columns
     .filter((c) => isNumericKind(c.kind) && !c.analysis_excluded)
     .map((c) => c.name);

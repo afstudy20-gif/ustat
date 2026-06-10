@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
-import { useStore, PALETTES, isNumericKind } from "../store";
+import { useStore, PALETTES, isNumericKind, type Session } from "../store";
 import { runROC, runROCCompare, runROCMultiCompare, runROCCombined } from "../api";
 import { Tip, InfoBanner } from "./Tip";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
@@ -158,8 +158,12 @@ function StyleRow({
 
 export default function ROCPanel() {
   const session = useStore((s) => s.session);
-  const showGrid = useStore((s) => s.showGrid);
   if (!session) return null;
+  return <ROCPanelBody session={session} />;
+}
+
+function ROCPanelBody({ session }: { session: Session }) {
+  const showGrid = useStore((s) => s.showGrid);
 
   const numCols = session.columns.filter((c) => isNumericKind(c.kind) && !c.analysis_excluded).map((c) => c.name);
   const allCols = session.columns.filter((c) => !c.analysis_excluded).map((c) => c.name);

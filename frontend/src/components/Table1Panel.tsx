@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useStore } from "../store";
+import { useStore, type Session } from "../store";
 import api from "../api";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
@@ -156,6 +156,11 @@ function StatsSelector({
 
 export default function Table1Panel() {
   const session = useStore((s) => s.session);
+  if (!session) return null;
+  return <Table1PanelBody session={session} />;
+}
+
+function Table1PanelBody({ session }: { session: Session }) {
   const result = useStore((s) => s.table1Result) as T1Result | null;
   const setResult = useStore((s) => s.setTable1Result);
   const clearTable1 = useStore((s) => s.clearTable1);
@@ -178,7 +183,6 @@ export default function Table1Panel() {
       }
     | undefined;
   const setPanelCache = useStore((s) => s.setPanelCache);
-  if (!session) return null;
 
   // Columns offered as Table 1 variables / group — drop those flagged
   // "exclude from analysis" (e.g. NAME, row-id) in the data tab.
