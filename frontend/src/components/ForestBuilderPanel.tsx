@@ -410,48 +410,77 @@ export default function ForestBuilderPanel() {
 
   // Value-column annotations (right side)
   const showCols = layout.showValueColumns;
-  const forestRight = showCols ? 0.55 : 0.95;
-  const TX1 = 0.58;   // HR (95% CI), p
-  const TX2 = 0.86;   // extra
+  // The value column ("HR (CI), p" + optional extra) is a FIXED-PX gutter in
+  // the right margin, sized to its longest content — so the left-anchored text
+  // never runs off the SVG edge on a narrow embedded plot (it would clip
+  // 'p=0.04' → 'p=0.0' otherwise). Headers/markers stay in the plot area.
+  const valText = (r: ForestRowInput) =>
+    `${fmtCI(r)}${r.p != null ? `, ${fmtPubP(r.p)}` : ""}`;
+  const maxValChars = Math.max(
+    (layout.rightHeader ?? "HR (95% CI)").length,
+    ...validRows.map((r) => valText(r).length),
+    10,
+  );
+  const maxExtraChars = (showCols && layout.showExtra)
+    ? Math.max(0, ...validRows.map((r) => (r.extra ?? "").length))
+    : 0;
+  const rightGutter = showCols
+    ? Math.min(440, Math.round((maxValChars + (maxExtraChars ? maxExtraChars + 2 : 0)) * 6.6) + 34)
+    : 24;
+  // Plot area fills the paper; the value column lives in the right margin
+  // gutter (TX1 just past x=1), so markers use the full width either way.
+  const forestRight = 1.0;
+  const TX1 = 1.02;   // HR (95% CI), p — just past the plot's right edge, in the gutter
+  const TX2_PX = Math.round((maxValChars + 2) * 6.6);  // extra column offset (px) from TX1
 
   const annotations: PlotData[] = [];
-  // Left column header (e.g. "Time horizon") — sits above the row labels,
-  // left-aligned into the y-axis label margin via a pixel shift.
+  // Column headers live in the TOP MARGIN (yref paper, pixel yshift above the
+  // plot area). The top margin is sized below to fit them — a fractional
+  // y like 1.04 scales with plot height and gets clipped on short plots.
+  const showHeaders = !!layout.leftHeader || showCols;
   if (layout.leftHeader) {
     annotations.push({
-      xref: "paper", yref: "paper", x: 0, y: 1.04,
-      xanchor: "left", yanchor: "bottom", xshift: -(labelMargin - 10),
+      xref: "paper", yref: "paper", x: 0, y: 1,
+      xanchor: "left", yanchor: "bottom", xshift: -(labelMargin - 10), yshift: 14,
       text: `<b>${layout.leftHeader}</b>`, showarrow: false,
-      font: { size: 12, color: "#1f2937" },
+      font: { size: 12.5, color: "#1f2937" },
     });
   }
+  // Row labels: drawn as annotations (NOT y-axis ticks) so they LEFT-align at
+  // the figure's left edge like a publication forest plot — Plotly tick labels
+  // can only right-align against the axis.
+  validRows.forEach((r, i) => {
+    const c = rowColor(r);
+    const sig = layout.colorBy === "significance" && c === layout.sigColor;
+    annotations.push({
+      xref: "paper", yref: "y", x: 0, y: yIdx[i],
+      xanchor: "left", yanchor: "middle", xshift: -(labelMargin - 10),
+      text: r.label ?? "", showarrow: false,
+      font: { size: 12, color: sig ? c : "#374151" },
+    });
+  });
   if (showCols) {
     annotations.push({
-      xref: "paper", yref: "paper", x: TX1, y: 1.04,
-      xanchor: "left", yanchor: "bottom",
+      xref: "paper", yref: "paper", x: TX1, y: 1,
+      xanchor: "left", yanchor: "bottom", yshift: 14,
       text: `<b>${layout.rightHeader || "HR (95% CI)"}</b>`, showarrow: false,
-      font: { size: 11, color: "#1f2937" },
+      font: { size: 12.5, color: "#1f2937" },
     });
-    if (layout.showExtra && validRows.some((r) => r.extra)) {
-      annotations.push({
-        xref: "paper", yref: "paper", x: TX2, y: 1.04,
-        xanchor: "left", yanchor: "bottom",
-        text: "", showarrow: false,
-      });
-    }
     validRows.forEach((r, i) => {
       const c = rowColor(r);
+      const sig = layout.colorBy === "significance" && c === layout.sigColor;
+      const v = valText(r);
       const yi = yIdx[i];
       annotations.push({
         xref: "paper", yref: "y", x: TX1, y: yi,
         xanchor: "left", yanchor: "middle",
-        text: `${fmtCI(r)}${r.p != null ? `, ${fmtPubP(r.p)}` : ""}`,
+        text: sig ? `<b>${v}</b>` : v,
         showarrow: false,
         font: { size: 11, color: c },
       });
       if (layout.showExtra && r.extra) {
         annotations.push({
-          xref: "paper", yref: "y", x: TX2, y: yi,
+          xref: "paper", yref: "y", x: TX1, y: yi, xshift: TX2_PX,
           xanchor: "left", yanchor: "middle",
           text: r.extra,
           showarrow: false,
@@ -901,7 +930,11 @@ export default function ForestBuilderPanel() {
                 plot_bgcolor: "#ffffff",
                 font: { color: "#374151", size: 12 },
                 autosize: true,
-                margin: { t: layout.customTitle ? 60 : 30, r: 24, b: 60, l: labelMargin },
+                // Extra top room when column headers are shown — they render
+                // in the margin (yref paper + yshift), not the plot area.
+                // Right margin = the value-column gutter so 'HR (CI), p' text
+                // never clips off the SVG edge.
+                margin: { t: (layout.customTitle ? 60 : 30) + (showHeaders ? 30 : 0), r: rightGutter, b: 60, l: labelMargin },
                 title: layout.customTitle
                   ? { text: titleHtml, font: { size: 13, color: "#1f2937" }, x: 0.5, xanchor: "center" }
                   : undefined,
@@ -923,21 +956,14 @@ export default function ForestBuilderPanel() {
                     : {}),
                 },
                 yaxis: {
-                  tickvals: yIdx,
-                  // Color each row label to match its marker / CI / right-text
-                  // so a significant row reads consistently across the whole
-                  // line. Plotly's tickfont.color is a single value, so embed
-                  // a per-tick HTML span instead. Default rows stay gray.
-                  ticktext: validRows.map((r, i) => {
-                    const c = colors[i];
-                    const label = r.label ?? "";
-                    if (layout.colorBy === "all_one" || c === layout.nonSigColor) return label;
-                    return `<span style="color:${c}">${label}</span>`;
-                  }),
+                  // Labels are drawn as left-aligned annotations in the left
+                  // margin (see above) — native tick labels would right-align
+                  // against the axis, unlike a publication forest plot.
+                  showticklabels: false,
+                  ticks: "",
                   range: [-0.6, n - 0.4],
                   gridcolor: "transparent",
                   zeroline: false,
-                  tickfont: { size: 12, color: "#374151" },
                 },
                 shapes: [
                   {
