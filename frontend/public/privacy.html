@@ -51,8 +51,23 @@
     <li>If the server is restarted, all in-memory data is lost — there is no persistent storage.</li>
   </ul>
   <p>
-    The browser-side React app uses <code>zustand</code> for local UI state. Closing the tab clears that state. Nothing is saved to <code>localStorage</code> or cookies for your data.
+    The browser-side React app uses <code>zustand</code> for transient UI state. For your
+    convenience it also keeps a <b>local autosave</b> so you can resume after a reload or crash:
   </p>
+  <ul>
+    <li>A snapshot of your session — <b>including the uploaded data</b> — is written to your
+      browser's own <b>IndexedDB</b> (the <em>Recent sessions</em> list on the home screen). Only
+      the most recent sessions are kept, up to a small size limit; older ones are evicted
+      automatically.</li>
+    <li>A <b>service worker</b> may cache API responses and the app shell so the tool loads quickly
+      and works offline.</li>
+    <li>This storage lives <b>only on your device</b> — it is never uploaded anywhere beyond the
+      server processing already described above, and we cannot see it.</li>
+    <li>It is <b>not</b> cleared merely by closing the tab. To remove it, delete entries from the
+      <em>Recent sessions</em> list, or clear this site's data in your browser settings (which also
+      unregisters the service-worker cache). A private/incognito window leaves nothing behind.</li>
+  </ul>
+  <p>No cookies are used for your data, and nothing is sent to third parties.</p>
 
   <h2>4. What we log</h2>
   <ul>
