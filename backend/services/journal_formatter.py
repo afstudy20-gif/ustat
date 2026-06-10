@@ -206,7 +206,6 @@ def format_table1_for_journal(result: dict, options: dict = None) -> dict:
     """
     opts = options or {}
     bold_p = opts.get("bold_significant_p", True)
-    show_test = opts.get("show_test_column", False)
     table_num = opts.get("table_number", 1)
 
     group_col = result.get("group_column", "")

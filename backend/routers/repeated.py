@@ -119,7 +119,6 @@ def wilcoxon_signed_rank(req: WilcoxonSRRequest):
     x1 = pair[req.col1].astype(float).values
     x2 = pair[req.col2].astype(float).values
     d = x1 - x2
-    n = len(d)
 
     # Remove zero differences (standard Wilcoxon practice)
     nonzero = d[d != 0]

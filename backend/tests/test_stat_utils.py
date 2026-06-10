@@ -388,7 +388,8 @@ def test_bootstrap_ci_mean(rng):
 def test_bootstrap_ci_two_mean_diff(rng):
     x = rng.normal(10.0, 2.0, 80)
     y = rng.normal(8.0, 2.0, 80)
-    fn = lambda a, b: float(a.mean() - b.mean())
+    def fn(a, b):
+        return float(a.mean() - b.mean())
     out = su.bootstrap_ci_two(x, y, fn, n_boot=300, seed=2)
     assert out["ci_low"] <= out["estimate"] <= out["ci_high"]
     assert out["estimate"] > 0  # x mean > y mean

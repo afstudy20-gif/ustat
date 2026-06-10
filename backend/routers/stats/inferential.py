@@ -21,7 +21,8 @@ from services.text_generators import (
 try:
     from services.text_generators import results_chisquare
 except ImportError:
-    results_chisquare = lambda ret: ret.get("interpretation", "")
+    def results_chisquare(ret):
+        return ret.get("interpretation", "")
 
 from services.stat_utils import (
     cohen_d, cohen_d_one_sample, eta_squared, omega_squared,
@@ -223,7 +224,6 @@ def anova(req: AnovaRequest):
     df_between = k - 1
     df_within = n_total - k
 
-    grand_mean = np.concatenate(group_arrays).mean()
     ss_within = sum(np.sum((g - g.mean())**2) for g in group_arrays)
     ms_within = ss_within / df_within if df_within > 0 else 1
 

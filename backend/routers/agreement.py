@@ -285,12 +285,8 @@ def passing_bablok(req: PassingBablokRequest):
 
     # Cusum linearity test
     residuals = y - (intercept + slope * x)
-    # Standardize cumulative sum
-    cumsum = np.cumsum(np.sign(residuals))
-    # Test statistic: max absolute cumsum
-    cusum_stat = float(np.max(np.abs(cumsum)))
-    # Approximate p-value using Kolmogorov-Smirnov approach
-    # Under H0 (linearity), cusum_stat / sqrt(n) ~ Brownian bridge
+    # Approximate p-value using Kolmogorov-Smirnov approach on the residuals
+    # under H0 of linearity (residuals ~ N(0, σ²)).
     try:
         cusum_p = float(sp.kstest(residuals, 'norm', args=(0, np.std(residuals, ddof=1))).pvalue)
     except Exception:

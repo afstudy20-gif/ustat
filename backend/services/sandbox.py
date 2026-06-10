@@ -163,7 +163,7 @@ def run_python(
             try:
                 stdout_b, stderr_b = proc.communicate(timeout=2)
             except Exception:
-                stdout_b, stderr_b = b"", b""
+                _, stderr_b = b"", b""
 
         elapsed = time.monotonic() - start
 

@@ -13,7 +13,7 @@ from services.number_format import format_p
 
 try:
     from docx import Document
-    from docx.shared import Inches, Pt, Cm
+    from docx.shared import Pt
     from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
@@ -72,7 +72,6 @@ def _run_table1_analysis(req: TableDocxRequest) -> dict:
 
     df = _get_df(req.session_id)
     rows = []
-    sel_stats = req.selected_stats if req.selected_stats else ["auto"]
     decimals_override = _resolve_decimals_override(req.session_id, None)
 
     groups = None

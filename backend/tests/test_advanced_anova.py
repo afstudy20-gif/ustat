@@ -116,7 +116,7 @@ def test_two_way_interaction(client):
     d = r.json()
     interaction = [e for e in d["effects"] if "interaction" in e.get("term", "").lower()]
     assert len(interaction) > 0
-    assert interaction[0]["significant"] == True
+    assert interaction[0]["significant"] is True
 
 
 def test_two_way_emms(client):

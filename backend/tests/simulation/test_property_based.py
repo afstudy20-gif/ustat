@@ -18,8 +18,10 @@ try:
     HYPOTHESIS_AVAILABLE = True
 except ImportError:
     HYPOTHESIS_AVAILABLE = False
-    given = lambda *a, **kw: (lambda f: f)
-    settings = lambda **kw: (lambda f: f)
+    def given(*a, **kw):
+        return lambda f: f
+    def settings(**kw):
+        return lambda f: f
     class HealthCheck:
         function_scoped_fixture = 1
 
@@ -235,7 +237,6 @@ def test_linear_produces_assumption_warnings_under_stress(client, noise_sd, seed
 
     data = r.json()
     # Either we have explicit assumption warnings or the overall severity is not "ok"
-    has_warnings = bool(data.get("warnings"))
     assumptions = data.get("assumptions", {})
     severity = assumptions.get("overall_severity", "ok")
 

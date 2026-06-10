@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
 
 from services import store
@@ -859,7 +859,7 @@ def model_validation(req: ValidationRequest):
             try:
                 c = concordance_index(duration[idx], -lp[idx], event[idx])  # higher LP = higher risk → negate for concordance_index
                 c_indices.append(c)
-            except:
+            except Exception:
                 pass
 
         if c_indices:
@@ -886,7 +886,7 @@ def model_validation(req: ValidationRequest):
         try:
             cal = compute_cox_calibration_slope(df, req.duration_col, req.event_col, lp)
             result["calibration"] = cal
-        except:
+        except Exception:
             pass
 
         return result
@@ -928,7 +928,7 @@ def model_validation(req: ValidationRequest):
     try:
         cal = compute_calibration_slope_intercept(y, probs)
         result["calibration"] = cal
-    except:
+    except Exception:
         pass
 
     return result
@@ -937,8 +937,6 @@ def model_validation(req: ValidationRequest):
 # ═══════════════════════════════════════════════════════════════════════════════
 # 6. Causal Sensitivity Analysis (E-value + Quantitative Bias Analysis) - Phase 5
 # ═══════════════════════════════════════════════════════════════════════════════
-
-from pydantic import Field
 
 class CausalSensitivityRequest(BaseModel):
     observed_estimate: float = Field(..., gt=0, description="Point estimate on RR/OR/HR scale")

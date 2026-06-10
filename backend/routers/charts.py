@@ -264,7 +264,6 @@ def forest_plot(req: ForestRequest):
         wts_fe = wts_fe / wts_fe.sum()  # normalise
         # Fixed-effect mean
         mu_fe = float(np.sum(wts_fe * ests))
-        var_fe = float(1.0 / np.sum(1.0 / (ses ** 2)))
         # Cochran Q and τ² (DerSimonian-Laird)
         q = float(np.sum((1.0 / (ses ** 2)) * (ests - mu_fe) ** 2))
         dfree = len(rows) - 1

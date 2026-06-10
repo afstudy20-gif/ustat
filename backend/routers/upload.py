@@ -1,10 +1,13 @@
 import io
-import uuid
-import tempfile
 import os
+import re
+import tempfile
+import uuid
+
 import pandas as pd
 import pyreadstat
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request
+from loguru import logger
 from services import store
 
 router = APIRouter()
@@ -12,8 +15,6 @@ router = APIRouter()
 # Hard cap on a single uploaded dataset. Protects the in-memory store from
 # being exhausted by an oversized (or hostile) file. Override via env.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(100 * 1024 * 1024)))  # 100 MB
-
-import re
 
 # Date/time patterns for auto-detection
 _DATE_PATTERNS = [
@@ -163,8 +164,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     try:
         df = _read(file.filename, content)
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
+        logger.exception("upload: failed to parse {}", file.filename)
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
 
     session_id = str(uuid.uuid4())

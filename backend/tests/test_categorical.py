@@ -22,7 +22,7 @@ def test_one_proportion(client):
     r = client.post("/api/categorical/one_proportion", json={"session_id": sid, "column": "x", "null_proportion": 0.5})
     assert r.status_code == 200
     d = r.json()
-    assert d["significant"] == True
+    assert d["significant"] is True
     assert "r_code" in d
 
 

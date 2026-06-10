@@ -20,7 +20,7 @@ def test_paired_ttest_known_answer(client):
     t_expected, p_expected = sp.ttest_rel(before, after)
     assert abs(d["t"] - t_expected) < 0.01
     assert abs(d["p"] - p_expected) < 0.001
-    assert d["significant"] == True
+    assert d["significant"] is True
     assert len(d["effect_sizes"]) == 1
     assert d["effect_sizes"][0]["name"] == "cohen_d_z"
     assert "paired" in d["result_text"].lower()
@@ -35,7 +35,7 @@ def test_paired_ttest_no_difference(client):
     r = client.post("/api/repeated/paired_ttest", json={"session_id": sid, "col1": "a", "col2": "b"})
     assert r.status_code == 200
     d = r.json()
-    assert d["significant"] == False
+    assert d["significant"] is False
     assert d["p"] >= 0.99
 
 

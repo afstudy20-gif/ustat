@@ -575,7 +575,8 @@ def permutation_test(x: np.ndarray, y: np.ndarray, statistic_fn=None,
                      n_perm: int = 5000, seed: int = 42) -> dict:
     """Two-sample permutation test. Default statistic: difference of means."""
     if statistic_fn is None:
-        statistic_fn = lambda a, b: float(a.mean() - b.mean())
+        def statistic_fn(a, b):
+            return float(a.mean() - b.mean())
     rng = np.random.RandomState(seed)
     observed = statistic_fn(x, y)
     combined = np.concatenate([x, y])

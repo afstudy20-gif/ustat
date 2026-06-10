@@ -376,7 +376,6 @@ def run_bayesian_regression(df: pd.DataFrame, req: BayesianRequest):
         
     # Fit null model (intercept only)
     y = df_clean[req.outcome].values
-    X_null = np.ones((n, 1))
     rss_null = np.sum((y - y.mean())**2)
     # BIC_null
     k_null = 1

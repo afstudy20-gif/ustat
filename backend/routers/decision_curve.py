@@ -214,7 +214,6 @@ def calibration(req: CalibrationRequest):
     if c_stat is not None:
         result_text += f" C-statistic (AUC) = {c_stat}."
 
-    preds_col = ", ".join(req.predictors)
 
     return {
         "test": "Calibration Analysis",

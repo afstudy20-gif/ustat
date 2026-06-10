@@ -99,7 +99,6 @@ def delta_adjustment_sensitivity(
     import statsmodels.api as sm
     from lifelines import CoxPHFitter
 
-    rng = np.random.default_rng(seed)
     deltas = np.linspace(delta_range[0], delta_range[1], n_steps)
 
     results = []
@@ -107,7 +106,6 @@ def delta_adjustment_sensitivity(
 
     # First do a standard MICE
     imp_result = mice_multiple(df, base_cols, n_imputations=3)
-    base_pooled = None
 
     for delta in deltas:
         # Apply delta adjustment to the last imputed dataset (simple but illustrative)

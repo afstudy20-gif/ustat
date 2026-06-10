@@ -811,7 +811,6 @@ def fit_fine_gray(req):
         raise HTTPException(status_code=422, detail=f"Event of interest {req.event_of_interest} not found. Available: {event_types}")
 
     # Build CIF curves
-    plots = {}
     cif_data = {}
     event_counts = {}
 

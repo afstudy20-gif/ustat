@@ -16,8 +16,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from tests.conftest import make_session
-from services.simulation_generators import generate_linear_data
+from tests.conftest import make_session  # noqa: E402  — must follow sys.path setup
+from services.simulation_generators import generate_linear_data  # noqa: E402
 
 
 @pytest.mark.simulation

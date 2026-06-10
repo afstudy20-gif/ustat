@@ -315,10 +315,8 @@ def export_xlsx(session_id: str, filename: str = Query("export.xlsx")):
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    try:
-        import openpyxl
-        from openpyxl.utils.dataframe import dataframe_to_rows
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("openpyxl") is None:
         raise HTTPException(status_code=400, detail="XLSX export requires openpyxl")
 
     # Write to bytes buffer

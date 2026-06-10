@@ -207,4 +207,4 @@ def test_permutation_test():
     y = np.random.RandomState(42).normal(12, 1, 30)
     result = permutation_test(x, y, n_perm=1000)
     assert result["p_permutation"] < 0.05  # significant difference
-    assert result["significant"] == True
+    assert result["significant"] is True

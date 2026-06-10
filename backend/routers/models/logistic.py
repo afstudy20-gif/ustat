@@ -18,7 +18,6 @@ from services.missing_data import (
     add_missing_data_diagnostics,
 )
 from services.regression import (
-    compute_vif as _compute_vif,
     stepwise_forward as _stepwise_forward,
     stepwise_backward as _stepwise_backward,
     _uni_p_for_pred,

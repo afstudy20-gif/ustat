@@ -208,7 +208,7 @@ def bootstrap_performance(
             try:
                 from sklearn.metrics import roc_auc_score
                 results['auc'].append(roc_auc_score(yb, pb))
-            except:
+            except Exception:
                 results['auc'].append(np.nan)
 
         if 'brier' in metrics:
@@ -222,7 +222,7 @@ def bootstrap_performance(
                     results['calibration_slope'].append(cal['calibration_slope'])
                 if 'calibration_intercept' in metrics:
                     results['calibration_intercept'].append(cal['calibration_intercept'])
-            except:
+            except Exception:
                 if 'calibration_slope' in metrics:
                     results['calibration_slope'].append(np.nan)
                 if 'calibration_intercept' in metrics:
@@ -285,7 +285,7 @@ def optimism_corrected_metrics(
         # Performance on bootstrap sample (apparent in bootstrap)
         try:
             boot_auc = roc_auc_score(yb, pb)
-        except:
+        except Exception:
             continue
 
         # Performance on original sample using bootstrap model predictions
@@ -299,7 +299,7 @@ def optimism_corrected_metrics(
             boot_cal = compute_calibration_slope_intercept(yb, pb)
             orig_cal = compute_calibration_slope_intercept(y, pb)
             optimism_slope.append(boot_cal['calibration_slope'] - orig_cal['calibration_slope'])
-        except:
+        except Exception:
             continue
 
     opt_auc = float(np.mean(optimism_auc)) if optimism_auc else 0.0

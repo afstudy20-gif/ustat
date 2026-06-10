@@ -792,12 +792,8 @@ def dag_adjustment(req: DAGRequest):
     anc_T, anc_Y = ancestors(req.treatment), ancestors(req.outcome)
     roles = {}
     for nd in nodes - {req.treatment, req.outcome}:
-        ch = children.get(nd, set())
         is_confounder = (nd in anc_T) and (nd in anc_Y) and (nd not in desc_T)
         is_mediator = (nd in desc_T) and (req.outcome in descendants(nd) or req.outcome in children.get(nd, set()))
-        is_collider = len(ch) >= 2 and any(  # common effect of two causes
-            len([p for p in parents.get(c2, set())]) >= 2 for c2 in [nd]
-        ) and len(parents.get(nd, set())) >= 2
         if is_confounder:
             roles[nd] = "confounder"
         elif is_mediator:
