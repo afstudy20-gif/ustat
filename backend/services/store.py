@@ -165,18 +165,28 @@ def _apply_conditions(df: pd.DataFrame, conditions: List[dict]) -> pd.DataFrame:
             try:
                 num_val = float(val)
                 s = pd.to_numeric(df[col], errors="coerce")
-                if op == "eq":  cond_mask = s == num_val
-                elif op == "ne":  cond_mask = s != num_val
-                elif op == "gt":  cond_mask = s > num_val
-                elif op == "lt":  cond_mask = s < num_val
-                elif op == "gte": cond_mask = s >= num_val
-                elif op == "lte": cond_mask = s <= num_val
-                else:             cond_mask = pd.Series([True] * len(df), index=df.index)
+                if op == "eq":
+                    cond_mask = s == num_val
+                elif op == "ne":
+                    cond_mask = s != num_val
+                elif op == "gt":
+                    cond_mask = s > num_val
+                elif op == "lt":
+                    cond_mask = s < num_val
+                elif op == "gte":
+                    cond_mask = s >= num_val
+                elif op == "lte":
+                    cond_mask = s <= num_val
+                else:
+                    cond_mask = pd.Series([True] * len(df), index=df.index)
             except (ValueError, TypeError):
                 s = df[col].astype(str)
-                if op == "eq":  cond_mask = s == str(val)
-                elif op == "ne":  cond_mask = s != str(val)
-                else:             cond_mask = pd.Series([True] * len(df), index=df.index)
+                if op == "eq":
+                    cond_mask = s == str(val)
+                elif op == "ne":
+                    cond_mask = s != str(val)
+                else:
+                    cond_mask = pd.Series([True] * len(df), index=df.index)
 
         if i == 0 or join == "AND":
             mask = mask & cond_mask

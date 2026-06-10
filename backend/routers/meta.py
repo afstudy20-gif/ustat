@@ -194,7 +194,8 @@ def _back(measure: str, x: float) -> float:
 @router.post("/analyze")
 def analyze(req: MetaRequest):
     rows = _prep(req)
-    y = np.array([r["y"] for r in rows]); v = np.array([r["v"] for r in rows])
+    y = np.array([r["y"] for r in rows])
+    v = np.array([r["v"] for r in rows])
     k = len(rows)
     log = _log_scale(req.measure)
 
@@ -212,10 +213,12 @@ def analyze(req: MetaRequest):
         pi_high = re["mu"] + t * spread
 
     # Per-study rows with RE weight %
-    w_re = re["weights"]; w_pct = 100.0 * w_re / w_re.sum()
+    w_re = re["weights"]
+    w_pct = 100.0 * w_re / w_re.sum()
     study_rows = []
     for i, r in enumerate(rows):
-        lo = r["y"] - _Z95 * r["se"]; hi = r["y"] + _Z95 * r["se"]
+        lo = r["y"] - _Z95 * r["se"]
+        hi = r["y"] + _Z95 * r["se"]
         study_rows.append({
             "label": r["label"],
             "effect": round(_back(req.measure, r["y"]), 4),
@@ -278,11 +281,13 @@ def subgroup(req: MetaRequest):
     for name, grp in groups.items():
         if len(grp) < 1:
             continue
-        y = np.array([r["y"] for r in grp]); v = np.array([r["v"] for r in grp])
+        y = np.array([r["y"] for r in grp])
+        v = np.array([r["v"] for r in grp])
         tau2 = (_tau2_PM(y, v) if req.tau2_method.upper() == "PM" else _tau2_DL(y, v)) if len(grp) >= 2 else 0.0
         pooled = _pool(y, v, tau2)
         het = _hetero(y, v) if len(grp) >= 2 else {"Q": 0, "Q_df": 0, "Q_p": None, "I2_pct": 0, "H2": None}
-        mus.append(pooled["mu"]); vars_.append(pooled["se"] ** 2)
+        mus.append(pooled["mu"])
+        vars_.append(pooled["se"] ** 2)
         sub_results.append({
             "subgroup": name, "k": len(grp),
             "effect": round(_back(req.measure, pooled["mu"]), 4),
@@ -294,7 +299,8 @@ def subgroup(req: MetaRequest):
     # Between-subgroup heterogeneity: Q_between on the subgroup pooled means.
     q_between = q_between_p = None
     if len(mus) >= 2:
-        mus_a = np.array(mus); w = 1.0 / np.array(vars_)
+        mus_a = np.array(mus)
+        w = 1.0 / np.array(vars_)
         grand = float(np.sum(w * mus_a) / np.sum(w))
         q_between = float(np.sum(w * (mus_a - grand) ** 2))
         df_b = len(mus) - 1
@@ -331,7 +337,8 @@ def meta_regression(req: MetaRequest):
         raise HTTPException(status_code=422, detail="Need ≥ 3 studies for meta-regression.")
     import statsmodels.api as sm
 
-    y = np.array([r["y"] for r in rows]); v = np.array([r["v"] for r in rows])
+    y = np.array([r["y"] for r in rows])
+    v = np.array([r["v"] for r in rows])
     x = np.array([float(r["moderator"]) for r in rows])
     tau2 = _tau2_PM(y, v) if req.tau2_method.upper() == "PM" else _tau2_DL(y, v)
     w = 1.0 / (v + tau2)
@@ -339,7 +346,8 @@ def meta_regression(req: MetaRequest):
     X = sm.add_constant(x)
     model = sm.WLS(y, X, weights=w).fit()
     intercept, slope = float(model.params[0]), float(model.params[1])
-    se_slope = float(model.bse[1]); p_slope = float(model.pvalues[1])
+    se_slope = float(model.bse[1])
+    p_slope = float(model.pvalues[1])
     ci = model.conf_int()
     slope_lo, slope_hi = float(ci[1][0]), float(ci[1][1])
 
@@ -388,14 +396,18 @@ def bias(req: MetaRequest):
         raise HTTPException(status_code=422, detail="Need ≥ 3 studies for bias diagnostics.")
     import statsmodels.api as sm
 
-    y = np.array([r["y"] for r in rows]); se = np.array([r["se"] for r in rows]); v = se ** 2
+    y = np.array([r["y"] for r in rows])
+    se = np.array([r["se"] for r in rows])
+    v = se ** 2
 
     # Egger's regression test: standardized effect (y/se) ~ precision (1/se);
     # the intercept tests funnel asymmetry.
-    z = y / se; prec = 1.0 / se
+    z = y / se
+    prec = 1.0 / se
     Xe = sm.add_constant(prec)
     egger = sm.OLS(z, Xe).fit()
-    egger_int = float(egger.params[0]); egger_p = float(egger.pvalues[0])
+    egger_int = float(egger.params[0])
+    egger_p = float(egger.pvalues[0])
 
     # Begg's rank correlation: Kendall τ between standardized effect and variance.
     mu_fe = float(np.sum((1 / v) * y) / np.sum(1 / v))

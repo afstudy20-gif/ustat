@@ -170,9 +170,12 @@ def fit_time_varying_joint_model(
     """
     Fits a time-varying two-stage joint model.
     """
-    if not long_predictors: long_predictors = []
-    if not surv_predictors: surv_predictors = []
-    if not association: association = ["value"]
+    if not long_predictors:
+        long_predictors = []
+    if not surv_predictors:
+        surv_predictors = []
+    if not association:
+        association = ["value"]
     
     long_clean = long_df.loc[:, ~long_df.columns.duplicated()].copy()
     
@@ -275,8 +278,10 @@ def fit_latent_class_joint_model(
     """
     Fits a pragmatic Joint Latent Class Model (JLCM) using GMM on extracted random effects.
     """
-    if not long_predictors: long_predictors = []
-    if not surv_predictors: surv_predictors = []
+    if not long_predictors:
+        long_predictors = []
+    if not surv_predictors:
+        surv_predictors = []
     
     long_clean = long_df.loc[:, ~long_df.columns.duplicated()].copy()
     long_clean = long_clean.sort_values([id_col, time_col]).reset_index(drop=True)

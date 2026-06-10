@@ -465,7 +465,8 @@ def added_value(req: AddedValueRequest):
                  ((np.mean(d[ne] < 0) - np.mean(d[ne] > 0)) if ne.any() else 0.0)
             ib = (np.mean(p_full[bi][ev]) - np.mean(p_base[bi][ev])) - \
                  (np.mean(p_full[bi][ne]) - np.mean(p_base[bi][ne]))
-            nris.append(nb); idis.append(ib)
+            nris.append(nb)
+            idis.append(ib)
         if nris:
             nri_ci = [round(float(np.quantile(nris, 0.025)), 4), round(float(np.quantile(nris, 0.975)), 4)]
             idi_ci = [round(float(np.quantile(idis, 0.025)), 4), round(float(np.quantile(idis, 0.975)), 4)]

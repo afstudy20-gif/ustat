@@ -427,7 +427,8 @@ def noninferiority(req: NonInferiorityRequest):
         y = pd.to_numeric(work[req.outcome_col], errors="coerce")
         if set(pd.unique(y.dropna())) - {0.0, 1.0}:
             raise HTTPException(status_code=422, detail="Binary outcome must be coded 0/1.")
-        t = y[groups == test_g]; r = y[groups == ref_g]
+        t = y[groups == test_g]
+        r = y[groups == ref_g]
         n1, n2 = int(t.notna().sum()), int(r.notna().sum())
         x1, x2 = int(t.sum()), int(r.sum())
         p1, p2 = x1 / n1, x2 / n2
@@ -668,14 +669,16 @@ def run_power(req: PowerRequest):
         tails = req.tails
 
         def corr_power(r, n):
-            if abs(r) >= 1 or n <= 3: return float("nan")
+            if abs(r) >= 1 or n <= 3:
+                return float("nan")
             ncp = np.arctanh(abs(r)) * np.sqrt(n - 3)
             z_c = norm.ppf(1 - a / (1 if tails == 1 else 2))
             return float(norm.sf(z_c - ncp) + (norm.cdf(-z_c - ncp) if tails == 2 else 0))
 
         def corr_solve_n(r, pwr):
             for n in range(4, 100001):
-                if corr_power(r, n) >= pwr: return n
+                if corr_power(r, n) >= pwr:
+                    return n
             return 100001
 
         def corr_solve_r(n, pwr):

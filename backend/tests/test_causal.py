@@ -139,7 +139,8 @@ def test_target_trial_needs_confounders(client, tt_sid):
 def test_did_recovers_interaction(client):
     rng = np.random.default_rng(11)
     n = 400
-    g = rng.integers(0, 2, n); t = rng.integers(0, 2, n)
+    g = rng.integers(0, 2, n)
+    t = rng.integers(0, 2, n)
     Y = 10 + 2 * g + 1 * t + 3 * (g * t) + rng.normal(0, 2, n)   # true DiD = 3
     sid = make_session(pd.DataFrame({"Y": Y, "grp": g, "time": t, "age": rng.normal(50, 8, n)}), "did_main")
     r = client.post("/api/causal/did", json={

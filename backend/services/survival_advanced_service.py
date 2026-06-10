@@ -1923,7 +1923,8 @@ def fit_recurrent_lwyy(req):
         else:
             coerced = pd.to_numeric(col, errors="coerce")
             if coerced.notna().mean() >= 0.8 and coerced.dropna().nunique() > 2:
-                pred_raw[c] = coerced; numeric_pred.append(c)
+                pred_raw[c] = coerced
+                numeric_pred.append(c)
             else:
                 cat_pred.append(c)
     num_part = pred_raw[numeric_pred].apply(pd.to_numeric, errors="coerce") if numeric_pred else pd.DataFrame(index=pred_raw.index)

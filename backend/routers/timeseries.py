@@ -188,7 +188,8 @@ async def arima(req: ARIMARequest):
     ci = fc.conf_int(alpha=0.05)
     fc_rows = []
     for i in range(steps):
-        lo = float(ci.iloc[i, 0]); hi = float(ci.iloc[i, 1])
+        lo = float(ci.iloc[i, 0])
+        hi = float(ci.iloc[i, 1])
         fc_rows.append({
             "step": i + 1,
             "x": str(mean.index[i]),
@@ -363,7 +364,8 @@ def stationarity(req: StationarityRequest):
     def _stems(vals, ci):
         out = []
         for k in range(len(vals)):
-            lo = float(ci[k][0] - vals[k]); hi = float(ci[k][1] - vals[k])
+            lo = float(ci[k][0] - vals[k])
+            hi = float(ci[k][1] - vals[k])
             out.append({"lag": k, "value": _safe(round(float(vals[k]), 4)),
                         "ci_low": _safe(round(lo, 4)), "ci_high": _safe(round(hi, 4))})
         return out

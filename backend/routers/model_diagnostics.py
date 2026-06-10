@@ -691,10 +691,13 @@ def _internal_validation_predictors(req: "ValidationRequest", df_full: pd.DataFr
                 mb = _fit(X[bi], y[bi])
                 pb = mb.predict_proba(X[bi])[:, 1]      # boot performance
                 po = mb.predict_proba(X)[:, 1]          # tested on original
-                auc_b = roc_auc_score(y[bi], pb); auc_o = roc_auc_score(y, po)
+                auc_b = roc_auc_score(y[bi], pb)
+                auc_o = roc_auc_score(y, po)
                 sl_b = compute_calibration_slope_intercept(y[bi], probs=pb)["calibration_slope"]
                 sl_o = compute_calibration_slope_intercept(y, probs=po)["calibration_slope"]
-                opt_auc.append(auc_b - auc_o); opt_slope.append(sl_b - sl_o); ok += 1
+                opt_auc.append(auc_b - auc_o)
+                opt_slope.append(sl_b - sl_o)
+                ok += 1
             except Exception:
                 continue
         o_auc = float(np.mean(opt_auc)) if opt_auc else 0.0
@@ -770,7 +773,8 @@ def _internal_validation_predictors(req: "ValidationRequest", df_full: pd.DataFr
             _, lp_o = _cfit_predict(bs, arr)
             c_b = concordance_index(bs["_d_"].values, -lp_b, bs["_e_"].values.astype(int))
             c_o = concordance_index(arr["_d_"].values, -lp_o, arr["_e_"].values.astype(int))
-            opt_c.append(c_b - c_o); ok += 1
+            opt_c.append(c_b - c_o)
+            ok += 1
         except Exception:
             continue
     o_c = float(np.mean(opt_c)) if opt_c else 0.0

@@ -636,9 +636,12 @@ def logistic_or_table(req: LogisticRequest):
                 ci_lo = float(np.exp(ci_lo_arr[i]))
                 ci_hi = float(np.exp(ci_hi_arr[i]))
                 p_val = float(p_two[i])
-                if not np.isfinite(or_val): or_val = 9999.0
-                if not np.isfinite(ci_lo): ci_lo = 0.0
-                if not np.isfinite(ci_hi): ci_hi = 9999.0
+                if not np.isfinite(or_val):
+                    or_val = 9999.0
+                if not np.isfinite(ci_lo):
+                    ci_lo = 0.0
+                if not np.isfinite(ci_hi):
+                    ci_hi = 9999.0
                 rows[var] = {"or": or_val, "ci_low": ci_lo, "ci_high": ci_hi, "p": p_val}
             if return_model:
                 X_null = np.ones((len(y_arr_in), 1))
@@ -679,9 +682,12 @@ def logistic_or_table(req: LogisticRequest):
             ci_lo = float(np.exp(ci.loc[var, 0]))
             ci_hi = float(np.exp(ci.loc[var, 1]))
             p_val = float(m.pvalues[var])
-            if not np.isfinite(or_val): or_val = 9999.0
-            if not np.isfinite(ci_lo): ci_lo = 0.0
-            if not np.isfinite(ci_hi): ci_hi = 9999.0
+            if not np.isfinite(or_val):
+                or_val = 9999.0
+            if not np.isfinite(ci_lo):
+                ci_lo = 0.0
+            if not np.isfinite(ci_hi):
+                ci_hi = 9999.0
             rows[var] = {"or": or_val, "ci_low": ci_lo, "ci_high": ci_hi, "p": p_val}
         if return_model:
             return rows, m, X_const, y_clean
@@ -738,20 +744,27 @@ def logistic_or_table(req: LogisticRequest):
             max_r2 = 1 - np.exp((2 / n_m) * llnull_m)
             nagelkerke = float(cox_snell / max_r2) if max_r2 != 0 else 0.0
             pred_probs = multi_model.predict(multi_X)
-            try: auc_val = float(roc_auc_score(multi_y, pred_probs))
-            except Exception: auc_val = None
+            try:
+                auc_val = float(roc_auc_score(multi_y, pred_probs))
+            except Exception:
+                auc_val = None
             try:
                 order = np.argsort(pred_probs)
                 groups = np.array_split(order, 10)
                 hl_chi2_val = 0.0
                 for grp in groups:
-                    o1 = multi_y[grp].sum(); o0 = len(grp) - o1
-                    e1 = pred_probs[grp].sum(); e0 = len(grp) - e1
-                    if e1 > 0: hl_chi2_val += (o1 - e1)**2 / e1
-                    if e0 > 0: hl_chi2_val += (o0 - e0)**2 / e0
+                    o1 = multi_y[grp].sum()
+                    o0 = len(grp) - o1
+                    e1 = pred_probs[grp].sum()
+                    e0 = len(grp) - e1
+                    if e1 > 0:
+                        hl_chi2_val += (o1 - e1)**2 / e1
+                    if e0 > 0:
+                        hl_chi2_val += (o0 - e0)**2 / e0
                 hl_p = float(1 - chi2_dist.cdf(hl_chi2_val, 8))
                 hl = {"chi2": round(hl_chi2_val, 4), "df": 8, "p": round(hl_p, 6)}
-            except Exception: hl = None
+            except Exception:
+                hl = None
             try:
                 y_pred = (pred_probs >= 0.5).astype(int)
                 tn, fp, fn, tp = _cm(multi_y, y_pred).ravel()
@@ -763,7 +776,8 @@ def logistic_or_table(req: LogisticRequest):
                     "npv": round(float(tn/(tn+fn)), 4) if (tn+fn) > 0 else 0,
                     "tp": int(tp), "tn": int(tn), "fp": int(fp), "fn": int(fn),
                 }
-            except Exception: classification = None
+            except Exception:
+                classification = None
 
             model_stats = {
                 "omnibus": {"chi2": round(omnibus_chi2, 4), "df": omnibus_df, "p": round(omnibus_p, 6)},

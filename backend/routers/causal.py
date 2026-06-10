@@ -293,7 +293,9 @@ def mediation(req: MediationRequest):
                 continue
             ind = ab * bb
             tot = ind + cb
-            a_bs.append(ind); ad_bs.append(cb); t_bs.append(tot)
+            a_bs.append(ind)
+            ad_bs.append(cb)
+            t_bs.append(tot)
             if abs(tot) > 1e-9:
                 pm_bs.append(ind / tot)
         if a_bs:
@@ -698,7 +700,8 @@ def regression_discontinuity(req: RDDRequest):
     p = float(wls.pvalues[1])
     ci = wls.conf_int()[1]
     ci_low, ci_high = float(ci[0]), float(ci[1])
-    n_left = int(np.sum(xb < 0)); n_right = int(np.sum(xb >= 0))
+    n_left = int(np.sum(xb < 0))
+    n_right = int(np.sum(xb >= 0))
     sig = bool(p < 0.05)
 
     result_text = (
@@ -776,7 +779,8 @@ def dag_adjustment(req: DAGRequest):
             u = stack.pop()
             for v in children.get(u, ()):
                 if v not in seen:
-                    seen.add(v); stack.append(v)
+                    seen.add(v)
+                    stack.append(v)
         return seen
 
     def ancestors(start: str) -> set:
@@ -785,7 +789,8 @@ def dag_adjustment(req: DAGRequest):
             u = stack.pop()
             for v in parents.get(u, ()):
                 if v not in seen:
-                    seen.add(v); stack.append(v)
+                    seen.add(v)
+                    stack.append(v)
         return seen
 
     desc_T = descendants(req.treatment)

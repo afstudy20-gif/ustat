@@ -81,39 +81,60 @@ def _es_magnitude(name: str, val: float) -> str:
     """Cohen's magnitude label for common effect sizes."""
     v = abs(val)
     if name in ("cohen_d", "hedges_g"):
-        if v < 0.2: return "negligible"
-        if v < 0.5: return "small"
-        if v < 0.8: return "medium"
+        if v < 0.2:
+            return "negligible"
+        if v < 0.5:
+            return "small"
+        if v < 0.8:
+            return "medium"
         return "large"
     if name == "cohen_f":
-        if v < 0.10: return "negligible"
-        if v < 0.25: return "small"
-        if v < 0.40: return "medium"
+        if v < 0.10:
+            return "negligible"
+        if v < 0.25:
+            return "small"
+        if v < 0.40:
+            return "medium"
         return "large"
     if name in ("r", "pearson_r", "point_biserial_r"):
-        if v < 0.10: return "negligible"
-        if v < 0.30: return "small"
-        if v < 0.50: return "medium"
+        if v < 0.10:
+            return "negligible"
+        if v < 0.30:
+            return "small"
+        if v < 0.50:
+            return "medium"
         return "large"
     if name in ("eta_squared", "eta2"):
-        if v < 0.01: return "negligible"
-        if v < 0.06: return "small"
-        if v < 0.14: return "medium"
+        if v < 0.01:
+            return "negligible"
+        if v < 0.06:
+            return "small"
+        if v < 0.14:
+            return "medium"
         return "large"
     if name in ("cramers_v", "cramer_v"):
-        if v < 0.10: return "negligible"
-        if v < 0.30: return "small"
-        if v < 0.50: return "medium"
+        if v < 0.10:
+            return "negligible"
+        if v < 0.30:
+            return "small"
+        if v < 0.50:
+            return "medium"
         return "large"
     if name == "odds_ratio":
-        if v < 1.5: return "negligible"
-        if v < 2.5: return "small"
-        if v < 4.0: return "medium"
+        if v < 1.5:
+            return "negligible"
+        if v < 2.5:
+            return "small"
+        if v < 4.0:
+            return "medium"
         return "large"
     if name == "rank_biserial_r":
-        if v < 0.10: return "negligible"
-        if v < 0.30: return "small"
-        if v < 0.50: return "medium"
+        if v < 0.10:
+            return "negligible"
+        if v < 0.30:
+            return "small"
+        if v < 0.50:
+            return "medium"
         return "large"
     return ""
 

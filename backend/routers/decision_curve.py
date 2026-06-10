@@ -348,12 +348,18 @@ def dca(req: DCARequest):
 
     # Determine columns we need for imputation
     needed_cols: List[str] = []
-    if req.outcome: needed_cols.append(req.outcome)
-    if req.predictors: needed_cols.extend(req.predictors)
-    if req.probability_col: needed_cols.append(req.probability_col)
-    if req.risk_col: needed_cols.append(req.risk_col)
-    if req.duration_col: needed_cols.append(req.duration_col)
-    if req.event_col: needed_cols.append(req.event_col)
+    if req.outcome:
+        needed_cols.append(req.outcome)
+    if req.predictors:
+        needed_cols.extend(req.predictors)
+    if req.probability_col:
+        needed_cols.append(req.probability_col)
+    if req.risk_col:
+        needed_cols.append(req.risk_col)
+    if req.duration_col:
+        needed_cols.append(req.duration_col)
+    if req.event_col:
+        needed_cols.append(req.event_col)
 
     needed_cols = list(dict.fromkeys(needed_cols))  # dedup preserve order
     df = apply_imputation(df_full, needed_cols, req.imputation) if needed_cols else df_full
