@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle, Newspaper } from "lucide-react";
 import { uploadFile } from "../api";
 import api from "../api";
@@ -17,6 +17,27 @@ export default function UploadZone() {
   const [showAbout, setShowAbout] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [mode, setMode] = useState<"home" | "power">("home");
+
+  // Entering Power Analysis pushes a browser history entry so the back button
+  // (and the in-app "Statistical Analysis" button) returns to the uSTAT home
+  // screen instead of leaving the app entirely.
+  useEffect(() => {
+    // Any back/forward navigation returns to the home screen. (We deliberately
+    // don't restore power mode from history state: a reload can leave a stale
+    // power entry as the current history position, which would then wrongly
+    // re-open power on back. Home-on-popstate is the robust choice and keeps
+    // the user inside the app.)
+    const onPop = () => setMode("home");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const enterPower = () => {
+    window.history.pushState({ ustatMode: "power" }, "");
+    setMode("power");
+  };
+  // Consume the pushed entry so history stays balanced; popstate flips to home.
+  const exitPower = () => window.history.back();
 
   const handle = useCallback(async (file: File) => {
     setLoading(true);
@@ -88,7 +109,7 @@ export default function UploadZone() {
               <HelpCircle size={14} />
               Help &amp; Guide
             </button>
-            <button onClick={() => setMode("home")}
+            <button onClick={exitPower}
               className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
               <BarChart2 size={14} />
               Statistical Analysis
@@ -166,7 +187,7 @@ export default function UploadZone() {
 
         {/* Power Analysis — separate, equal size */}
         <button
-          onClick={() => setMode("power")}
+          onClick={enterPower}
           className="flex flex-col items-center justify-center gap-3 px-4 py-8 rounded-xl border-2 border-gray-200 bg-white text-gray-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700 transition-colors min-h-[220px]"
         >
           <div className="flex items-center gap-2">
