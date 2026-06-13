@@ -863,13 +863,40 @@ def _power_result_text(req, result) -> str:
     if result is None:
         return ""
 
+    a_str = f"{req.alpha}" if req.alpha else "0.05"
+    pw_pct = int((req.power or 0.8) * 100)
+
+    # Regression powers have their own effect metric (OR / HR) and design inputs.
+    if req.test == "logistic":
+        orr = req.log_or if (req.log_or and req.log_or > 0) else None
+        or_txt = f"OR = {orr}" if orr else "the specified odds ratio"
+        if req.solve_for == "n":
+            return (f"You need a total N = {int(np.ceil(result))} for a logistic regression to "
+                    f"detect {or_txt} (event prevalence {req.p_event}) with {pw_pct}% power at "
+                    f"alpha = {a_str}.")
+        if req.solve_for == "power":
+            return (f"With N = {req.n} and event prevalence {req.p_event}, your logistic regression "
+                    f"has {round(result*100,1)}% power to detect {or_txt} at alpha = {a_str}.")
+        return (f"With N = {req.n} at {pw_pct}% power (event prevalence {req.p_event}, alpha = {a_str}), "
+                f"the smallest detectable odds ratio is {result:.3f}.")
+    if req.test == "survival_cox":
+        hr_txt = f"HR = {req.hr}" if req.hr else "the specified hazard ratio"
+        if req.solve_for == "n":
+            return (f"You need a total N = {int(np.ceil(result))} (event rate {req.event_rate}, "
+                    f"exposed fraction {req.p_exposed}) for a Cox model to detect {hr_txt} with "
+                    f"{pw_pct}% power at alpha = {a_str}.")
+        if req.solve_for == "power":
+            return (f"With N = {req.n} (event rate {req.event_rate}), your Cox model has "
+                    f"{round(result*100,1)}% power to detect {hr_txt} at alpha = {a_str}.")
+        return (f"With N = {req.n} at {pw_pct}% power (event rate {req.event_rate}, alpha = {a_str}), "
+                f"the smallest detectable hazard ratio is {result:.3f}.")
+
     test_names = {
         "t_two": "two-sample t-test", "t_one": "one-sample/paired t-test",
         "anova": "one-way ANOVA", "correlation": "correlation test",
         "proportion": "two-proportion z-test", "chi2": "chi-square test",
     }
     test_name = test_names.get(req.test, req.test)
-    a_str = f"{req.alpha}" if req.alpha else "0.05"
 
     if req.solve_for == "n":
         n = int(np.ceil(result))

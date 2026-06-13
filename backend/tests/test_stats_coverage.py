@@ -289,6 +289,45 @@ def test_power_anova_power(client, sid):
     assert isinstance(r.json(), dict)
 
 
+def test_power_logistic_n(client, sid):
+    # Sample size for a logistic model: OR=2.0, 30% event rate, 80% power.
+    r = client.post("/api/stats/power", json={
+        "test": "logistic", "solve_for": "n", "alpha": 0.05,
+        "power": 0.8, "log_or": 2.0, "p_event": 0.3})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    n = b.get("result") or b.get("n")
+    assert n is not None and n > 0
+
+
+def test_power_logistic_power_monotone(client, sid):
+    # Power must increase with n for the same effect.
+    def pw(n):
+        r = client.post("/api/stats/power", json={
+            "test": "logistic", "solve_for": "power", "alpha": 0.05,
+            "n": n, "log_or": 1.8, "p_event": 0.25})
+        assert r.status_code == 200, r.text
+        return float(r.json()["result"])
+    assert 0.0 <= pw(100) <= pw(400) <= 1.0
+
+
+def test_power_logistic_requires_event_rate(client, sid):
+    r = client.post("/api/stats/power", json={
+        "test": "logistic", "solve_for": "n", "alpha": 0.05,
+        "power": 0.8, "log_or": 2.0})  # missing p_event
+    assert r.status_code == 400
+
+
+def test_power_cox_n(client, sid):
+    # Sample size for a Cox model: HR=1.6, 40% event rate, 80% power.
+    r = client.post("/api/stats/power", json={
+        "test": "survival_cox", "solve_for": "n", "alpha": 0.05,
+        "power": 0.8, "hr": 1.6, "event_rate": 0.4, "p_exposed": 0.5})
+    assert r.status_code == 200, r.text
+    b = r.json()
+    assert (b.get("result") or b.get("n")) > 0
+
+
 # ── ROC ──────────────────────────────────────────────────────────────────────
 
 def test_roc(client, sid):

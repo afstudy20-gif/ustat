@@ -26,7 +26,7 @@ const _pal = () => PALETTES[useStore.getState().plotTheme.palette] ?? PALETTES.i
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-type TestId   = "t_two" | "t_one" | "anova" | "correlation" | "proportion" | "chi2";
+type TestId   = "t_two" | "t_one" | "anova" | "correlation" | "proportion" | "chi2" | "logistic" | "survival_cox";
 type SolveFor = "n" | "power" | "effect_size";
 
 interface CurvePoint { n: number; power: number }
@@ -37,6 +37,7 @@ interface PowerResult { result: number | null; label: string; curve: CurvePoint[
 const TESTS: {
   id: TestId; label: string; short: string; desc: string; effectLabel: string;
   hasRatio: boolean; hasGroups: boolean; hasTails: boolean; isProportions: boolean;
+  isRegression?: "logistic" | "cox";
 }[] = [
   { id: "t_two",       label: "Independent t-test",        short: "t-test (2-grp)",
     desc: "Compare means of two independent groups (e.g. treatment vs. control).",
@@ -56,6 +57,12 @@ const TESTS: {
   { id: "chi2",        label: "Chi-square test",            short: "Chi-square",
     desc: "Test association between two categorical variables.",
     effectLabel: "Cohen's w", hasRatio: false, hasGroups: true,  hasTails: false, isProportions: false },
+  { id: "logistic",    label: "Logistic regression",        short: "Logistic",
+    desc: "Detect the effect (odds ratio) of one predictor on a binary outcome, adjusting for others.",
+    effectLabel: "Odds ratio (OR)", hasRatio: false, hasGroups: false, hasTails: true, isProportions: false, isRegression: "logistic" },
+  { id: "survival_cox", label: "Cox regression (survival)", short: "Cox PH",
+    desc: "Detect the effect (hazard ratio) of one predictor on time-to-event, given the expected event rate.",
+    effectLabel: "Hazard ratio (HR)", hasRatio: false, hasGroups: false, hasTails: true, isProportions: false, isRegression: "cox" },
 ];
 
 const SOLVE_OPTS: { id: SolveFor; label: string; icon: string; desc: string }[] = [
@@ -85,6 +92,11 @@ const TIPS = {
   r:      "Pearson r is the correlation coefficient. r = 0.3 means ~9% shared variance. r = 0.5 is a large, clinically meaningful correlation.",
   w:      "Cohen's w measures departure from expected frequencies in a chi-square table. Same Small/Medium/Large cutoffs as most other measures.",
   p1p2:   "Enter expected event rates in each group. Larger difference between p₁ and p₂ = smaller sample needed. Example: 30% controls vs 50% treated → enter 0.30 and 0.50.",
+  or:     "The odds ratio you want to detect for a one-unit increase in the predictor (or exposed vs. unexposed). OR = 2.0 means the odds of the outcome double. Values nearer 1.0 are harder to detect and need a larger sample.",
+  hr:     "The hazard ratio you want to detect. HR = 1.5 means a 50% higher instantaneous event rate in the exposed group. Cox power depends on the number of EVENTS, not just total n.",
+  pEvent: "Overall probability of the binary outcome (event prevalence) in your sample. Power is greatest near 0.5 and falls for rare outcomes — a 5% outcome needs many more participants than a 50% one.",
+  eventRate: "Proportion of participants expected to experience the event by end of follow-up. Cox power is driven by event count = n × event rate, so low event rates demand large cohorts.",
+  pExposed: "Fraction of the cohort in the exposed / treated group (the predictor = 1). Balanced exposure (0.5) is most efficient; rare exposures need more participants.",
   n:      "Participants per group. Total N = n × (1 + ratio) for two-group designs. Equal groups (ratio = 1) give the best statistical efficiency.",
   tails:  "Two-tailed tests for effects in either direction (A > B or A < B) — use by default. One-tailed tests assume a direction in advance and need fewer participants, but require strong justification.",
   ratio:  "Size of group 2 relative to group 1. Ratio = 1 means equal groups (most efficient). Ratio = 2 means group 2 is twice as large.",
@@ -153,6 +165,10 @@ export default function PowerPanel() {
   const [kGroups,    setKGroups]    = usePersistedPanelState<string>("power_sel", "kGroups", "3");
   const [p1,         setP1]         = usePersistedPanelState<string>("power_sel", "p1", "0.50");
   const [p2,         setP2]         = usePersistedPanelState<string>("power_sel", "p2", "0.30");
+  // Regression-power inputs (logistic + Cox)
+  const [pEvent,     setPEvent]     = usePersistedPanelState<string>("power_sel", "pEvent", "0.30");
+  const [eventRate,  setEventRate]  = usePersistedPanelState<string>("power_sel", "eventRate", "0.40");
+  const [pExposed,   setPExposed]   = usePersistedPanelState<string>("power_sel", "pExposed", "0.50");
 
   const cachedPower = useStore((s) => s.panelCache.power);
   const setCachePower = useStore((s) => s.setPanelCache);
@@ -204,6 +220,7 @@ export default function PowerPanel() {
   const effectTip: Record<TestId, string> = {
     t_two: TIPS.d, t_one: TIPS.d, anova: TIPS.f,
     correlation: TIPS.r, proportion: TIPS.p1p2, chi2: TIPS.w,
+    logistic: TIPS.or, survival_cox: TIPS.hr,
   };
 
   // ── Calculate ────────────────────────────────────────────────────────────────
@@ -221,8 +238,18 @@ export default function PowerPanel() {
       };
       if (solveFor !== "n")            payload.n           = parseInt(n);
       if (solveFor !== "power")        payload.power       = parseFloat(power);
-      if (solveFor !== "effect_size" && !testInfo.isProportions)
-                                       payload.effect_size = parseFloat(effectSize);
+      if (testInfo.isRegression === "logistic") {
+        // effectSize holds the OR; backend logs it (OR>0 ⇒ log). Always sent so
+        // the request validates even in solve-for-effect-size mode.
+        payload.log_or  = parseFloat(effectSize);
+        payload.p_event = parseFloat(pEvent);
+      } else if (testInfo.isRegression === "cox") {
+        payload.hr         = parseFloat(effectSize);  // effectSize holds the HR
+        payload.event_rate = parseFloat(eventRate);
+        payload.p_exposed  = parseFloat(pExposed);
+      } else if (solveFor !== "effect_size" && !testInfo.isProportions) {
+        payload.effect_size = parseFloat(effectSize);
+      }
       const res = await runPower(payload);
       setResult(res.data);
       if (res.data.result != null) {
@@ -237,7 +264,17 @@ export default function PowerPanel() {
     } finally { setLoading(false); }
   };
 
-  const switchTest  = (id: TestId)  => { setTest(id);    setResult(null); setError(null); };
+  const switchTest  = (id: TestId)  => {
+    // OR/HR live on a different scale than the Cohen-style effects, so reset the
+    // effect field to a sensible default when crossing into/out of a regression
+    // test (otherwise a Cohen's d of 0.5 would be read as OR=0.5, etc.).
+    const fromReg = !!testInfo.isRegression;
+    const toReg   = TESTS.find((t) => t.id === id)?.isRegression;
+    if (toReg === "logistic") setEffectSize("2.0");
+    else if (toReg === "cox") setEffectSize("1.5");
+    else if (fromReg)         setEffectSize("0.50");
+    setTest(id); setResult(null); setError(null);
+  };
   const switchSolve = (s: SolveFor) => { setSolveFor(s); setResult(null); setError(null); };
 
   // ── Plot data ────────────────────────────────────────────────────────────────
@@ -557,6 +594,36 @@ export default function PowerPanel() {
                   className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
                   value={kGroups} onChange={(e) => setKGroups(e.target.value)} />
               </div>
+            )}
+            {testInfo.isRegression === "logistic" && (
+              <div className="space-y-1 min-w-[140px]">
+                <label className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                  Event prevalence <Tip text={TIPS.pEvent} wide />
+                </label>
+                <input type="number" min="0.01" max="0.99" step="0.01"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  value={pEvent} onChange={(e) => setPEvent(e.target.value)} />
+              </div>
+            )}
+            {testInfo.isRegression === "cox" && (
+              <>
+                <div className="space-y-1 min-w-[140px]">
+                  <label className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                    Event rate <Tip text={TIPS.eventRate} wide />
+                  </label>
+                  <input type="number" min="0.01" max="0.99" step="0.01"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    value={eventRate} onChange={(e) => setEventRate(e.target.value)} />
+                </div>
+                <div className="space-y-1 min-w-[140px]">
+                  <label className="text-xs font-medium text-gray-500 flex items-center gap-1">
+                    Exposed fraction <Tip text={TIPS.pExposed} wide />
+                  </label>
+                  <input type="number" min="0.01" max="0.99" step="0.01"
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    value={pExposed} onChange={(e) => setPExposed(e.target.value)} />
+                </div>
+              </>
             )}
           </div>
         )}
