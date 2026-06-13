@@ -42,6 +42,52 @@ def test_ordinal_returns_proportional_odds():
     assert d["pseudo_r2"] is not None
 
 
+def test_brant_supports_proportional_odds_when_true():
+    # Data simulated WITH the proportional-odds structure (one shared slope) —
+    # the Brant test should NOT reject.
+    rng = np.random.default_rng(11)
+    n = 1200
+    x = rng.normal(0, 1, n)
+    g = rng.integers(0, 2, n).astype(float)
+    lin = 1.0 * x + 0.8 * g + rng.logistic(0, 1, n)
+    y = np.digitize(lin, [-0.6, 0.8]) + 1  # 3 ordered categories 1/2/3
+    df = pd.DataFrame({"stage": y, "x": x, "grp": g})
+    store.save("ord_brant_ok", df)
+    r = client.post("/api/models/ordinal", json={
+        "session_id": "ord_brant_ok", "outcome": "stage", "predictors": ["x", "grp"],
+    })
+    assert r.status_code == 200, r.text
+    brant = r.json()["brant_proportional_odds"]
+    assert brant["computed"] is True
+    assert brant["omnibus"]["violation"] is False, brant["omnibus"]
+    assert {b["variable"] for b in brant["by_predictor"]} == {"x", "grp"}
+
+
+def test_brant_flags_nonproportional_predictor():
+    # x's effect differs across the two cumulative thresholds → Brant must
+    # reject overall AND isolate x (not grp) as the violator.
+    import scipy.special as sp
+    rng = np.random.default_rng(3)
+    n = 1500
+    x = rng.normal(0, 1, n)
+    g = rng.integers(0, 2, n).astype(float)
+    p_gt0 = sp.expit(0.5 + 0.3 * x + 0.5 * g)
+    p_gt1 = sp.expit(-1.0 + 2.0 * x + 0.5 * g)
+    y = (rng.uniform(size=n) < p_gt0).astype(int) + (rng.uniform(size=n) < p_gt1).astype(int) + 1
+    df = pd.DataFrame({"stage": y, "x": x, "grp": g})
+    store.save("ord_brant_bad", df)
+    r = client.post("/api/models/ordinal", json={
+        "session_id": "ord_brant_bad", "outcome": "stage", "predictors": ["x", "grp"],
+    })
+    assert r.status_code == 200, r.text
+    brant = r.json()["brant_proportional_odds"]
+    assert brant["computed"] is True
+    assert brant["omnibus"]["violation"] is True, brant["omnibus"]
+    by = {b["variable"]: b for b in brant["by_predictor"]}
+    assert by["x"]["violation"] is True
+    assert by["grp"]["violation"] is False
+
+
 def test_ordinal_requires_three_categories():
     rng = np.random.default_rng(1)
     df = pd.DataFrame({"bin": rng.integers(0, 2, 50), "x": rng.normal(0, 1, 50)})

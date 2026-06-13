@@ -351,6 +351,118 @@ class OrdinalRequest(BaseModel):
     imputation: Optional[str] = "listwise"
 
 
+def _brant_test(y_codes: np.ndarray, X: pd.DataFrame) -> dict:
+    """Brant (1990) test of the proportional-odds assumption.
+
+    Fits the J−1 binary logits Pr(Y > j) and tests whether the slope vector is
+    constant across the cut-points. Returns an omnibus χ² (H0: proportional
+    odds holds for every predictor jointly) plus a per-predictor χ². A small
+    p-value flags a violation — that predictor's effect differs across the
+    ordinal thresholds, so a single shared OR is misleading.
+
+    Reference: Brant R. Assessing proportionality in the proportional odds
+    model for ordinal logistic regression. Biometrics 1990;46:1171-8.
+    """
+    from scipy import stats as _sps
+
+    codes = np.asarray(y_codes, dtype=int)
+    Xv = np.asarray(X, dtype=float)
+    n, k = Xv.shape
+    cut_codes = sorted(set(codes))
+    cuts = cut_codes[:-1]  # J−1 cut-points (every level except the top)
+    m = len(cuts)
+    if m < 2:
+        return {"computed": False, "reason": "Need ≥3 ordinal categories for the Brant test."}
+    if n <= k + 1:
+        return {"computed": False, "reason": "Too few observations for the Brant test."}
+
+    Xc = np.column_stack([np.ones(n), Xv])  # design with intercept
+    betas: list[np.ndarray] = []   # slope vectors (intercept dropped)
+    pis: list[np.ndarray] = []     # fitted Pr(Y > j)
+    A: list[np.ndarray] = []       # (X'W_j X)^{-1}, full (k+1)
+    try:
+        for c in cuts:
+            z = (codes > c).astype(float)
+            if z.sum() == 0 or z.sum() == n:
+                return {"computed": False, "reason": "A cut-point is degenerate (all one class)."}
+            fit = sm.Logit(z, Xc).fit(disp=False, maxiter=100)
+            pi = np.clip(np.asarray(fit.predict(Xc), dtype=float), 1e-10, 1 - 1e-10)
+            w = pi * (1 - pi)
+            XtWX = Xc.T @ (Xc * w[:, None])
+            A.append(np.linalg.pinv(XtWX))
+            betas.append(np.asarray(fit.params, dtype=float)[1:])
+            pis.append(pi)
+    except Exception:  # pragma: no cover - numerical failure path
+        logger.exception("Brant test: binary logit fit failed")
+        return {"computed": False, "reason": "A binary logit at one cut-point failed to converge."}
+
+    beta = np.concatenate(betas)  # length m*k
+    # Brant covariance of the stacked slope vector. Diagonal blocks are the
+    # ordinary GLM variance; off-diagonal block (j<l) uses W_{jl}=π_l(1−π_j).
+    V = np.zeros((m * k, m * k))
+    for j in range(m):
+        for q in range(m):
+            if j <= q:
+                w_jq = pis[q] * (1 - pis[j])  # j<q; j==q → π_j(1−π_j) = W_j
+                XtWX = Xc.T @ (Xc * w_jq[:, None])
+                block = (A[j] @ XtWX @ A[q])[1:, 1:]  # drop intercept row/col
+            else:
+                block = V[q * k:(q + 1) * k, j * k:(j + 1) * k].T
+            V[j * k:(j + 1) * k, q * k:(q + 1) * k] = block
+
+    def _wald(contrast: np.ndarray, b: np.ndarray, cov: np.ndarray):
+        Db = contrast @ b
+        DVD = contrast @ cov @ contrast.T
+        stat = float(Db.T @ np.linalg.pinv(DVD) @ Db)
+        dof = int(np.linalg.matrix_rank(contrast))
+        return stat, dof, float(_sps.chi2.sf(stat, dof))
+
+    # Omnibus: every slope equal across the m binary fits (compare each to the
+    # first). (m−1)·k constraints.
+    rows = []
+    for r in range(1, m):
+        D = np.zeros((k, m * k))
+        D[:, 0:k] = np.eye(k)
+        D[:, r * k:(r + 1) * k] = -np.eye(k)
+        rows.append(D)
+    Domni = np.vstack(rows)
+    chi2, df, pval = _wald(Domni, beta, V)
+
+    # Per-predictor: just that predictor's m values equal across fits.
+    per = []
+    for ki, name in enumerate(X.columns):
+        rows_k = []
+        for r in range(1, m):
+            row = np.zeros(m * k)
+            row[ki] = 1.0
+            row[r * k + ki] = -1.0
+            rows_k.append(row)
+        Dk = np.vstack(rows_k)
+        s_k, df_k, p_k = _wald(Dk, beta, V)
+        per.append({
+            "variable": str(name),
+            "chi2": round(s_k, 4),
+            "df": df_k,
+            "p": round(p_k, 6),
+            "violation": bool(p_k < 0.05),
+        })
+
+    return {
+        "computed": True,
+        "omnibus": {
+            "chi2": round(chi2, 4),
+            "df": df,
+            "p": round(pval, 6),
+            "violation": bool(pval < 0.05),
+        },
+        "by_predictor": per,
+        "note": ("Brant test of proportional odds. A significant omnibus χ² (p<0.05) "
+                 "means the assumption is violated — at least one predictor's effect "
+                 "is not constant across the ordinal thresholds; prefer a partial-"
+                 "proportional-odds or multinomial model for those predictors."),
+    }
+
+
 @router.post("/ordinal")
 def ordinal_regression(req: OrdinalRequest):
     """Proportional-odds ordinal logistic regression (statsmodels OrderedModel).
@@ -454,21 +566,35 @@ def ordinal_regression(req: OrdinalRequest):
         "pseudo_r2": pseudo_r2,
         "aic": round(float(result.aic), 4) if result.aic is not None else None,
         "bic": round(float(result.bic), 4) if result.bic is not None else None,
-        "brant_proportional_odds": {
-            "computed": False,
-            "note": "Effects are constrained equal across thresholds (proportional-odds "
-                    "assumption). Inspect category-specific patterns if you suspect non-proportionality.",
-        },
-        "result_text": _ordinal_results_text(len(cats), len(df)),
+        "brant_proportional_odds": _brant_test(np.asarray(y), X),
+        "result_text": "",
     }
+    res["result_text"] = _ordinal_results_text(len(cats), len(df), res["brant_proportional_odds"])
 
     ordinal_report = check_ordinal_assumptions_placeholder()
     res = add_assumption_warnings_to_result(res, ordinal_report)
     return res
 
 
-def _ordinal_results_text(n_categories, n_obs):
-    return (
+def _ordinal_results_text(n_categories, n_obs, brant: dict | None = None):
+    text = (
         f"Ordinal logistic regression was performed on {n_categories} ordered categories "
-        f"({n_obs} observations). Note: formal proportional odds testing is limited."
+        f"({n_obs} observations)."
     )
+    if brant and brant.get("computed") and brant.get("omnibus"):
+        om = brant["omnibus"]
+        if om["violation"]:
+            bad = [b["variable"] for b in brant.get("by_predictor", []) if b["violation"]]
+            text += (
+                f" The Brant test rejected the proportional-odds assumption "
+                f"(χ²={om['chi2']}, df={om['df']}, p={om['p']:.3g})"
+            )
+            text += f"; flagged predictor(s): {', '.join(bad)}." if bad else "."
+        else:
+            text += (
+                f" The proportional-odds assumption was supported by the Brant test "
+                f"(χ²={om['chi2']}, df={om['df']}, p={om['p']:.3g})."
+            )
+    else:
+        text += " Note: the Brant proportional-odds test could not be computed for this fit."
+    return text
