@@ -273,3 +273,17 @@ def shared_frailty(req: FrailtyRequest):
     return _svc.fit_shared_frailty(req)
 
 
+class IntervalCensoredRequest(BaseModel):
+    session_id: str
+    lower_col: str                 # left bracket L (≥0)
+    upper_col: str                 # right bracket R (blank/inf ⇒ right-censored)
+    covariates: List[str] = Field(default_factory=list)
+    group_col: Optional[str] = None
+
+
+@router.post("/interval_censored")
+def interval_censored(req: IntervalCensoredRequest):
+    from services import interval_censored as _ic
+    return _ic.interval_censored_analysis(req)
+
+
