@@ -164,6 +164,15 @@ export interface ModelResult {
   rows?: HRRow[];
   model_stats?: ModelSummary;
   omnibus?: ChiSquareTest;
+  brant_proportional_odds?: BrantTest;
+}
+
+export interface BrantTest {
+  computed: boolean;
+  reason?: string;
+  note?: string;
+  omnibus?: { chi2: number; df: number; p: number; violation: boolean };
+  by_predictor?: { variable: string; chi2: number; df: number; p: number; violation: boolean }[];
 }
 
 export function adjustP(p: number, beta: number, nullHyp: string): number {

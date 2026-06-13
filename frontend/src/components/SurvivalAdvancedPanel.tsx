@@ -7,6 +7,7 @@ import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import ResultExporter from "./ResultExporter";
 import PlotExporter from "./PlotExporter";
 import TitledPlot from "./TitledPlot";
+import IntervalCensoredPanel from "./IntervalCensoredPanel";
 import { Tip } from "./Tip";
 import ThreeCol from "./ThreeCol";
 import { fmtP, fmtPubP } from "../lib/format";
@@ -462,7 +463,7 @@ function CoxUniMultiForest({
 // Method registry — drives the left nav + which Section renders on the right.
 type SurvMethod =
   | "km" | "cox" | "timehorizon" | "landmark" | "rmst"
-  | "finegray" | "lwyy" | "evalue";
+  | "finegray" | "lwyy" | "evalue" | "intervalcensored";
 
 const SURV_METHODS: { id: SurvMethod; title: string; desc: string }[] = [
   { id: "km",          title: "Kaplan-Meier",        desc: "Survival curves + log-rank" },
@@ -472,6 +473,7 @@ const SURV_METHODS: { id: SurvMethod; title: string; desc: string }[] = [
   { id: "rmst",        title: "RMST",                desc: "Restricted mean survival time" },
   { id: "finegray",    title: "Fine-Gray",           desc: "Competing risks (CIF)" },
   { id: "lwyy",        title: "Recurrent (LWYY)",    desc: "Repeated events" },
+  { id: "intervalcensored", title: "Interval-censored", desc: "Event time bracketed [L, R]" },
   { id: "evalue",      title: "E-value",             desc: "Unmeasured confounding" },
 ];
 
@@ -1535,6 +1537,11 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
           }
         />
       </Section>
+      )}
+
+      {/* ── Interval-censored ── */}
+      {activeMethod === "intervalcensored" && (
+        <IntervalCensoredPanel session={session} />
       )}
 
       {/* ── E-value ── */}

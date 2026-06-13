@@ -717,6 +717,53 @@ export default function ModelsPanel() {
                 </div>
               )}
 
+              {/* ── Brant test of the proportional-odds assumption (ordinal) ── */}
+              {result.brant_proportional_odds?.computed && result.brant_proportional_odds.omnibus && (() => {
+                const b = result.brant_proportional_odds!;
+                const om = b.omnibus!;
+                const violated = om.violation;
+                return (
+                  <div className="mt-3 panel">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="font-semibold text-gray-900">Proportional-odds assumption (Brant test)</h4>
+                      <Tip wide text="The proportional-odds model assumes each predictor's effect is the same across every cumulative split of the ordinal outcome. Brant's test checks this. A significant result (p < 0.05) means the assumption is violated for at least one predictor — its single shared odds ratio is misleading and a partial-proportional-odds or multinomial model is preferable." />
+                    </div>
+                    <div className={`rounded-lg px-3 py-2 text-sm ${violated ? "bg-amber-50 text-amber-800 border border-amber-200" : "bg-emerald-50 text-emerald-800 border border-emerald-200"}`}>
+                      <strong>{violated ? "⚠ Assumption violated" : "✓ Assumption supported"}</strong>
+                      {" — omnibus χ² = "}{om.chi2.toFixed(2)}, df = {om.df}, p = {om.p < 0.001 ? "<0.001" : om.p.toFixed(3)}.
+                      {violated && b.by_predictor && (() => {
+                        const bad = b.by_predictor.filter((x) => x.violation).map((x) => x.variable);
+                        return bad.length ? <> Flagged predictor(s): <strong>{bad.join(", ")}</strong>.</> : null;
+                      })()}
+                    </div>
+                    {b.by_predictor && b.by_predictor.length > 0 && (
+                      <table className="w-full text-xs mt-2">
+                        <thead>
+                          <tr className="text-gray-500 border-b border-gray-200">
+                            <th className="text-left py-1 font-medium">Predictor</th>
+                            <th className="text-right py-1 font-medium">χ²</th>
+                            <th className="text-right py-1 font-medium">df</th>
+                            <th className="text-right py-1 font-medium">p</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {b.by_predictor.map((x) => (
+                            <tr key={x.variable} className={`border-b border-gray-100 ${x.violation ? "bg-amber-50/50" : ""}`}>
+                              <td className="py-1 font-mono text-gray-700">{x.variable}</td>
+                              <td className="py-1 text-right tabular-nums">{x.chi2.toFixed(2)}</td>
+                              <td className="py-1 text-right tabular-nums">{x.df}</td>
+                              <td className={`py-1 text-right tabular-nums ${x.violation ? "text-amber-700 font-semibold" : "text-gray-600"}`}>
+                                {x.p < 0.001 ? "<0.001" : x.p.toFixed(3)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* ── SPSS-style Model Summary (logistic only) ── */}
               {result.omnibus && (
                 <div className="mt-3">
