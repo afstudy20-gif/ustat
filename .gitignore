@@ -13,7 +13,6 @@ virtualenv/
 dist/
 build/
 release/
-*.spec
 .pytest_cache/
 .coverage
 htmlcov/
@@ -51,3 +50,12 @@ Thumbs.db
 .claude/
 
 logs/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/icons/
+
+# Hypothesis
+.hypothesis/
+

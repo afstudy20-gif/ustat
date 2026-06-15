@@ -1,0 +1,192 @@
+name: Release Desktop App
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: 'lts/*'
+
+jobs:
+  # ─────────────────────────────────────────────────────
+  # Step 1: Build the Python backend binary per platform
+  # ─────────────────────────────────────────────────────
+  build-backend:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            backend-name: ustat-backend
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            backend-name: ustat-backend
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            backend-name: ustat-backend
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            backend-name: ustat-backend.exe
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -r backend/requirements.txt
+
+      - name: Setup Node.js (for frontend build)
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build backend binary with PyInstaller
+        run: pyinstaller scripts/ustat-backend.spec --noconfirm
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.target }}
+          path: dist/ustat-backend/
+          retention-days: 1
+
+  # ─────────────────────────────────────────────────────
+  # Step 2: Build Tauri desktop app (downloads backend artifact)
+  # ─────────────────────────────────────────────────────
+  build-tauri:
+    needs: build-backend
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+            backend-artifact: backend-aarch64-apple-darwin
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+            backend-artifact: backend-x86_64-apple-darwin
+          - platform: ubuntu-22.04
+            args: ''
+            backend-artifact: backend-x86_64-unknown-linux-gnu
+          - platform: windows-latest
+            args: ''
+            backend-artifact: backend-x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (Ubuntu)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Download backend binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.backend-artifact }}
+          path: src-tauri/binaries/
+
+      - name: Make backend binary executable (Unix)
+        if: matrix.platform != 'windows-latest'
+        run: chmod +x src-tauri/binaries/ustat-backend
+
+      - name: Generate Tauri icons from logo
+        run: |
+          mkdir -p src-tauri/icons
+          # Use the existing PWA icon as source for Tauri icons
+          cp frontend/public/pwa-512.png src-tauri/icons/icon.png
+          cp frontend/public/pwa-512.png src-tauri/icons/128x128@2x.png
+          cp frontend/public/pwa-192.png src-tauri/icons/128x128.png
+          cp frontend/public/pwa-192.png src-tauri/icons/32x32.png
+          # Generate .icns and .ico will be handled by tauri-action if missing
+          # For now, copy the PNG as placeholder — tauri-action handles conversion
+          cp frontend/public/pwa-512.png src-tauri/icons/icon.icns || true
+          cp frontend/public/pwa-512.png src-tauri/icons/icon.ico || true
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        id: tauri-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: v__VERSION__
+          releaseName: 'uSTAT v__VERSION__'
+          releaseBody: |
+            ## uSTAT Desktop v__VERSION__
+
+            Download the installer for your operating system below.
+
+            **What's included:**
+            - Full statistical analysis engine (90+ methods)
+            - Works completely offline — no internet required
+            - All data stays on your computer
+
+            ### Installation
+            - **macOS**: Download `.dmg`, drag to Applications
+            - **Windows**: Download `.msi` installer or `.exe` portable
+            - **Linux**: Download `.deb` or `.AppImage`
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Upload Windows portable binary
+        if: matrix.platform == 'windows-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $TAG = "${{ github.ref_name }}"
+          $VERSION = $TAG -replace '^v', ''
+          $EXE = "src-tauri/target/release/ustat-desktop.exe"
+          $DEST = "uSTAT_${VERSION}_x64-portable.exe"
+          if (Test-Path $EXE) {
+            Copy-Item $EXE $DEST
+            gh release upload $TAG $DEST --repo ${{ github.repository }} --clobber
+          }
+        shell: pwsh

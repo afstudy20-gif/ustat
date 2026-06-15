@@ -1,0 +1,30 @@
+[package]
+name = "ustat-desktop"
+version = "0.1.0"
+description = "uSTAT Desktop — Statistical Analysis Platform"
+authors = ["Dr. Yusuf Hoşoğlu"]
+edition = "2021"
+
+[lib]
+name = "ustat_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tokio = { version = "1", features = ["time"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
