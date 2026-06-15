@@ -54,7 +54,6 @@ logs/
 # Tauri / Rust
 src-tauri/target/
 src-tauri/binaries/
-src-tauri/icons/
 
 # Hypothesis
 .hypothesis/

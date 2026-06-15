@@ -1,0 +1,2 @@
+# Placeholder to keep the binaries directory tracked in git.
+# In production build (GitHub Actions), this directory will contain the PyInstaller-bundled backend.
