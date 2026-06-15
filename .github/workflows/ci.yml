@@ -22,7 +22,6 @@ jobs:
             exit 1
           fi
           echo "No oversized tracked files."
-
   backend:
     name: Backend (pytest)
     runs-on: ubuntu-latest
