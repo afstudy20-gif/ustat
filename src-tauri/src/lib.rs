@@ -57,9 +57,9 @@ pub fn run() {
                 .expect("cannot resolve resource dir");
 
             let backend_binary = if cfg!(target_os = "windows") {
-                resource_dir.join("binaries").join("ustat-backend").join("ustat-backend.exe")
+                resource_dir.join("binaries").join("ustat-backend.exe")
             } else {
-                resource_dir.join("binaries").join("ustat-backend").join("ustat-backend")
+                resource_dir.join("binaries").join("ustat-backend")
             };
 
             // Spawn the backend process
