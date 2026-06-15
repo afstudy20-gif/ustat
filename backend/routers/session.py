@@ -59,6 +59,8 @@ async def update_cell(session_id: str, body: CellUpdate):
     store.save(session_id, df)
 
     stored = df.at[body.row_index, body.column]
+    if hasattr(stored, "item"):
+        stored = stored.item()
     try:
         if isinstance(stored, float) and (np.isnan(stored) or np.isinf(stored)):
             stored = None

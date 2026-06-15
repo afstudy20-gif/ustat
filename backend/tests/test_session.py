@@ -103,7 +103,7 @@ def test_reorder_columns(client, df):
 
 def test_delete_row(client, df):
     sid = _new_session(df, "delrow")
-    r = client.delete(f"/api/sessions/{sid}/row/2")  # 1-based -> index 1
+    r = client.delete(f"/api/sessions/{sid}/row/1")  # 0-based -> index 1
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["rows"] == len(df) - 1
@@ -112,7 +112,7 @@ def test_delete_row(client, df):
 
 def test_delete_row_invalid_index(client, df):
     sid = _new_session(df, "delrow_bad")
-    r = client.delete(f"/api/sessions/{sid}/row/0")  # 1-based 0 -> target -1
+    r = client.delete(f"/api/sessions/{sid}/row/-1")  # negative index -> 400 Bad Request
     assert r.status_code == 400, r.text
 
 
