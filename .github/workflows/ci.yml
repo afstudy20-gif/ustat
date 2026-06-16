@@ -42,7 +42,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
       - name: Verify critical packages
-        run: python -c "import httpx2; from fastapi.testclient import TestClient; print('OK: httpx2 + TestClient available')"
+        run: python -c "import httpx2; from fastapi.testclient import TestClient; print('OK - httpx2 + TestClient available')"
       - name: Run tests with coverage
         # Ratchet: 60 floor (current ≈64%). Raise toward 80 as coverage
         # improves — never lower it.
