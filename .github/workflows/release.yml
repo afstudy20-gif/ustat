@@ -106,7 +106,8 @@ jobs:
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
-            xdg-utils
+            xdg-utils \
+            libfuse2
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -138,18 +139,7 @@ jobs:
         run: chmod +x src-tauri/binaries/ustat-backend
 
       - name: Generate Tauri icons from logo
-        shell: bash
-        run: |
-          mkdir -p src-tauri/icons
-          # Use the existing PWA icon as source for Tauri icons
-          cp frontend/public/pwa-512.png src-tauri/icons/icon.png
-          cp frontend/public/pwa-512.png src-tauri/icons/128x128@2x.png
-          cp frontend/public/pwa-192.png src-tauri/icons/128x128.png
-          cp frontend/public/pwa-192.png src-tauri/icons/32x32.png
-          # Generate .icns and .ico will be handled by tauri-action if missing
-          # For now, copy the PNG as placeholder — tauri-action handles conversion
-          cp frontend/public/pwa-512.png src-tauri/icons/icon.icns || true
-          cp frontend/public/pwa-512.png src-tauri/icons/icon.ico || true
+        run: npx -y @tauri-apps/cli icon frontend/public/pwa-512.png
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
