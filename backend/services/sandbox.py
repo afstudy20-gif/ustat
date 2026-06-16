@@ -20,6 +20,7 @@ is documented as a roadmap step in `backend/SECURITY.md`.
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import json
 import os
@@ -60,9 +61,26 @@ def _serialise_df(df: pd.DataFrame) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+@functools.lru_cache(maxsize=1)
+def _is_unshare_working() -> bool:
+    unshare = shutil.which("unshare")
+    if unshare is None:
+        return False
+    try:
+        # Check if unshare actually works in this environment (e.g. not blocked by docker/CI)
+        res = subprocess.run(
+            [unshare, "--user", "--net", "--map-root-user", "true"],
+            capture_output=True,
+            timeout=2
+        )
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
 def _network_wrapper() -> list[str]:
     """Return a command prefix that strips network access when possible."""
-    if sys.platform == "linux":
+    if sys.platform == "linux" and _is_unshare_working():
         unshare = shutil.which("unshare")
         if unshare is not None:
             return [unshare, "--user", "--net", "--map-root-user"]
