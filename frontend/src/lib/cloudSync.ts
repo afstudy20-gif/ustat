@@ -283,24 +283,29 @@ async function initTokenClient(): Promise<void> {
     client_id: CLOUD_CONFIG.GOOGLE_CLIENT_ID,
     scope: CLOUD_CONFIG.SCOPE,
     callback: (resp: GisTokenResponse) => {
-      if (resp.error) {
+      if (resp.error || !resp.access_token) {
         console.error("[cloud] token error", resp);
-        setStatus("error", resp.error_description || resp.error);
+        setStatus("error", resp.error_description || resp.error || "no token");
         signedIn = false;
         return;
       }
-      accessToken = resp.access_token!;
+      accessToken = resp.access_token;
       tokenExpiresAt = Date.now() + ((resp.expires_in ?? 3600) - 60) * 1000;
       signedIn = true;
       authMode = "popup";
       persistToken();
+      // Fire the UI update IMMEDIATELY so the button flips to "connected"
+      // before any network round-trip. fetchUserInfo + syncNow are best-effort
+      // enrichment — they must never block the signed-in state, otherwise a
+      // CSP/network hiccup leaves the user stuck "not connected" and the
+      // popup re-opens on every click.
+      setStatus("syncing", "Initial sync...");
       fetchUserInfo()
-        .then(() => {
-          setStatus("syncing", "Initial sync...");
-          syncNow().catch((e) => setStatus("error", e.message));
-          startBackgroundPull();
-        })
-        .catch((e) => setStatus("error", e.message));
+        .catch((e) => console.warn("[cloud] userinfo failed (non-fatal)", e))
+        .finally(() => emit()); // re-emit so avatar/email appear once known
+      syncNow()
+        .catch((e) => console.warn("[cloud] initial sync failed (non-fatal)", e));
+      startBackgroundPull();
     },
     error_callback: (err: GisErrorCallback) => {
       // Popup blocked / failed to open (common in TWA / restrictive WebViews)
@@ -435,6 +440,13 @@ function handleRedirectCallback(): "ok" | "error" | null {
 export async function signIn(): Promise<void> {
   if (!CLOUD_CONFIG.GOOGLE_CLIENT_ID) {
     setStatus("setupNeeded", "OAuth client ID not configured in cloudConfig.ts");
+    return;
+  }
+  // Already signed in with a live token — don't re-trigger the consent
+  // popup (that was the "clicking again reopens the popup" bug). Just
+  // surface the current status so the UI is in sync.
+  if (signedIn && accessToken && tokenExpiresAt > Date.now()) {
+    emit();
     return;
   }
   // Route platforms with broken popups straight to redirect
@@ -885,9 +897,23 @@ function startBackgroundPull(): void {
 }
 
 async function afterSignedIn(): Promise<void> {
+  // Signed-in state is already persisted before this runs; treat userinfo +
+  // sync as best-effort enrichment. A failure here must never revert to a
+  // non-connected UI (that was the root cause of the "stuck not-connected"
+  // bug after the redirect return).
   setStatus("syncing", "");
-  await fetchUserInfo();
-  await syncNow();
+  try {
+    await fetchUserInfo();
+  } catch (e) {
+    console.warn("[cloud] userinfo after sign-in failed (non-fatal)", e);
+  } finally {
+    emit();
+  }
+  try {
+    await syncNow();
+  } catch (e) {
+    console.warn("[cloud] initial sync after sign-in failed (non-fatal)", e);
+  }
   startBackgroundPull();
 }
 
