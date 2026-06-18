@@ -32,9 +32,14 @@ import {
 } from "./cloudConfig";
 import {
   listRecentSessions,
+  listTrashedSessions,
   getRecentSession,
   upsertRecentSessionRaw,
+  trashSession,
+  purgeExpiredTrash,
+  purgeSession,
   notifySessionsChanged,
+  TRASH_TTL_MS,
   type RecentSessionMeta,
   type RecentSessionRecord,
 } from "./sessionDb";
@@ -440,6 +445,15 @@ async function downloadJson<T>(fileId: string, allowRedirect = false): Promise<T
   return (await r.json()) as T;
 }
 
+/** Permanently delete a Drive file (used to purge expired tombstones). */
+async function deleteFile(fileId: string, allowRedirect = false): Promise<void> {
+  try {
+    await driveFetch(`/files/${fileId}`, { method: "DELETE" }, allowRedirect);
+  } catch (e) {
+    console.warn("[cloud] deleteFile failed (non-fatal)", fileId, e);
+  }
+}
+
 async function uploadJson<T>(
   name: string,
   json: unknown,
@@ -483,6 +497,10 @@ interface RemoteIndexEntry {
   updated: number; // epoch ms (LWW clock — matches sessionDb savedAt)
   bytes: number;
   rev: string | null; // Drive file id of ustat-session-<id>.json
+  // Tombstone: null/omitted = active; a timestamp = moved to Trash at that
+  // time. After TRASH_TTL_MS the tombstone (and its session file) are
+  // permanently deleted from Drive during push().
+  deletedAt?: number | null;
 }
 
 interface RemoteIndex {
@@ -506,9 +524,13 @@ function findFile(files: DriveFile[], name: string): DriveFile | undefined {
 }
 
 /**
- * Pull remote session snapshots into IndexedDB (and thereby the Recent
- * Sessions list). For each remote entry, only overwrites the local record
- * when the remote `updated` is newer. Returns summary counts.
+ * Pull remote session snapshots + tombstones into IndexedDB.
+ *
+ * Tombstone handling: if a remote entry carries `deletedAt`, the matching
+ * local record is soft-deleted (moved to Trash) with that timestamp — so a
+ * delete on device A propagates to device B. If the remote tombstone is
+ * already older than TRASH_TTL_MS, the record is purged permanently on both
+ * sides during push() (Drive file + index entry) rather than here.
  */
 async function pull(allowRedirect = false): Promise<{
   pulled: number;
@@ -524,8 +546,10 @@ async function pull(allowRedirect = false): Promise<{
   const remoteSessions = remoteIndex.sessions ?? [];
   const fileByName = new Map(files.map((f) => [f.name, f]));
 
-  // Build the current local index once so we can compare updated timestamps.
-  const localList = await listRecentSessions();
+  // Build the current local index (active + trashed) once so we can compare.
+  const localActive = await listRecentSessions();
+  const localTrashed = await listTrashedSessions();
+  const localList = [...localActive, ...localTrashed];
   const localById = new Map(localList.map((m) => [m.id, m]));
 
   let pulled = 0;
@@ -535,6 +559,26 @@ async function pull(allowRedirect = false): Promise<{
     const loc = localById.get(r.id);
     const localByName = localList.find((m) => m.name === r.name);
     const candidate = loc ?? localByName;
+
+    // ── Tombstone (remote trashed) ───────────────────────────────────
+    if (r.deletedAt) {
+      // Already expired remotely? push() will have removed it from the index;
+      // if we still see it (e.g. mid-sync), purge locally too.
+      if (Date.now() - r.deletedAt > TRASH_TTL_MS) {
+        if (candidate) await purgeSession(candidate.id);
+        continue;
+      }
+      // Propagate the tombstone: only move-to-trash if the local record is
+      // currently active AND the remote delete is newer than the local
+      // snapshot (LWW — a more recent local edit wins over a stale delete).
+      if (candidate && !candidate.deletedAt && r.deletedAt > (candidate.savedAt ?? 0)) {
+        await trashSession(candidate.id);
+        pulled++; // count as a pulled change so the UI refreshes
+      }
+      continue;
+    }
+
+    // ── Active session ───────────────────────────────────────────────
     const remoteNewer =
       !candidate || (r.updated ?? 0) > (candidate.savedAt ?? 0);
     if (!remoteNewer) continue;
@@ -576,9 +620,15 @@ async function pull(allowRedirect = false): Promise<{
 }
 
 /**
- * Push local session snapshots to Drive. For each local record, uploads it
- * when local `savedAt` is newer than the remote `updated` (LWW). Rebuilds
- * and pushes the remote index every time. Returns summary counts.
+ * Push local session snapshots + tombstones to Drive.
+ *
+ * - Active records: upload payload + index entry (deletedAt: null).
+ * - Trashed records: keep index entry with deletedAt = timestamp (payload is
+ *   still written so the record is restorable). After TRASH_TTL_MS the
+ *   tombstone — and its Drive session file — are permanently deleted here.
+ * - Records that exist only remotely (deleted on this device) are dropped
+ *   from the index; their session files are left for Drive's own cleanup
+ *   (orphaned appDataFolder files cost negligible quota).
  */
 async function push(allowRedirect = false): Promise<{
   pushed: number;
@@ -594,30 +644,54 @@ async function push(allowRedirect = false): Promise<{
   );
   const fileMap = new Map(files.map((f) => [f.name, f]));
 
-  // Fetch the FULL local records (with payload) for upload.
-  const localList = await listRecentSessions();
+  // All local records: active + trashed. Both must be reflected in the index
+  // so deletes/restore propagate to other devices.
+  const localActive = await listRecentSessions();
+  const localTrashed = await listTrashedSessions();
+  const localAll = [...localActive, ...localTrashed];
+  const now = Date.now();
+
   let pushed = 0;
   const failures: string[] = [];
   const newEntries: RemoteIndexEntry[] = [];
 
-  for (const meta of localList) {
+  for (const meta of localAll) {
+    const isTrashed = !!meta.deletedAt;
+
+    // ── Expired tombstone: purge from Drive (index + session file) ─────
+    if (isTrashed && meta.deletedAt! && now - meta.deletedAt! > TRASH_TTL_MS) {
+      const r = remoteMap.get(meta.id);
+      const fname = sessionFileName(meta.id);
+      const existing = fileMap.get(fname);
+      if (existing) await deleteFile(existing.id, allowRedirect);
+      if (r?.rev) await deleteFile(r.rev, allowRedirect);
+      // Not added to newEntries → drops out of the remote index.
+      pushed++;
+      continue;
+    }
+
     let rec: RecentSessionRecord | undefined;
     try {
       rec = await getRecentSession(meta.id);
     } catch {
       rec = undefined;
     }
-    if (!rec) continue;
+    // For trashed records we may not need the payload, but we keep it so the
+    // record stays restorable on other devices within the TTL window.
+    const payload = rec?.payload ?? "";
 
     const r = remoteMap.get(meta.id);
-    const localNewer = !r || (meta.savedAt ?? 0) > (r.updated ?? 0);
+    // For trashed records, "newer" is judged on the deletedAt tombstone vs
+    // the remote deletedAt; for active records, on savedAt vs remote updated.
+    const localClock = isTrashed ? meta.deletedAt! : meta.savedAt;
+    const remoteClock = isTrashed ? r?.deletedAt ?? 0 : r?.updated ?? 0;
+    const localNewer = !r || localClock > remoteClock;
     if (!localNewer) {
-      // Keep the existing remote entry as-is.
-      newEntries.push(r);
+      // Keep the existing remote entry as-is (carry over its deletedAt too).
+      newEntries.push({ ...r, deletedAt: isTrashed ? r!.deletedAt : r?.deletedAt });
       continue;
     }
 
-    const payload = rec.payload ?? "";
     if (payload.length > CLOUD_CONFIG.MAX_SESSION_BYTES) {
       console.warn(
         "[cloud] session too large, skipping",
@@ -632,6 +706,7 @@ async function push(allowRedirect = false): Promise<{
           updated: meta.savedAt,
           bytes: payload.length,
           rev: null,
+          deletedAt: meta.deletedAt ?? null,
         },
       );
       continue;
@@ -650,22 +725,31 @@ async function push(allowRedirect = false): Promise<{
         nCols: meta.nCols,
         activeTab: meta.activeTab,
         source: meta.source,
+        deletedAt: meta.deletedAt ?? null,
       },
       payload,
     };
     try {
-      const uploaded = await uploadJson<Record<string, never>>(
-        fname,
-        fileObj,
-        existing ? existing.id : null,
-        allowRedirect,
-      );
+      // Only upload the session file if it actually changed (active records
+      // always need their payload; trashed records only need it once so they
+      // remain restorable — skip re-upload if the file already exists).
+      let rev = r?.rev ?? null;
+      if (!isTrashed || !existing) {
+        const uploaded = await uploadJson<Record<string, never>>(
+          fname,
+          fileObj,
+          existing ? existing.id : null,
+          allowRedirect,
+        );
+        rev = uploaded.id;
+      }
       newEntries.push({
         id: meta.id,
         name: meta.name,
         updated: meta.savedAt,
         bytes: payload.length,
-        rev: uploaded.id,
+        rev,
+        deletedAt: meta.deletedAt ?? null,
       });
       pushed++;
     } catch (e) {
@@ -678,6 +762,7 @@ async function push(allowRedirect = false): Promise<{
           updated: meta.savedAt,
           bytes: payload.length,
           rev: null,
+          deletedAt: meta.deletedAt ?? null,
         },
       );
     }
@@ -705,6 +790,9 @@ export async function syncNow(allowRedirect = false): Promise<void> {
   inFlight = true;
   setStatus("syncing", "");
   try {
+    // Age out expired tombstones locally BEFORE syncing, so they are purged
+    // from Drive (not re-pushed as live tombstones) on this same pass.
+    await purgeExpiredTrash();
     const p1 = await pull(allowRedirect);
     const p2 = await push(allowRedirect);
     const failures = [...p1.failures, ...p2.failures];

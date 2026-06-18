@@ -35,6 +35,10 @@ export interface RecentSessionMeta {
   nCols?: number;
   activeTab?: string;       // header tab the user was on
   source: "auto" | "manual";
+  // Soft-delete (trash) timestamp. null/undefined = active record; a value =
+  // moved to the Trash bin at that epoch ms. After TRASH_TTL_MS it is purged
+  // permanently (local + Drive) by purgeExpiredTrash().
+  deletedAt?: number | null;
 }
 
 /** Full record stored in IndexedDB — extends the metadata with the
@@ -71,19 +75,34 @@ function getDb(): SessionDB {
   db.version(2).stores({
     sessions: "id, savedAt, serverSessionId, name",
   });
+  // v3 adds a `deletedAt` index for the Trash bin — records moved to trash
+  // are soft-deleted (deletedAt = timestamp) rather than hard-removed, so
+  // they can be restored and are aged out after TRASH_TTL_MS.
+  db.version(3).stores({
+    sessions: "id, savedAt, serverSessionId, name, deletedAt",
+  });
   _db = db;
   return db;
 }
 
-// ── Capacity policy ──────────────────────────────────────────────────
+// ── Capacity & Trash policy ──────────────────────────────────────────
 
 const MAX_SESSIONS = 20;
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024; // 200 MB hard cap
 
-/** Drop the oldest records until the store fits within the cap. */
+/** How long a trashed record survives before permanent deletion. */
+export const TRASH_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+/** How often purgeExpiredTrash runs while the app is open. */
+export const TRASH_PURGE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Drop the oldest ACTIVE records until the store fits within the cap.
+ *  Trashed records are ignored here — they age out via purgeExpiredTrash(). */
 async function pruneToCap(): Promise<void> {
   const db = getDb();
-  const all = await db.sessions.orderBy("savedAt").toArray();
+  const all = await db.sessions
+    .orderBy("savedAt")
+    .filter((r) => !r.deletedAt)
+    .toArray();
   if (all.length <= MAX_SESSIONS) {
     const total = all.reduce((s, r) => s + r.sizeBytes, 0);
     if (total <= MAX_TOTAL_BYTES) return;
@@ -112,14 +131,21 @@ function newLocalId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Collapse records that share a display name down to the newest one.
+/** Collapse ACTIVE records that share a display name down to the newest
+ *  one. Trashed records are excluded — a name can legitimately appear once
+ *  in the active list and once in the Trash.
+ *
  *  The server session_id changes on every upload / reload / restore, so
  *  the same logical file accumulates a row per browser session. Identity
  *  that survives reloads is the *name*, so we keep the freshest snapshot
  *  per name and drop the stale ones. */
 async function dedupeByName(): Promise<void> {
   const db = getDb();
-  const rows = await db.sessions.orderBy("savedAt").reverse().toArray();
+  const rows = await db.sessions
+    .orderBy("savedAt")
+    .reverse()
+    .filter((r) => !r.deletedAt)
+    .toArray();
   const seen = new Set<string>();
   const stale: string[] = [];
   for (const r of rows) {
@@ -135,10 +161,30 @@ async function dedupeByName(): Promise<void> {
   }
 }
 
+/** List ACTIVE records (deletedAt null/undefined), newest first. */
 export async function listRecentSessions(): Promise<RecentSessionMeta[]> {
   const db = getDb();
   await dedupeByName();
-  const rows = await db.sessions.orderBy("savedAt").reverse().toArray();
+  const rows = await db.sessions
+    .orderBy("savedAt")
+    .reverse()
+    .filter((r) => !r.deletedAt)
+    .toArray();
+  return rows.map((row) => {
+    const { payload: _ignored, ...meta } = row;
+    void _ignored;
+    return meta;
+  });
+}
+
+/** List TRASHED records (deletedAt set), most-recently-trashed first. */
+export async function listTrashedSessions(): Promise<RecentSessionMeta[]> {
+  const db = getDb();
+  const rows = await db.sessions
+    .orderBy("deletedAt")
+    .reverse()
+    .filter((r) => !!r.deletedAt)
+    .toArray();
   return rows.map((row) => {
     const { payload: _ignored, ...meta } = row;
     void _ignored;
@@ -150,12 +196,80 @@ export async function getRecentSession(id: string): Promise<RecentSessionRecord 
   return getDb().sessions.get(id);
 }
 
-export async function deleteRecentSession(id: string): Promise<void> {
+/** Get a trashed record including its payload (for restore). */
+export async function getTrashedSession(id: string): Promise<RecentSessionRecord | undefined> {
+  const rec = await getDb().sessions.get(id);
+  return rec && rec.deletedAt ? rec : undefined;
+}
+
+// ── Trash: soft-delete / restore / purge ─────────────────────────────
+
+/** Move a record to the Trash (soft delete). The record stays in IndexedDB
+ *  (and is mirrored to Drive as a tombstone) so it can be restored within
+ *  TRASH_TTL_MS; after that purgeExpiredTrash() removes it permanently. */
+export async function trashSession(id: string): Promise<void> {
+  await getDb().sessions.update(id, { deletedAt: Date.now() });
+}
+
+/** Restore a trashed record back to active. Resets savedAt to now so the
+ *  card reappears at the top of the Recent list and is re-pushed to Drive
+ *  as active (tombstone cleared). */
+export async function restoreSession(id: string): Promise<void> {
+  await getDb().sessions.update(id, { deletedAt: null, savedAt: Date.now() });
+}
+
+/** Permanently delete a single record from IndexedDB (hard delete). Used
+ *  by "Kalıcı Sil" in the Trash bin and by purgeExpiredTrash(). */
+export async function purgeSession(id: string): Promise<void> {
   await getDb().sessions.delete(id);
 }
 
+/** Permanently delete ALL trashed records. */
+export async function emptyTrash(): Promise<void> {
+  const db = getDb();
+  const ids = await db.sessions
+    .where("deletedAt")
+    .above(0)
+    .primaryKeys();
+  await db.sessions.bulkDelete(ids);
+}
+
+/**
+ * Permanently delete trashed records older than TRASH_TTL_MS. Idempotent —
+ * safe to call on app open and periodically. Returns the number purged.
+ * Mirrors notepad's auto-expiry: items stay in Trash for 30 days, then are
+ * gone for good (local AND Drive, via the tombstone sync in cloudSync.ts).
+ */
+export async function purgeExpiredTrash(
+  ttlMs: number = TRASH_TTL_MS,
+  now: number = Date.now(),
+): Promise<number> {
+  const db = getDb();
+  const cutoff = now - ttlMs;
+  // deletedAt index gives us all trashed records; filter to expired only.
+  const expiredIds = await db.sessions
+    .where("deletedAt")
+    .belowOrEqual(cutoff)
+    .primaryKeys();
+  if (expiredIds.length) {
+    await db.sessions.bulkDelete(expiredIds);
+  }
+  return expiredIds.length;
+}
+
+/** Remove all ACTIVE records (leaves the Trash untouched). */
 export async function clearAllRecentSessions(): Promise<void> {
-  await getDb().sessions.clear();
+  const db = getDb();
+  const ids = await db.sessions
+    .filter((r) => !r.deletedAt)
+    .primaryKeys();
+  await db.sessions.bulkDelete(ids);
+}
+
+/** Permanently delete a single ACTIVE record (legacy hard-delete). Kept for
+ *  any callers that still want immediate removal rather than trash. */
+export async function deleteRecentSession(id: string): Promise<void> {
+  await getDb().sessions.delete(id);
 }
 
 /** Upsert a session blob, deduping so the same logical file occupies a

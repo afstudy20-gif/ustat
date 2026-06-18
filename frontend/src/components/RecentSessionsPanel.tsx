@@ -18,11 +18,16 @@ import api from "../api";
 import { useStore } from "../store";
 import {
   listRecentSessions,
-  deleteRecentSession,
+  listTrashedSessions,
+  trashSession,
+  restoreSession,
+  purgeSession,
+  emptyTrash,
   getRecentSession,
   subscribeSessions,
   getStorageEstimate,
   clearAllRecentSessions,
+  TRASH_TTL_MS,
   type RecentSessionMeta,
 } from "../lib/sessionDb";
 import { cloudSync } from "../lib/cloudSync";
@@ -70,6 +75,8 @@ export default function RecentSessionsPanel() {
   const setSession = useStore((s) => s.setSession);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const [items, setItems] = useState<RecentSessionMeta[]>([]);
+  const [trashedItems, setTrashedItems] = useState<RecentSessionMeta[]>([]);
+  const [trashOpen, setTrashOpen] = useState(false);
   const [estimate, setEstimate] = useState<{ count: number; bytes: number; capCount: number; capBytes: number } | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,13 +92,19 @@ export default function RecentSessionsPanel() {
 
   const reload = useCallback(async () => {
     try {
-      const [list, est] = await Promise.all([listRecentSessions(), getStorageEstimate()]);
+      const [list, trash, est] = await Promise.all([
+        listRecentSessions(),
+        listTrashedSessions(),
+        getStorageEstimate(),
+      ]);
       setItems(list);
+      setTrashedItems(trash);
       setEstimate(est);
     } catch {
       // IndexedDB unavailable (Safari private mode etc.) — silently
       // degrade; the upload zone still works.
       setItems([]);
+      setTrashedItems([]);
       setEstimate(null);
     } finally {
       setLoaded(true);
@@ -142,8 +155,32 @@ export default function RecentSessionsPanel() {
   };
 
   const onDelete = async (id: string) => {
-    if (!window.confirm("Bu kayıt silinsin mi? Bu işlem geri alınamaz.")) return;
-    await deleteRecentSession(id);
+    // Soft-delete: move to Trash. Restoreable for 30 days, then permanently
+    // purged by purgeExpiredTrash() (local + Drive).
+    await trashSession(id);
+    void reload();
+  };
+
+  const onRestoreFromTrash = async (id: string) => {
+    setRestoring(id);
+    try {
+      await restoreSession(id);
+      await reload();
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  const onPurgeOne = async (id: string) => {
+    if (!window.confirm("Bu kayıt kalıcı olarak silinsin mi? Bu işlem geri alınamaz.")) return;
+    await purgeSession(id);
+    void reload();
+  };
+
+  const onEmptyTrash = async () => {
+    if (trashedItems.length === 0) return;
+    if (!window.confirm(`Çöp kutusundaki ${trashedItems.length} kayıt kalıcı olarak silinsin mi? Bu işlem geri alınamaz.`)) return;
+    await emptyTrash();
     void reload();
   };
 
@@ -279,7 +316,7 @@ export default function RecentSessionsPanel() {
               <button
                 onClick={() => onDelete(it.id)}
                 className="text-gray-400 hover:text-red-600 hover:bg-red-50 px-2 py-1.5 rounded-lg transition-colors"
-                title="Bu kaydı sil"
+                title="Çöp kutusuna taşı (30 gün sonra kalıcı silinir)"
               >
                 <Trash2 size={12} />
               </button>
@@ -287,6 +324,83 @@ export default function RecentSessionsPanel() {
           </div>
         ))}
       </div>
+
+      {/* Trash bin — collapsed by default; only renders when there are
+          trashed records. Each item shows when it was deleted and a
+          countdown to permanent purge. Restore / permanently-delete /
+          empty-trash actions mirror a typical recycle-bin UX. */}
+      {trashedItems.length > 0 && (
+        <div className="mt-3 border border-gray-200 rounded-xl overflow-hidden">
+          <button
+            onClick={() => setTrashOpen((v) => !v)}
+            className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+          >
+            <Trash2 size={14} className="text-gray-500 flex-shrink-0" />
+            <span className="text-xs font-semibold text-gray-600">
+              Çöp Kutusu
+            </span>
+            <span className="text-[10px] text-gray-400 bg-white border border-gray-200 rounded-full px-1.5 py-0.5">
+              {trashedItems.length}
+            </span>
+            <span className="ml-auto text-[10px] text-gray-400">
+              {trashOpen ? "Gizle ▲" : "Göster ▼"}
+            </span>
+          </button>
+
+          {trashOpen && (
+            <div className="p-2 space-y-1.5">
+              {trashedItems.map((it) => {
+                const deletedAt = it.deletedAt ?? Date.now();
+                const daysLeft = Math.max(
+                  0,
+                  Math.ceil((deletedAt + TRASH_TTL_MS - Date.now()) / (24 * 60 * 60 * 1000)),
+                );
+                return (
+                  <div
+                    key={it.id}
+                    className="flex items-center gap-2 bg-white border border-gray-200 rounded-lg px-2.5 py-2"
+                  >
+                    <FileText size={12} className="text-gray-400 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-gray-600 truncate" title={it.name}>
+                        {it.name}
+                      </p>
+                      <p className="text-[10px] text-gray-400">
+                        Silindi: {fmtAgo(deletedAt)} ·
+                        <span className={daysLeft <= 3 ? "text-amber-600 font-semibold" : ""}>
+                          {" "}{daysLeft} gün sonra kalıcı silinir
+                        </span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => onRestoreFromTrash(it.id)}
+                      disabled={restoring === it.id}
+                      className="inline-flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2 py-1 rounded transition-colors disabled:opacity-50"
+                      title="Geri yükle"
+                    >
+                      <RotateCcw size={10} />
+                      Geri Yükle
+                    </button>
+                    <button
+                      onClick={() => onPurgeOne(it.id)}
+                      className="inline-flex items-center text-[10px] font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded transition-colors"
+                      title="Kalıcı sil"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                );
+              })}
+              <button
+                onClick={onEmptyTrash}
+                className="w-full mt-1 text-[10px] font-semibold text-red-600 hover:text-red-700 hover:bg-red-50 py-1.5 rounded transition-colors"
+              >
+                Çöp Kutusunu Boşalt ({trashedItems.length})
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -92,6 +92,7 @@ import FactorPCAPanel from "./components/FactorPCAPanel";
 import BayesianPanel from "./components/BayesianPanel";
 import CloudSyncBar from "./components/CloudSyncBar";
 import { cloudSync } from "./lib/cloudSync";
+import { purgeExpiredTrash, notifySessionsChanged, TRASH_PURGE_INTERVAL_MS } from "./lib/sessionDb";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -574,6 +575,18 @@ export default function App() {
   // call before sign-in — it just warms up the GIS client. (Idempotent.)
   useEffect(() => {
     void cloudSync.init().catch((e) => console.warn("[cloud] init", e));
+    // Trash auto-expiry: purge trashed records older than 30 days on startup
+    // and every 5 minutes while the app is open. Runs before any Drive push
+    // so expired tombstones are removed locally AND remotely on the next sync.
+    void purgeExpiredTrash()
+      .then((n) => { if (n > 0) notifySessionsChanged(); })
+      .catch((e) => console.warn("[trash] purge failed", e));
+    const t = setInterval(() => {
+      void purgeExpiredTrash()
+        .then((n) => { if (n > 0) notifySessionsChanged(); })
+        .catch((e) => console.warn("[trash] purge failed", e));
+    }, TRASH_PURGE_INTERVAL_MS);
+    return () => clearInterval(t);
   }, []);
   // Header Save-As dropdown (consolidates dataset export + session JSON
   // — supersedes the dropdown previously hidden inside the DataTable
