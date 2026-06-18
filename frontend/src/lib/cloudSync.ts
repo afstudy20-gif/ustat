@@ -308,22 +308,26 @@ async function initTokenClient(): Promise<void> {
       startBackgroundPull();
     },
     error_callback: (err: GisErrorCallback) => {
-      // Popup blocked / failed to open (common in TWA / restrictive WebViews)
-      // → fall back to the universal redirect flow. User-cancelled = stay put.
-      console.warn("[cloud] GIS error", err);
-      if (
-        err &&
-        (err.type === "popup_failed_to_open" || err.type === "unknown")
-      ) {
-        void startRedirectAuth(false);
-      } else {
-        setStatus(
-          "idle",
-          err && err.type === "popup_closed"
-            ? ""
-            : (err && err.type) || "auth cancelled",
-        );
+      // GIS errors arrive as opaque minified objects (e.g. { type: "_.Cd" }).
+      // Log the WHOLE object so the real type/message is visible in the
+      // console, then route to the redirect flow on any non-user-cancel
+      // failure. Popup-based token requests commonly fail when third-party
+      // cookies are blocked (Safari ITP, Firefox ETP, embedded WebViews) or
+      // when the popup can't open — the redirect flow works in all of those.
+      console.error("[cloud] GIS error_callback", JSON.stringify(err), err);
+      const t = err?.type || "";
+      // User actively closed the popup → stay idle, don't surprise-redirect.
+      const userCancelled =
+        t === "popup_closed" || t === "user_cancelled" || t === "cancelled";
+      if (userCancelled) {
+        setStatus("idle", "");
+        return;
       }
+      // Anything else (popup_failed_to_open, idpiframe_*, unknown, _.Cd, …)
+      // → fall back to the full-page redirect flow, which is robust against
+      // third-party-cookie blocks and popup blockers.
+      setStatus("syncing", "Drive bağlanıyor (yönlendirme akışı)…");
+      void startRedirectAuth(false);
     },
   });
 }
