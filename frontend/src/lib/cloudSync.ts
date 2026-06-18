@@ -75,36 +75,12 @@ const AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth";
 
 // ── GIS type shims (minimal) ─────────────────────────────────────────
 
-interface GisTokenResponse {
-  access_token?: string;
-  expires_in?: number;
-  error?: string;
-  error_description?: string;
-}
-
-interface GisErrorCallback {
-  type?: string;
-}
-
-interface GisTokenClient {
-  requestAccessToken: (cfg: { prompt?: string }) => void;
-  callback: (resp: GisTokenResponse) => void;
-}
-
-interface GisClient {
-  initTokenClient: (cfg: {
-    client_id: string;
-    scope: string;
-    callback: (resp: GisTokenResponse) => void;
-    error_callback?: (err: GisErrorCallback) => void;
-  }) => GisTokenClient;
-  revoke: (token: string, cb: () => void) => void;
-}
-
+// Minimal GIS type shim — only `revoke` is still used (in signOut) now that
+// sign-in/refresh use the redirect flow. Keeping the global so TS knows about
+// window.google.accounts.oauth2.revoke.
 interface GoogleAccounts {
   oauth2: {
-    initTokenClient: GisClient["initTokenClient"];
-    revoke: GisClient["revoke"];
+    revoke: (token: string, cb: () => void) => void;
   };
 }
 
@@ -116,7 +92,6 @@ declare global {
 
 // ── State ────────────────────────────────────────────────────────────
 
-let tokenClient: GisTokenClient | null = null;
 let accessToken: string | null = null;
 let tokenExpiresAt = 0;
 let userInfo: CloudUserInfo | null = null;
@@ -132,38 +107,8 @@ let listeners: Listener[] = [];
 let inFlight = false;
 
 // ── Platform detection ───────────────────────────────────────────────
-// iOS standalone PWAs (and some embedded contexts) break window.open OAuth
-// popups. Detect and route those to a full-page redirect flow instead.
-
-function isStandalone(): boolean {
-  try {
-    return (
-      (window.matchMedia &&
-        window.matchMedia("(display-mode: standalone)").matches) ||
-      (window.navigator as unknown as { standalone?: boolean }).standalone ===
-        true
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isIOS(): boolean {
-  return (
-    /iP(hone|ad|od)/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-  );
-}
-
-function gisAvailable(): boolean {
-  return !!(window.google && window.google.accounts?.oauth2);
-}
-
-// Prefer redirect when popups are unreliable: iOS standalone, or GIS lib unavailable.
-function preferRedirect(): boolean {
-  if (isStandalone() && isIOS()) return true;
-  return false;
-}
+// Sign-in always uses the full-page redirect flow (see note above), so no
+// popup/platform-specific routing is needed here.
 
 function redirectUri(): string {
   // Must EXACTLY match an "Authorized redirect URI" in the OAuth client config.
@@ -256,77 +201,12 @@ function restoreUser(): CloudUserInfo | null {
   }
 }
 
-// ── GIS init ─────────────────────────────────────────────────────────
-
-function ensureGISLoaded(): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.accounts?.oauth2) {
-      resolve();
-      return;
-    }
-    let waited = 0;
-    const poll = setInterval(() => {
-      if (window.google?.accounts?.oauth2) {
-        clearInterval(poll);
-        resolve();
-      } else if ((waited += 100) > 10_000) {
-        clearInterval(poll);
-        reject(new Error("GIS client failed to load"));
-      }
-    }, 100);
-  });
-}
-
-async function initTokenClient(): Promise<void> {
-  await ensureGISLoaded();
-  tokenClient = window.google!.accounts.oauth2.initTokenClient({
-    client_id: CLOUD_CONFIG.GOOGLE_CLIENT_ID,
-    scope: CLOUD_CONFIG.SCOPE,
-    callback: (resp: GisTokenResponse) => {
-      if (resp.error || !resp.access_token) {
-        console.error("[cloud] token error", resp);
-        setStatus("error", resp.error_description || resp.error || "no token");
-        signedIn = false;
-        return;
-      }
-      accessToken = resp.access_token;
-      tokenExpiresAt = Date.now() + ((resp.expires_in ?? 3600) - 60) * 1000;
-      signedIn = true;
-      authMode = "popup";
-      persistToken();
-      // Fire the UI update IMMEDIATELY so the button flips to "connected"
-      // before any network round-trip. fetchUserInfo + syncNow are best-effort
-      // enrichment — they must never block the signed-in state, otherwise a
-      // CSP/network hiccup leaves the user stuck "not connected" and the
-      // popup re-opens on every click.
-      setStatus("syncing", "Initial sync...");
-      fetchUserInfo()
-        .catch((e) => console.warn("[cloud] userinfo failed (non-fatal)", e))
-        .finally(() => emit()); // re-emit so avatar/email appear once known
-      syncNow()
-        .catch((e) => console.warn("[cloud] initial sync failed (non-fatal)", e));
-      startBackgroundPull();
-    },
-    error_callback: (err: GisErrorCallback) => {
-      // GIS errors arrive as opaque minified objects. Log the WHOLE object
-      // so the real type/message is visible in the console.
-      console.error("[cloud] GIS error_callback", JSON.stringify(err), err);
-      // NOTE: "Popup window closed" / type:"popup_closed" is fired BOTH when
-      // the user manually closes the popup AND — critically — when GIS
-      // itself closes the popup because third-party cookies are blocked
-      // (Safari ITP, Firefox ETP, Chrome incognito, embedded WebViews). In
-      // that case the popup opens then immediately closes without ever
-      // showing consent, so it looks like "user cancelled" but isn't. Since
-      // we can't reliably tell the two apart, route EVERY popup failure to
-      // the full-page redirect flow, which is robust against third-party-
-      // cookie blocks. The user already clicked "Drive Bağla", so a
-      // same-tab redirect to Google is the expected next step, not a
-      // surprise.
-      setStatus("syncing", "Drive'a yönlendiriliyor…");
-      void startRedirectAuth(false);
-    },
-  });
-}
+// NOTE: sign-in and refresh both use the full-page redirect flow. The GIS
+// popup token flow was removed because it is unreliable under third-party
+// cookie blocking (Safari ITP / Firefox ETP / incognito / embedded
+// WebViews): Google's GIS script opens the popup then immediately closes it
+// without showing consent, firing { type: 'popup_closed' }. The redirect
+// flow navigates the whole tab and works everywhere.
 
 async function fetchUserInfo(): Promise<void> {
   try {
@@ -442,27 +322,20 @@ export async function signIn(): Promise<void> {
     setStatus("setupNeeded", "OAuth client ID not configured in cloudConfig.ts");
     return;
   }
-  // Already signed in with a live token — don't re-trigger the consent
-  // popup (that was the "clicking again reopens the popup" bug). Just
+  // Already signed in with a live token — don't re-trigger auth. Just
   // surface the current status so the UI is in sync.
   if (signedIn && accessToken && tokenExpiresAt > Date.now()) {
     emit();
     return;
   }
-  // Route platforms with broken popups straight to redirect
-  if (preferRedirect()) {
-    await startRedirectAuth(false);
-    return;
-  }
-  try {
-    if (!tokenClient) await initTokenClient();
-    // GIS prompts for consent on first call; silent thereafter
-    tokenClient!.requestAccessToken({ prompt: signedIn ? "" : "consent" });
-  } catch (e) {
-    // GIS unavailable (offline lib, blocked) → fall back to redirect
-    console.warn("[cloud] popup auth unavailable, using redirect", e);
-    await startRedirectAuth(false);
-  }
+  // Use the full-page REDIRECT flow as the default. The GIS popup token
+  // flow is unreliable in modern browsers that block third-party cookies
+  // (Safari ITP, Firefox ETP, Chrome incognito, embedded WebViews): Google's
+  // GIS script opens the popup then immediately closes it WITHOUT showing
+  // consent, firing { type: 'popup_closed' } and leaving the user stuck.
+  // The redirect flow navigates the whole tab to Google and back, which
+  // works regardless of cookie/popup-blocker settings.
+  await startRedirectAuth(false);
 }
 
 export async function signOut(): Promise<void> {
@@ -490,44 +363,18 @@ export async function signOut(): Promise<void> {
 }
 
 // Refresh the access token before it expires.
-// popup mode: silent GIS re-grant (no UI). redirect mode: navigate with prompt=none
-// (Google immediately bounces back with a fresh token if consent is still valid).
+// Sign-in is always via the full-page redirect flow, so refresh also uses a
+// silent redirect (prompt=none): Google immediately bounces back with a
+// fresh token if consent is still valid, otherwise it asks for consent.
+// `allowRedirect=false` means the caller can't tolerate a navigation (e.g.
+// mid-sync); in that case we throw and the caller surfaces "re-sign-in".
 async function refreshToken(allowRedirect = true): Promise<void> {
-  if (authMode === "redirect") {
-    if (!allowRedirect) {
-      throw new Error("Token expired, redirect refresh deferred");
-    }
-    await startRedirectAuth(true); // prompt=none → page navigates; resumes via init() on return
-    return; // Halt this call; the page is unloading.
+  if (!allowRedirect) {
+    throw new Error("Token expired, re-sign-in required");
   }
-  if (!gisAvailable()) throw new Error("Token expired and GIS unavailable");
-  if (!tokenClient) await initTokenClient();
-  await new Promise<void>((resolve, reject) => {
-    const prev = tokenClient!.callback;
-    const timeoutId = setTimeout(() => {
-      tokenClient!.callback = prev;
-      reject(
-        new Error(
-          "Silent token refresh timed out (often due to blocked third-party cookies)",
-        ),
-      );
-    }, 5_000);
-
-    tokenClient!.callback = (resp: GisTokenResponse) => {
-      clearTimeout(timeoutId);
-      tokenClient!.callback = prev;
-      if (resp.error) {
-        reject(new Error(resp.error));
-        return;
-      }
-      accessToken = resp.access_token!;
-      tokenExpiresAt = Date.now() + ((resp.expires_in ?? 3600) - 60) * 1000;
-      authMode = "popup";
-      persistToken();
-      resolve();
-    };
-    tokenClient!.requestAccessToken({ prompt: "" });
-  });
+  // prompt=none → page navigates to Google and back; resumes via init() on
+  // return (the page is unloading, so nothing after this runs).
+  await startRedirectAuth(true);
 }
 
 // ── Drive REST ───────────────────────────────────────────────────────
@@ -1004,11 +851,6 @@ export async function init(): Promise<void> {
     await startRedirectAuth(true); // navigates away; returns via handleRedirectCallback
     return;
   }
-
-  // 4. Warm up the GIS popup client for browser sign-in (non-blocking).
-  void initTokenClient().catch(() => {
-    /* redirect flow remains available */
-  });
 }
 
 export function isSignedIn(): boolean {
