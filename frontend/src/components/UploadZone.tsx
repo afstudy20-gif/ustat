@@ -344,7 +344,7 @@ export default function UploadZone() {
             { url: "https://ecgcal.drtr.uk/",Icon: HeartPulse,  name: "ECG Caliper",desc: "Digital ECG wave analyzer" },
             { url: "https://neodw.drtr.uk/", Icon: Layers,      name: "NeoDW",      desc: "DICOM workstation (any modality)" },
             { url: "https://flow.drtr.uk",   Icon: Workflow,    name: "AcademicFlow", desc: "Journal flowchart designer" },
-            { url: "https://articleditor.drtr.uk/", Icon: Newspaper, name: "Articleditor", desc: "Academic article editor" },
+            { url: "https://arted.drtr.uk/", Icon: Newspaper, name: "Articleditor", desc: "Academic article editor" },
           ].map(({ url, Icon, name, desc }) => (
             <a
               key={url}
