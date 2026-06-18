@@ -308,25 +308,21 @@ async function initTokenClient(): Promise<void> {
       startBackgroundPull();
     },
     error_callback: (err: GisErrorCallback) => {
-      // GIS errors arrive as opaque minified objects (e.g. { type: "_.Cd" }).
-      // Log the WHOLE object so the real type/message is visible in the
-      // console, then route to the redirect flow on any non-user-cancel
-      // failure. Popup-based token requests commonly fail when third-party
-      // cookies are blocked (Safari ITP, Firefox ETP, embedded WebViews) or
-      // when the popup can't open — the redirect flow works in all of those.
+      // GIS errors arrive as opaque minified objects. Log the WHOLE object
+      // so the real type/message is visible in the console.
       console.error("[cloud] GIS error_callback", JSON.stringify(err), err);
-      const t = err?.type || "";
-      // User actively closed the popup → stay idle, don't surprise-redirect.
-      const userCancelled =
-        t === "popup_closed" || t === "user_cancelled" || t === "cancelled";
-      if (userCancelled) {
-        setStatus("idle", "");
-        return;
-      }
-      // Anything else (popup_failed_to_open, idpiframe_*, unknown, _.Cd, …)
-      // → fall back to the full-page redirect flow, which is robust against
-      // third-party-cookie blocks and popup blockers.
-      setStatus("syncing", "Drive bağlanıyor (yönlendirme akışı)…");
+      // NOTE: "Popup window closed" / type:"popup_closed" is fired BOTH when
+      // the user manually closes the popup AND — critically — when GIS
+      // itself closes the popup because third-party cookies are blocked
+      // (Safari ITP, Firefox ETP, Chrome incognito, embedded WebViews). In
+      // that case the popup opens then immediately closes without ever
+      // showing consent, so it looks like "user cancelled" but isn't. Since
+      // we can't reliably tell the two apart, route EVERY popup failure to
+      // the full-page redirect flow, which is robust against third-party-
+      // cookie blocks. The user already clicked "Drive Bağla", so a
+      // same-tab redirect to Google is the expected next step, not a
+      // surprise.
+      setStatus("syncing", "Drive'a yönlendiriliyor…");
       void startRedirectAuth(false);
     },
   });
