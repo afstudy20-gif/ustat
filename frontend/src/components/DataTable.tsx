@@ -1266,14 +1266,14 @@ function DataTableBody({ session }: { session: Session }) {
                         const pct = preview.length ? (nMissing / preview.length) * 100 : 0;
                         const pctLabel = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
                         return (
-                          <div className="flex justify-start">
+                          <div className="flex justify-center">
                             <button
                               onClick={() => {
                                 setShowMissingOnly(true);
                                 setFilters((prev) => ({ ...prev, [col.name]: "" }));
                               }}
                               title={`${nMissing} missing values (${pctLabel}% of ${preview.length} rows) — click to filter`}
-                              className="flex-shrink-0 text-[9px] font-semibold px-1 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 transition-colors"
+                              className="flex-shrink-0 text-[8px] font-semibold px-1 py-0.5 rounded bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 transition-colors"
                             >
                               {nMissing}✕ · {pctLabel}%
                             </button>
