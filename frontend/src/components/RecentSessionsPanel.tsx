@@ -104,7 +104,11 @@ export default function RecentSessionsPanel() {
     return unsub;
   }, [reload]);
 
-  if (loaded && items.length === 0) return null;
+  // Hide the panel entirely when there's nothing to show AND cloud sync isn't
+  // connected. When connected, keep it visible even with zero local records so
+  // the "Drive'dan içe aktar" entry point stays reachable (a brand-new device
+  // has no IndexedDB snapshots yet, but Drive may have them).
+  if (loaded && items.length === 0 && !cloudOn) return null;
 
   const onRestore = async (id: string) => {
     setRestoring(id);

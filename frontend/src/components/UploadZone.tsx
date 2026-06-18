@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle, Newspaper } from "lucide-react";
+import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle, Newspaper, Cloud, CloudDownload, LogOut, RefreshCw } from "lucide-react";
 import { uploadFile } from "../api";
 import api from "../api";
 import { useStore } from "../store";
@@ -8,6 +8,7 @@ import HelpModal from "./HelpModal";
 import RecentSessionsPanel from "./RecentSessionsPanel";
 import PowerPanel from "./PowerPanel";
 import RefreshAppButton from "./RefreshAppButton";
+import { cloudSync, type CloudStatusInfo } from "../lib/cloudSync";
 
 export default function UploadZone() {
   const setSession = useStore((s) => s.setSession);
@@ -17,6 +18,40 @@ export default function UploadZone() {
   const [showAbout, setShowAbout] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
   const [mode, setMode] = useState<"home" | "power">("home");
+  // Google Drive cloud-sync state — drives the connection strip on the
+  // welcome screen. Live-updates via the sync motor's subscription.
+  const [cloud, setCloud] = useState<CloudStatusInfo>(cloudSync.getStatus());
+  const [cloudBusy, setCloudBusy] = useState(false);
+  useEffect(() => {
+    const unsub = cloudSync.subscribe(setCloud);
+    return unsub;
+  }, []);
+
+  const onDriveConnect = () => {
+    if (cloud.status === "setupNeeded") {
+      window.alert(
+        "Google Drive senkronizasyonu için OAuth Client ID gerekli.\n\n" +
+          "Kurulum detayları: frontend/src/lib/cloudConfig.ts dosyasının başında.",
+      );
+      return;
+    }
+    void cloudSync.signIn().catch((e) => console.warn("[cloud] signIn", e));
+  };
+  const onDriveSync = async () => {
+    setCloudBusy(true);
+    try {
+      await cloudSync.syncNow(true);
+    } catch (e) {
+      console.warn("[cloud] sync", e);
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+  const onDriveDisconnect = () => {
+    if (window.confirm("Google Drive bağlantısı kesilsin mi? Yerel oturum kayıtlarınız silinmez.")) {
+      void cloudSync.signOut();
+    }
+  };
 
   // Entering Power Analysis pushes a browser history entry so the back button
   // (and the in-app "Statistical Analysis" button) returns to the uSTAT home
@@ -202,6 +237,75 @@ export default function UploadZone() {
           the user has at least one saved snapshot. Lets them resume
           exactly where they left off without re-uploading the dataset. */}
       <RecentSessionsPanel />
+
+      {/* Google Drive cloud-sync strip — always visible on the welcome
+          screen so a brand-new device (no local snapshots) can still
+          connect and pull sessions from Drive. Collapses to a single
+          "connected" row once signed in. */}
+      <div className="w-full max-w-2xl rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-3 flex items-center gap-3 flex-wrap">
+        <Cloud size={18} className="text-sky-500 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          {cloud.signedIn ? (
+            <>
+              <p className="text-xs font-semibold text-sky-800 truncate">
+                Google Drive bağlı
+                {cloud.user?.email && (
+                  <span className="font-normal text-sky-600"> · {cloud.user.email}</span>
+                )}
+              </p>
+              <p className="text-[10px] text-sky-500">
+                {cloud.status === "syncing"
+                  ? "Senkronize ediliyor…"
+                  : cloud.status === "error"
+                    ? `Hata: ${cloud.message || "senkronizasyon başarısız"}`
+                    : cloud.lastSync
+                      ? `Son senkronizasyon: ${new Date(cloud.lastSync).toLocaleString()}`
+                      : "Henüz senkronize edilmedi"}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-semibold text-sky-800">
+                Google Drive ile cihazlar arası taşıyın &amp; yedekleyin
+              </p>
+              <p className="text-[10px] text-sky-500">
+                Oturumlarınız kendi gizli Drive klasörünüze yedeklenir — sunucudan geçmez.
+              </p>
+            </>
+          )}
+        </div>
+        {cloud.signedIn ? (
+          <div className="flex items-center gap-1.5 flex-shrink-0">
+            <button
+              onClick={onDriveSync}
+              disabled={cloudBusy}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-sky-700 bg-white border border-sky-200 hover:bg-sky-100 rounded-lg px-2.5 py-1.5 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={cloudBusy ? "animate-spin" : ""} />
+              {cloudBusy ? "…" : "Senkronize et"}
+            </button>
+            <button
+              onClick={onDriveDisconnect}
+              title="Bağlantıyı kes"
+              className="inline-flex items-center text-[11px] font-semibold text-sky-600 hover:text-red-600 bg-white border border-sky-200 hover:border-red-200 hover:bg-red-50 rounded-lg px-2 py-1.5 transition-colors"
+            >
+              <LogOut size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onDriveConnect}
+            className={`inline-flex items-center gap-1.5 text-[11px] font-semibold rounded-lg px-3 py-1.5 transition-colors flex-shrink-0 ${
+              cloud.status === "setupNeeded"
+                ? "text-amber-700 bg-amber-50 border border-amber-300 hover:bg-amber-100"
+                : "text-white bg-sky-600 hover:bg-sky-700"
+            }`}
+          >
+            <CloudDownload size={13} />
+            Drive Bağla
+          </button>
+        )}
+      </div>
 
       {/* Quick facts — privacy, scope, cost */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 w-full max-w-2xl text-xs">
