@@ -90,6 +90,8 @@ import WeightedStatsPanel from "./components/WeightedStatsPanel";
 import MissingDataPanel from "./components/MissingDataPanel";
 import FactorPCAPanel from "./components/FactorPCAPanel";
 import BayesianPanel from "./components/BayesianPanel";
+import CloudSyncBar from "./components/CloudSyncBar";
+import { cloudSync } from "./lib/cloudSync";
 
 const TABS = [
   { id: "data",        label: "Data",        icon: Table2 },
@@ -566,6 +568,13 @@ export default function App() {
   useAutoSession({
     onStatus: (state, at) => setAutoSaveStatus({ state, at }),
   });
+  // Initialise Google Drive cloud sync once on mount. Restores a cached
+  // token (silent re-auth if needed) and kicks off the background pull so
+  // sessions saved on another device appear in Recent Sessions. Safe to
+  // call before sign-in — it just warms up the GIS client. (Idempotent.)
+  useEffect(() => {
+    void cloudSync.init().catch((e) => console.warn("[cloud] init", e));
+  }, []);
   // Header Save-As dropdown (consolidates dataset export + session JSON
   // — supersedes the dropdown previously hidden inside the DataTable
   // toolbar). Closes on outside-click.
@@ -819,6 +828,7 @@ export default function App() {
                 </span>
               </div>
             )}
+            <CloudSyncBar />
             <div className="relative" ref={headerSaveMenuRef}>
               <button
                 onClick={() => setShowHeaderSaveMenu(v => !v)}

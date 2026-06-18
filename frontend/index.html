@@ -139,6 +139,11 @@
         }());
       }
     </script>
+    <!-- Google Identity Services (GIS) — used by cloud sync (Google Drive
+         appDataFolder backup of session snapshots). async/defer so it never
+         blocks the app; the sync module polls for window.google.accounts.oauth2
+         and degrades gracefully (redirect flow) if the lib fails to load. -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
   <body>
     <div id="root">

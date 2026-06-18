@@ -23,6 +23,7 @@ import { useEffect, useRef } from "react";
 import api from "../api";
 import { useStore } from "../store";
 import { upsertRecentSession, notifySessionsChanged } from "../lib/sessionDb";
+import { cloudSync } from "../lib/cloudSync";
 
 const DEBOUNCE_MS = 5_000;
 const PERIODIC_MS = 60_000;
@@ -110,6 +111,10 @@ export function useAutoSession({ onStatus }: AutoSaveDeps = {}): void {
           source,
         });
         notifySessionsChanged();
+        // Mirror the snapshot to Google Drive too — schedules a debounced
+        // push (no-op when cloud sync isn't connected). Lives alongside the
+        // IndexedDB autosave so Drive is always a backup of the same blob.
+        cloudSync.markDirty();
         onStatusRef.current?.("saved", Date.now());
       } catch {
         // Network blip, server restart, 404 on session_id — try again

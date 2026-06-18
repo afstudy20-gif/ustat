@@ -30,12 +30,15 @@ _DEFAULT_CSP = "; ".join([
     # 'unsafe-eval' is currently required by the bundled Plotly.js build; it
     # should be dropped once charts are verified to render without it. The
     # backend formula evaluator no longer uses eval() (see routers/compute.py).
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+    # https://accounts.google.com is required for the Google Identity Services
+    # (GIS) client used by Drive cloud sync.
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    # Same-origin only — the MapMyVisitors tracker has been removed.
-    "connect-src 'self'",
+    # GIS auth + Drive REST endpoints for cloud sync (session snapshot backup).
+    "connect-src 'self' https://accounts.google.com https://*.googleapis.com https://www.googleapis.com",
+    "frame-src https://accounts.google.com",
     "frame-ancestors 'none'",
     "base-uri 'self'",
     "form-action 'self'",

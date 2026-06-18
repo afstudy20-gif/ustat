@@ -208,6 +208,53 @@ export async function upsertRecentSession(input: {
   return meta;
 }
 
+/**
+ * Raw upsert used by the Google Drive cloud-sync pull path. Identical to
+ * {@link upsertRecentSession} EXCEPT it preserves the original `savedAt`
+ * timestamp instead of stamping `Date.now()`. This is essential for the
+ * last-write-wins clock: when a remote snapshot is pulled back locally, the
+ * record's `savedAt` must reflect when the snapshot was *taken* (so a
+ * subsequent push does not mark it newer than the remote and bounce it
+ * back), not when it landed in IndexedDB.
+ */
+export async function upsertRecentSessionRaw(input: {
+  serverSessionId?: string;
+  name: string;
+  payload: string;
+  savedAt: number;
+  nRows?: number;
+  nCols?: number;
+  activeTab?: string;
+  source: "auto" | "manual";
+}): Promise<RecentSessionMeta> {
+  const db = getDb();
+  let existing: RecentSessionRecord | undefined =
+    input.serverSessionId
+      ? await db.sessions.where("serverSessionId").equals(input.serverSessionId).first()
+      : undefined;
+  if (!existing && input.name) {
+    existing = await db.sessions.where("name").equals(input.name).first();
+  }
+  const id = existing?.id ?? newLocalId();
+  const rec: RecentSessionRecord = {
+    id,
+    serverSessionId: input.serverSessionId,
+    name: input.name,
+    payload: input.payload,
+    sizeBytes: input.payload.length,
+    nRows: input.nRows,
+    nCols: input.nCols,
+    activeTab: input.activeTab,
+    savedAt: input.savedAt,
+    source: input.source,
+  };
+  await db.sessions.put(rec);
+  await pruneToCap();
+  const { payload: _ignored, ...meta } = rec;
+  void _ignored;
+  return meta;
+}
+
 // ── Cross-tab notifications ───────────────────────────────────────────
 
 const CHANNEL = "wiz3-sessions";

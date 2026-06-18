@@ -107,7 +107,8 @@ jobs:
             librsvg2-dev \
             patchelf \
             xdg-utils \
-            libfuse2
+            libfuse2 \
+            zsync
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -138,6 +139,19 @@ jobs:
         if: matrix.platform != 'windows-latest'
         run: chmod +x src-tauri/binaries/ustat-backend
 
+      - name: Update version in tauri.conf.json
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          echo "Updating tauri.conf.json version to $VERSION"
+          node -e "
+            const fs = require('fs');
+            const conf = JSON.parse(fs.readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            conf.version = '$VERSION';
+            fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(conf, null, 2), 'utf8');
+          "
+
       - name: Generate Tauri icons from logo
         run: npx -y @tauri-apps/cli icon frontend/public/pwa-512.png
 
@@ -149,6 +163,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPIMAGE_EXTRACT_AND_RUN: 1
+          NO_STRIP: true
         with:
           tagName: v__VERSION__
           releaseName: 'uSTAT v__VERSION__'

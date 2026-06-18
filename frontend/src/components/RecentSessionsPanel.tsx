@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Clock, Database, RotateCcw, Trash2, Sparkles, FileText, HardDrive } from "lucide-react";
+import { Clock, Database, RotateCcw, Trash2, Sparkles, FileText, HardDrive, Cloud, CloudDownload } from "lucide-react";
 import api from "../api";
 import { useStore } from "../store";
 import {
@@ -25,6 +25,7 @@ import {
   clearAllRecentSessions,
   type RecentSessionMeta,
 } from "../lib/sessionDb";
+import { cloudSync } from "../lib/cloudSync";
 
 function fmtBytes(b: number): string {
   if (b < 1024) return `${b} B`;
@@ -73,6 +74,14 @@ export default function RecentSessionsPanel() {
   const [restoring, setRestoring] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // Cloud sync state — refreshes when the sync motor emits (sign-in/out,
+  // manual sync). Drives the "☁ Drive" badge + "Drive'dan içe aktar" link.
+  const [cloudOn, setCloudOn] = useState(cloudSync.isSignedIn());
+  const [cloudBusy, setCloudBusy] = useState(false);
+  useEffect(() => {
+    const unsub = cloudSync.subscribe((s) => setCloudOn(s.signedIn));
+    return unsub;
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -140,6 +149,21 @@ export default function RecentSessionsPanel() {
     void reload();
   };
 
+  // Pull remote session snapshots from Drive into IndexedDB, then refresh
+  // the card list. Only offered when cloud sync is connected.
+  const onImportFromDrive = async () => {
+    setCloudBusy(true);
+    setError(null);
+    try {
+      await cloudSync.syncNow(true);
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Drive'dan içe aktarma başarısız");
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+
   if (!loaded) return null;
 
   return (
@@ -148,22 +172,43 @@ export default function RecentSessionsPanel() {
         <div className="flex items-center gap-1.5">
           <Clock size={14} className="text-indigo-500" />
           <h3 className="text-xs font-semibold text-gray-700">Son Çalışmalar</h3>
+          {cloudOn && (
+            <span
+              className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wide bg-sky-50 text-sky-600 px-1.5 py-0.5 rounded border border-sky-200"
+              title="Google Drive senkronizasyonu bağlı — oturumlar cihazlar arası taşınır"
+            >
+              <Cloud size={9} /> Drive
+            </span>
+          )}
           <span className="text-[10px] text-gray-400 font-normal">
             (otomatik olarak tarayıcınızda saklanır — sunucuya gönderilmez)
           </span>
         </div>
-        {estimate && (
-          <div className="flex items-center gap-2 text-[10px] text-gray-400">
-            <HardDrive size={11} />
-            <span>{estimate.count}/{estimate.capCount} · {fmtBytes(estimate.bytes)}</span>
+        <div className="flex items-center gap-2 text-[10px] text-gray-400">
+          {cloudOn && (
             <button
-              onClick={onClearAll}
-              className="text-gray-400 hover:text-red-500 underline-offset-2 hover:underline"
+              onClick={onImportFromDrive}
+              disabled={cloudBusy}
+              className="inline-flex items-center gap-1 text-sky-600 hover:text-sky-700 hover:underline underline-offset-2 disabled:opacity-50"
+              title="Google Drive'dan oturum anlık görüntülerini çek"
             >
-              Tümünü temizle
+              <CloudDownload size={11} />
+              {cloudBusy ? "İçe aktarılıyor…" : "Drive'dan içe aktar"}
             </button>
-          </div>
-        )}
+          )}
+          {estimate && (
+            <>
+              <HardDrive size={11} />
+              <span>{estimate.count}/{estimate.capCount} · {fmtBytes(estimate.bytes)}</span>
+              <button
+                onClick={onClearAll}
+                className="text-gray-400 hover:text-red-500 underline-offset-2 hover:underline"
+              >
+                Tümünü temizle
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {error && (
