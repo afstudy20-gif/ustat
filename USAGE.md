@@ -3,6 +3,12 @@
 A step-by-step companion to the [README](README.md). Each section assumes you
 have <https://ustat.drtr.uk> open in a recent Chrome / Firefox / Safari / Edge.
 
+> **Looking for "which test do I run, and how?"** See **[MANUAL.md](MANUAL.md)** —
+> a complete, screenshot-illustrated reference that maps every analysis to its
+> tab and exact steps. It is written to be scanned by an AI assistant: tell a
+> chatbot *"I uploaded my data to uSTAT, which tests should I run and how?"* and
+> it can answer directly from that file.
+
 > ⚠️ uSTAT is **not a medical device** and has **not yet been validated through
 > peer-reviewed publications**. Verify any clinically or scientifically
 > important result against an established statistics package (SPSS, R, Stata,
