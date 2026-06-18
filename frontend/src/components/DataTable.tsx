@@ -1218,41 +1218,55 @@ function DataTableBody({ session }: { session: Session }) {
                     style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                     title="Ctrl/Cmd+Shift+click selects the visible column"
                   >
-                    <div className="flex items-center gap-1 justify-between">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-gray-300 text-[8px] flex-shrink-0 cursor-grab" title="Drag to reorder">⠿</span>
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-1 justify-between">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-gray-300 text-[8px] flex-shrink-0 cursor-grab" title="Drag to reorder">⠿</span>
+                          <button
+                            onClick={() => cycleKind(col.name)}
+                            title={`Type: ${col.kind} — click to change`}
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 transition-colors ${KIND_STYLE[col.kind] ?? KIND_STYLE.text}`}
+                          >
+                            {KIND_LABEL[col.kind] ?? col.kind}
+                          </button>
+                          {renameCol === col.name ? (
+                            <input ref={renameRef}
+                              className="text-xs font-medium text-gray-900 bg-white border border-indigo-400 rounded px-1 py-0 w-24 focus:outline-none select-text"
+                              value={renameVal}
+                              onClick={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onChange={(e) => setRenameVal(e.target.value)}
+                              onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenameCol(null); }}
+                              onBlur={commitRename}
+                            />
+                          ) : (
+                            <span className={`text-left text-xs font-medium truncate cursor-text ${col.analysis_excluded ? "text-gray-400 line-through" : "text-gray-700"}`}
+                              onDoubleClick={() => startRename(col.name)}
+                              title={col.analysis_excluded ? "Excluded from analysis · double-click to rename" : "Double-click to rename"}>
+                              {col.name}
+                            </span>
+                          )}
+                          {col.analysis_excluded && (
+                            <span className="flex-shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-violet-100 text-violet-600 border border-violet-300"
+                              title="Excluded from analysis (kept in the dataset)">excl</span>
+                          )}
+                        </div>
                         <button
-                          onClick={() => cycleKind(col.name)}
-                          title={`Type: ${col.kind} — click to change`}
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded border flex-shrink-0 transition-colors ${KIND_STYLE[col.kind] ?? KIND_STYLE.text}`}
+                          onClick={() => toggleSort(col.name)}
+                          title="Sort"
+                          className={`flex-shrink-0 text-xs w-5 h-5 rounded flex items-center justify-center transition-colors
+                            ${isSorted
+                              ? "text-indigo-600 bg-indigo-100"
+                              : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}
                         >
-                          {KIND_LABEL[col.kind] ?? col.kind}
+                          {isSorted ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
                         </button>
-                        {renameCol === col.name ? (
-                          <input ref={renameRef}
-                            className="text-xs font-medium text-gray-900 bg-white border border-indigo-400 rounded px-1 py-0 w-24 focus:outline-none select-text"
-                            value={renameVal}
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onChange={(e) => setRenameVal(e.target.value)}
-                            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commitRename(); if (e.key === "Escape") setRenameCol(null); }}
-                            onBlur={commitRename}
-                          />
-                        ) : (
-                          <span className={`text-left text-xs font-medium truncate cursor-text ${col.analysis_excluded ? "text-gray-400 line-through" : "text-gray-700"}`}
-                            onDoubleClick={() => startRename(col.name)}
-                            title={col.analysis_excluded ? "Excluded from analysis · double-click to rename" : "Double-click to rename"}>
-                            {col.name}
-                          </span>
-                        )}
-                        {col.analysis_excluded && (
-                          <span className="flex-shrink-0 text-[8px] font-bold px-1 py-0.5 rounded bg-violet-100 text-violet-600 border border-violet-300"
-                            title="Excluded from analysis (kept in the dataset)">excl</span>
-                        )}
-                        {nMissing > 0 && (() => {
-                          const pct = preview.length ? (nMissing / preview.length) * 100 : 0;
-                          const pctLabel = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
-                          return (
+                      </div>
+                      {nMissing > 0 && (() => {
+                        const pct = preview.length ? (nMissing / preview.length) * 100 : 0;
+                        const pctLabel = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
+                        return (
+                          <div className="flex justify-start">
                             <button
                               onClick={() => {
                                 setShowMissingOnly(true);
@@ -1263,19 +1277,9 @@ function DataTableBody({ session }: { session: Session }) {
                             >
                               {nMissing}✕ · {pctLabel}%
                             </button>
-                          );
-                        })()}
-                      </div>
-                      <button
-                        onClick={() => toggleSort(col.name)}
-                        title="Sort"
-                        className={`flex-shrink-0 text-xs w-5 h-5 rounded flex items-center justify-center transition-colors
-                          ${isSorted
-                            ? "text-indigo-600 bg-indigo-100"
-                            : "text-gray-300 hover:text-gray-500 hover:bg-gray-100"}`}
-                      >
-                        {isSorted ? (sortDir === "asc" ? "▲" : "▼") : "⇅"}
-                      </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   </th>
                 );
