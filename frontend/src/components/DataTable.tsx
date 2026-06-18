@@ -1266,7 +1266,7 @@ function DataTableBody({ session }: { session: Session }) {
                         const pct = preview.length ? (nMissing / preview.length) * 100 : 0;
                         const pctLabel = pct >= 10 ? pct.toFixed(0) : pct.toFixed(1);
                         return (
-                          <div className="flex justify-center">
+                          <div className="flex justify-start">
                             <button
                               onClick={() => {
                                 setShowMissingOnly(true);
