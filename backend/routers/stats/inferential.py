@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from loguru import logger
 
 from services import store
+from services.category_health import clean_two_level, rare_level_warnings
 from services.impute import apply_imputation
 from services.text_generators import (
     methods_ttest_ind, methods_ttest_one, methods_chisquare, methods_fisher, methods_anova,
@@ -52,6 +53,24 @@ def _sanitize(obj):
     return obj
 
 
+def _two_level_work(df: pd.DataFrame, value_col: str, group_col: str) -> tuple[pd.DataFrame, list]:
+    work = df[[value_col, group_col]].copy()
+    cleaned = clean_two_level(work[group_col])
+    work[group_col] = cleaned.series
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    return work.dropna(), cleaned.warnings
+
+
+def _clean_crosstab_work(df: pd.DataFrame, row_col: str, col_col: str) -> tuple[pd.DataFrame, list]:
+    work = df[[row_col, col_col]].copy()
+    warnings = []
+    for col in (row_col, col_col):
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    return work.dropna(), warnings
+
+
 # ── 1. T-Test ──────────────────────────────────────────────────────────────────
 
 class TTestRequest(BaseModel):
@@ -68,11 +87,12 @@ def ttest(req: TTestRequest):
     col = df[req.column].dropna()
 
     if req.group_column:
-        groups = sorted_groups(df[req.group_column])
+        work, warnings = _two_level_work(df, req.column, req.group_column)
+        groups = sorted_groups(work[req.group_column])
         if len(groups) != 2:
             raise HTTPException(status_code=400, detail="Group column must have exactly 2 groups")
-        g1 = df[df[req.group_column] == groups[0]][req.column].dropna().astype(float).values
-        g2 = df[df[req.group_column] == groups[1]][req.column].dropna().astype(float).values
+        g1 = work[work[req.group_column] == groups[0]][req.column].values.astype(float)
+        g2 = work[work[req.group_column] == groups[1]][req.column].values.astype(float)
 
         # Assumption checks
         assumptions = [check_normality(g1, str(groups[0])), check_normality(g2, str(groups[1])),
@@ -97,6 +117,8 @@ def ttest(req: TTestRequest):
             "methods_text": methods_ttest_ind(req.column, req.group_column, use_welch),
             "r_code": r_ttest_ind(req.column, req.group_column),
         }
+        if warnings:
+            ret["warnings"] = warnings
         ret["result_text"] = results_ttest_ind(ret)
         return _sanitize(ret)
     else:
@@ -134,7 +156,8 @@ class ChiSqRequest(BaseModel):
 @router.post("/chisquare")
 def chisquare(req: ChiSqRequest):
     df = _get_df(req.session_id)
-    ct = pd.crosstab(df[req.row_column], df[req.col_column])
+    work, warnings = _clean_crosstab_work(df, req.row_column, req.col_column)
+    ct = pd.crosstab(work[req.row_column], work[req.col_column])
     chi2, p, dof, expected = scipy_stats.chi2_contingency(ct)
     sig = bool(p < 0.05)
     n = ct.values.sum()
@@ -145,7 +168,7 @@ def chisquare(req: ChiSqRequest):
     if ct.shape == (2, 2):
         effect_sizes.append(odds_ratio_effect(ct.values))
 
-    warnings = []
+    warnings.extend(rare_level_warnings(work, [req.row_column, req.col_column]))
     if (expected < 5).any():
         warnings.append("Some expected cell counts < 5. Consider Fisher's exact test instead.")
     p_str = '<0.001' if p < 0.001 else f'{p:.4f}'
@@ -175,7 +198,8 @@ class FisherRequest(BaseModel):
 @router.post("/fisher")
 def fisher_exact(req: FisherRequest):
     df = _get_df(req.session_id)
-    ct = pd.crosstab(df[req.row_column], df[req.col_column])
+    work, warnings = _clean_crosstab_work(df, req.row_column, req.col_column)
+    ct = pd.crosstab(work[req.row_column], work[req.col_column])
     if ct.shape != (2, 2):
         raise HTTPException(status_code=400, detail="Fisher's exact test requires a 2×2 table")
     table = ct.values.tolist()
@@ -191,6 +215,7 @@ def fisher_exact(req: FisherRequest):
         "table": table,
         "row_labels": ct.index.tolist(),
         "col_labels": ct.columns.tolist(),
+        "warnings": warnings,
         "interpretation": f"{'Significant' if sig else 'No significant'} association (p = {p_str}, OR = {es['value']:.2f}, 95% CI: {es['ci_low']:.2f}–{es['ci_high']:.2f})",
         "methods_text": methods_fisher(req.row_column, req.col_column),
         "r_code": r_fisher(req.row_column, req.col_column),
@@ -294,11 +319,12 @@ def tost(req: TOSTRequest):
     test_type = req.test_type
     n1 = n2 = 0
     mean1 = mean2 = std1 = std2 = None
+    warnings = []
 
     if test_type == "independent":
         if not req.group_column:
             raise HTTPException(status_code=422, detail="independent TOST requires group_column.")
-        sub = df[[req.column, req.group_column]].dropna()
+        sub, warnings = _two_level_work(df, req.column, req.group_column)
         groups = sorted_groups(sub[req.group_column])
         if len(groups) != 2:
             raise HTTPException(status_code=422, detail=f"group_column must have exactly 2 levels, found {len(groups)}.")
@@ -344,6 +370,7 @@ def tost(req: TOSTRequest):
         p_overall = max(p_low, p_high)
         diff = mean1 - mu
         group_labels = [req.column, f"μ₀ = {mu}"]
+        warnings = []
     else:
         raise HTTPException(status_code=422, detail=f"Unknown test_type '{test_type}'")
 
@@ -369,6 +396,7 @@ def tost(req: TOSTRequest):
         "p_overall": float(p_overall),
         "equivalent": bool(equivalent),
         "group_labels": group_labels,
+        "warnings": warnings,
         "interpretation": interp,
         "result_text": (
             f"Two One-Sided Tests for equivalence within [{req.low}, {req.high}]. "
@@ -408,6 +436,9 @@ def noninferiority(req: NonInferiorityRequest):
 
     cols = [req.outcome_col, req.group_col]
     work = apply_imputation(df[cols], cols, req.imputation or "listwise").dropna()
+    cleaned = clean_two_level(work[req.group_col])
+    work[req.group_col] = cleaned.series
+    work = work.dropna()
     groups = work[req.group_col].astype(str)
     levels = sorted(groups.unique().tolist())
     if len(levels) != 2:
@@ -528,6 +559,7 @@ def noninferiority(req: NonInferiorityRequest):
         "alpha_one_sided": req.alpha,
         "non_inferior": bool(non_inferior),
         "p_noninferiority": round(p_ni, 6),
+        "warnings": cleaned.warnings,
         **detail,
         "assumptions": [
             {"name": "Analysis population", "met": True,

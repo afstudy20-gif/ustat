@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from services import store
+from services.category_health import clean_two_level
 from services.stat_utils import cohens_h, adjust_pvalues, kendalls_w, sorted_groups
 
 router = APIRouter()
@@ -21,6 +22,16 @@ def _get_df(session_id: str) -> pd.DataFrame:
 
 def _p_str(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.4f}"
+
+
+def _clean_binary_frame(df: pd.DataFrame, columns: List[str]) -> tuple[pd.DataFrame, list]:
+    work = df[columns].copy()
+    warnings = []
+    for col in columns:
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    return work.dropna(), warnings
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -213,7 +224,10 @@ def two_proportions_ztest(req: TwoProportionsRequest):
         if c not in df.columns:
             raise HTTPException(400, f"Column '{c}' not found.")
 
-    sub = df[[req.column, req.group_column]].dropna()
+    sub = df[[req.column, req.group_column]].copy()
+    cleaned_group = clean_two_level(sub[req.group_column])
+    sub[req.group_column] = cleaned_group.series
+    sub = sub.dropna()
     groups = sorted_groups(sub[req.group_column])
     if len(groups) != 2:
         raise HTTPException(400, f"Group column must have exactly 2 groups, found {len(groups)}.")
@@ -256,6 +270,7 @@ def two_proportions_ztest(req: TwoProportionsRequest):
             str(groups[1]): {"n": n2, "k": k2, "proportion": round(p2, 4)},
             "success_value": success_label,
         },
+        "warnings": cleaned_group.warnings,
         "interpretation": (
             f"{'Significant' if sig else 'No significant'} difference between proportions "
             f"({groups[0]}: {p1:.3f} vs {groups[1]}: {p2:.3f}, z = {z_stat:.3f}, p = {ps}, "
@@ -302,7 +317,7 @@ def mcnemar_test(req: McnemarRequest):
         if c not in df.columns:
             raise HTTPException(400, f"Column '{c}' not found.")
 
-    sub = df[[req.col1, req.col2]].dropna()
+    sub, warnings = _clean_binary_frame(df, [req.col1, req.col2])
     if len(sub) < 5:
         raise HTTPException(400, "Need at least 5 paired observations.")
 
@@ -345,6 +360,7 @@ def mcnemar_test(req: McnemarRequest):
             "concordant_a": int(a), "concordant_d": int(d),
             "n": int(len(sub)),
         },
+        "warnings": warnings,
         "interpretation": (
             f"{'Significant' if sig else 'No significant'} change between {req.col1} and {req.col2} "
             f"({'exact' if exact else 'chi-squared'} statistic = {stat:.3f}, p = {ps}, OR = {or_str})"
@@ -515,7 +531,13 @@ def mantel_haenszel_test(req: MantelHaenszelRequest):
         if c not in df.columns:
             raise HTTPException(400, f"Column '{c}' not found.")
 
-    sub = df[[req.row_col, req.col_col, req.strata_col]].dropna()
+    sub = df[[req.row_col, req.col_col, req.strata_col]].copy()
+    cleaned_row = clean_two_level(sub[req.row_col])
+    cleaned_col = clean_two_level(sub[req.col_col])
+    sub[req.row_col] = cleaned_row.series
+    sub[req.col_col] = cleaned_col.series
+    sub = sub.dropna()
+    warnings = cleaned_row.warnings + cleaned_col.warnings
     if len(sub) < 10:
         raise HTTPException(400, "Need at least 10 observations.")
 
@@ -571,6 +593,7 @@ def mantel_haenszel_test(req: MantelHaenszelRequest):
             "n_total": int(len(sub)),
             "strata": stratum_info,
         },
+        "warnings": warnings,
         "interpretation": (
             f"{'Significant' if sig else 'No significant'} association between {req.row_col} and {req.col_col} "
             f"after stratifying by {req.strata_col} "

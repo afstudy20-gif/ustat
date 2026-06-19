@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from loguru import logger
 
 from services import store
+from services.category_health import clean_two_level, rare_level_warnings
 from services.impute import apply_imputation
 from services.missing_data import (
     mice_multiple,
@@ -67,6 +68,31 @@ def _compute_vif(X: pd.DataFrame) -> dict:
             v = None
         out[str(col)] = v
     return out
+
+
+def _sanitize(obj):
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, (float, np.floating)):
+        f = float(obj)
+        return f if np.isfinite(f) else None
+    return obj
+
+
+def _clean_predictor_categories(df: pd.DataFrame, predictors: List[str]) -> tuple[pd.DataFrame, list]:
+    work = df.copy()
+    warnings = []
+    for col in predictors:
+        if col not in work.columns or pd.api.types.is_numeric_dtype(work[col]):
+            continue
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    work = work.dropna(subset=[c for c in predictors if c in work.columns])
+    warnings.extend(rare_level_warnings(work, predictors))
+    return work, warnings
 
 
 def _add_pairwise_interactions(
@@ -303,6 +329,7 @@ def stepwise_selection(req: StepwiseRequest):
 
     cols_needed = [req.outcome] + req.candidates
     df = apply_imputation(df_full, cols_needed, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.candidates)
     n_excluded = n_total - len(df)
 
     if len(df) < 10:
@@ -324,9 +351,6 @@ def stepwise_selection(req: StepwiseRequest):
         y = pd.to_numeric(y, errors="coerce")
 
     Xdf = df[req.candidates].copy()
-    for c in Xdf.columns:
-        if Xdf[c].dtype == object or str(Xdf[c].dtype).startswith("category"):
-            Xdf[c] = pd.Categorical(Xdf[c]).codes
 
     pred_list = [c for c in req.candidates if c in Xdf.columns]
 
@@ -379,10 +403,24 @@ def stepwise_selection(req: StepwiseRequest):
             trace.append({"step": len(trace)+1, "action": "refine_both", "selected": list(selected), "aic": aic})
 
     final_model, final_aic = _fit_and_aic(selected)
+    if not selected:
+        return _sanitize({
+            "model_type": mt,
+            "direction": direction,
+            "criterion": req.criterion,
+            "selected": [],
+            "n_selected": 0,
+            "final_aic": None,
+            "n_obs": int(len(df)),
+            "n_excluded": int(n_excluded),
+            "warnings": cat_warnings + ["No predictors met the stepwise entry/removal criteria."],
+            "trace": trace,
+            "result_text": _stepwise_results_text(mt, [], float("nan"), direction),
+        })
     if final_model is None:
         raise HTTPException(status_code=422, detail=_sanitize_model_error(Exception("convergence failed"), "stepwise selection"))
 
-    return {
+    return _sanitize({
         "model_type": mt,
         "direction": direction,
         "criterion": req.criterion,
@@ -391,9 +429,10 @@ def stepwise_selection(req: StepwiseRequest):
         "final_aic": round(final_aic, 2) if np.isfinite(final_aic) else None,
         "n_obs": int(len(df)),
         "n_excluded": int(n_excluded),
+        "warnings": cat_warnings,
         "trace": trace,
         "result_text": _stepwise_results_text(mt, selected, final_aic, direction),
-    }
+    })
 
 
 def _stepwise_results_text(model_type, selected, final_aic, direction):

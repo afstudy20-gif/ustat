@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services import store
+from services.category_health import clean_two_level
 from services.impute import apply_imputation
 from services.text_generators import (
     methods_mannwhitney, methods_kruskal,
@@ -40,6 +41,14 @@ def _sanitize(obj):
     return obj
 
 
+def _two_level_work(df: pd.DataFrame, value_col: str, group_col: str) -> tuple[pd.DataFrame, list]:
+    work = df[[value_col, group_col]].copy()
+    cleaned = clean_two_level(work[group_col])
+    work[group_col] = cleaned.series
+    work[value_col] = pd.to_numeric(work[value_col], errors="coerce")
+    return work.dropna(), cleaned.warnings
+
+
 # ── 1. Mann-Whitney U ──────────────────────────────────────────────────────────
 
 class MannWhitneyRequest(BaseModel):
@@ -51,11 +60,12 @@ class MannWhitneyRequest(BaseModel):
 @router.post("/mannwhitney")
 def mannwhitney(req: MannWhitneyRequest):
     df = _get_df(req.session_id)
-    groups = sorted_groups(df[req.group_column])
+    work, warnings = _two_level_work(df, req.column, req.group_column)
+    groups = sorted_groups(work[req.group_column])
     if len(groups) != 2:
         raise HTTPException(status_code=400, detail="Group column must have exactly 2 groups")
-    g1 = df[df[req.group_column] == groups[0]][req.column].dropna().astype(float).values
-    g2 = df[df[req.group_column] == groups[1]][req.column].dropna().astype(float).values
+    g1 = work[work[req.group_column] == groups[0]][req.column].values.astype(float)
+    g2 = work[work[req.group_column] == groups[1]][req.column].values.astype(float)
     stat, p = scipy_stats.mannwhitneyu(g1, g2, alternative="two-sided")
     sig = bool(p < 0.05)
     es = rank_biserial_r(float(stat), len(g1), len(g2))
@@ -75,6 +85,8 @@ def mannwhitney(req: MannWhitneyRequest):
         "methods_text": methods_mannwhitney(req.column, req.group_column),
         "r_code": r_mannwhitney(req.column, req.group_column),
     }
+    if warnings:
+        ret["warnings"] = warnings
     ret["result_text"] = results_mannwhitney(ret)
     return _sanitize(ret)
 

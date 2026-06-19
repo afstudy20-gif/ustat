@@ -14,6 +14,7 @@ from scipy import stats as sp
 from scipy.integrate import quad
 
 from services import store
+from services.category_health import clean_two_level
 from services.stat_utils import sorted_groups
 from services.impute import apply_imputation
 
@@ -225,6 +226,9 @@ def run_bayesian_ttest_ind(df: pd.DataFrame, req: BayesianRequest):
     if not req.predictor:
         raise HTTPException(400, "Grouping predictor variable required.")
     df_clean = df[[req.outcome, req.predictor]].dropna()
+    cleaned = clean_two_level(df_clean[req.predictor])
+    df_clean[req.predictor] = cleaned.series
+    df_clean = df_clean.dropna()
     groups = sorted_groups(df_clean[req.predictor])
     if len(groups) != 2:
         raise HTTPException(400, f"Grouping variable must have exactly 2 groups. Found: {groups}")
@@ -289,6 +293,7 @@ def run_bayesian_ttest_ind(df: pd.DataFrame, req: BayesianRequest):
         "bf01": round(bf01, 4) if bf01 < 10000 else float(f"{bf01:.3e}"),
         "interpretation": interpret_bf(bf10),
         "plot_coords": plot_coords,
+        "warnings": cleaned.warnings,
         "r_code": r_code
     }
 
@@ -432,8 +437,14 @@ def run_bayesian(req: BayesianRequest):
     if missing:
         raise HTTPException(status_code=400, detail=f"Columns not found: {missing}")
         
-    df_sub = df[cols_to_check].apply(pd.to_numeric, errors="coerce")
-    df_sub = apply_imputation(df_sub, cols_to_check, req.imputation)
+    if req.analysis_type == "ttest_ind" and req.predictor:
+        numeric_cols = [req.outcome]
+        df_sub = df[cols_to_check].copy()
+        df_sub[req.outcome] = pd.to_numeric(df_sub[req.outcome], errors="coerce")
+        df_sub = apply_imputation(df_sub, numeric_cols, req.imputation).dropna(subset=cols_to_check)
+    else:
+        df_sub = df[cols_to_check].apply(pd.to_numeric, errors="coerce")
+        df_sub = apply_imputation(df_sub, cols_to_check, req.imputation)
     
     if req.analysis_type == "ttest_one":
         return run_bayesian_ttest_one(df_sub, req)

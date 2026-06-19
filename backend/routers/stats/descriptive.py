@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from loguru import logger
 
 from services import store
+from services.category_health import clean_two_level
 from services.stat_utils import sorted_groups
 from services.impute import apply_imputation, missing_info
 
@@ -641,8 +642,9 @@ def _categorical_p_with_rule(ct: np.ndarray) -> tuple[float, str]:
 
 @router.post("/table1")
 def table1(req: Table1Request):
-    df = _get_df(req.session_id)
+    df = _get_df(req.session_id).copy()
     rows = []
+    warnings: list = []
     sel_stats: list[str] = req.selected_stats if req.selected_stats else ["auto"]
     # Per-column decimal overrides: merge the session-persisted map with
     # any request-supplied overrides (request wins). Auto-detection still
@@ -653,6 +655,9 @@ def table1(req: Table1Request):
     group_labels = []
     group_ns: dict = {}
     if req.group_column and req.group_column in df.columns:
+        cleaned_group = clean_two_level(df[req.group_column])
+        df[req.group_column] = cleaned_group.series
+        warnings.extend(cleaned_group.warnings)
         groups = sorted_groups(df[req.group_column])
         group_labels = [str(g) for g in groups]
         group_ns = {str(g): int((df[req.group_column] == g).sum()) for g in groups}
@@ -778,6 +783,11 @@ def table1(req: Table1Request):
             }
 
         else:
+            cleaned_var = clean_two_level(s)
+            s = cleaned_var.series
+            warnings.extend(cleaned_var.warnings)
+            if var in df.columns:
+                df[var] = s
             vc_all = s.value_counts(dropna=True)
             total_all = s.count()
             cats = [str(v) for v in vc_all.index.tolist()]
@@ -867,6 +877,7 @@ def table1(req: Table1Request):
         "group_labels": group_labels,
         "group_ns": group_ns,
         "total_n": len(df),
+        "warnings": warnings,
         "rows": rows,
     })
 

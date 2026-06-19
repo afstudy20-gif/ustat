@@ -12,9 +12,18 @@ response so the user notices what their data looks like.
 
 from __future__ import annotations
 
-from typing import List
+from dataclasses import dataclass
+from typing import Iterable, List
 
 import pandas as pd
+
+
+@dataclass
+class CategoryCleanResult:
+    series: pd.Series
+    levels: list
+    warnings: List[dict]
+    n_dropped: int = 0
 
 
 def rare_level_warnings(
@@ -66,3 +75,111 @@ def rare_level_warnings(
             ),
         })
     return out
+
+
+_MISSING_TOKENS = {
+    "", ".", "-", "--", "?", "na", "n/a", "nan", "none", "null",
+    "missing", "unknown", "unk",
+}
+
+_SEX_MAP = {
+    "f": "Female",
+    "female": "Female",
+    "woman": "Female",
+    "women": "Female",
+    "m": "Male",
+    "male": "Male",
+    "man": "Male",
+    "men": "Male",
+}
+
+_BINARY_MAP = {
+    "0": "0",
+    "1": "1",
+    "no": "0",
+    "n": "0",
+    "false": "0",
+    "negative": "0",
+    "neg": "0",
+    "absent": "0",
+    "yes": "1",
+    "y": "1",
+    "true": "1",
+    "positive": "1",
+    "pos": "1",
+    "present": "1",
+}
+
+
+def _stable_levels(s: pd.Series) -> list:
+    return sorted(s.dropna().unique().tolist(), key=lambda x: (str(type(x)), str(x)))
+
+
+def clean_two_level(series: pd.Series, keep: str | Iterable | None = "auto") -> CategoryCleanResult:
+    """Normalize obvious binary/case variants while preserving true 3+ level data.
+
+    The helper intentionally only collapses well-known binary spellings:
+    ``M/Male`` + ``F/Female`` and common yes/no or 0/1 labels. Stray values
+    next to a recognized two-level variable are treated as missing with a
+    warning; otherwise extra levels are left intact so callers can keep their
+    existing "must have exactly 2 groups" validation.
+    """
+    raw = series.copy()
+    warnings: List[dict] = []
+
+    text = raw.astype("string").str.strip()
+    lowered = text.str.casefold()
+    missing = raw.isna() | lowered.isin(_MISSING_TOKENS)
+
+    cleaned = text.mask(missing, pd.NA)
+
+    observed = set(lowered[~missing].dropna().tolist())
+    sex_labels = {_SEX_MAP[v] for v in observed if v in _SEX_MAP}
+    if (sex_labels == {"Female", "Male"}) or (observed and observed.issubset(set(_SEX_MAP))):
+        mapper = _SEX_MAP
+    elif observed and observed.issubset(set(_BINARY_MAP)):
+        mapper = _BINARY_MAP
+    else:
+        mapper = {}
+
+    if mapper:
+        mapped = lowered.map(mapper).astype("string")
+        known = mapped.notna()
+        cleaned = mapped.where(known, pd.NA)
+        unknown = lowered[~missing & ~known]
+        if not unknown.empty:
+            counts = unknown.value_counts()
+            warnings.append({
+                "variable": str(series.name) if series.name is not None else None,
+                "dropped_levels": [
+                    {"level": str(level), "n": int(n)} for level, n in counts.items()
+                ],
+                "note": (
+                    "Unrecognized values were treated as missing after normalizing "
+                    "the two-level variable."
+                ),
+            })
+    else:
+        cleaned = cleaned.astype("object")
+
+    if keep not in (None, "auto"):
+        keep_set = {str(v) for v in keep}
+        keep_mask = cleaned.astype("string").isin(keep_set) | cleaned.isna()
+        dropped = cleaned[~keep_mask].astype(str).value_counts()
+        if not dropped.empty:
+            warnings.append({
+                "variable": str(series.name) if series.name is not None else None,
+                "dropped_levels": [
+                    {"level": str(level), "n": int(n)} for level, n in dropped.items()
+                ],
+                "note": "Values outside the requested two levels were treated as missing.",
+            })
+        cleaned = cleaned.where(keep_mask, pd.NA)
+
+    n_dropped = int(cleaned.isna().sum() - raw.isna().sum())
+    return CategoryCleanResult(
+        series=cleaned,
+        levels=_stable_levels(cleaned),
+        warnings=warnings,
+        n_dropped=max(0, n_dropped),
+    )

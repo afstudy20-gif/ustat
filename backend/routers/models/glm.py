@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from loguru import logger
 
 from services import store
+from services.category_health import clean_two_level, rare_level_warnings
 from services.impute import apply_imputation
 from services.assumptions import (
     check_gee_assumptions_placeholder,
@@ -57,6 +58,31 @@ def _compute_vif(X: pd.DataFrame) -> dict:
     return out
 
 
+def _sanitize(obj):
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    if isinstance(obj, (float, np.floating)):
+        f = float(obj)
+        return f if np.isfinite(f) else None
+    return obj
+
+
+def _clean_predictor_categories(df: pd.DataFrame, predictors: List[str]) -> tuple[pd.DataFrame, list]:
+    work = df.copy()
+    warnings = []
+    for col in predictors:
+        if col not in work.columns or pd.api.types.is_numeric_dtype(work[col]):
+            continue
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    work = work.dropna(subset=[c for c in predictors if c in work.columns])
+    warnings.extend(rare_level_warnings(work, predictors))
+    return work, warnings
+
+
 # ── Poisson Regression ───────────────────────────────────────────────────────
 
 class PoissonRequest(BaseModel):
@@ -72,6 +98,7 @@ def poisson_regression(req: PoissonRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
@@ -102,7 +129,7 @@ def poisson_regression(req: PoissonRequest):
             "irr_ci_high": float(np.exp(ci.loc[var, 1])),
             "vif": vifs.get(str(var)),
         })
-    return {
+    return _sanitize({
         "model": f"Poisson Regression{' [Robust SE]' if req.robust_se else ''}",
         "outcome": req.outcome,
         "n": int(model.nobs),
@@ -110,9 +137,10 @@ def poisson_regression(req: PoissonRequest):
         "imputation": req.imputation or "listwise",
         "aic": float(model.aic),
         "bic": float(model.bic),
+        "warnings": cat_warnings,
         "coefficients": coefs,
         "result_text": _poisson_results_text(req.outcome, coefs),
-    }
+    })
 
 
 def _poisson_results_text(outcome, coefs):
@@ -145,6 +173,7 @@ def gamma_regression(req: GammaRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
@@ -177,7 +206,7 @@ def gamma_regression(req: GammaRequest):
             "vif": vifs.get(str(var)),
         })
 
-    return {
+    return _sanitize({
         "model": f"Gamma GLM (link={req.link}){' [Robust SE]' if req.robust_se else ''}",
         "outcome": req.outcome,
         "link": req.link,
@@ -187,8 +216,9 @@ def gamma_regression(req: GammaRequest):
         "bic": float(model.bic),
         "deviance": float(model.deviance),
         "scale": float(model.scale),
+        "warnings": cat_warnings,
         "coefficients": coefs,
-    }
+    })
 
 
 # ── Negative Binomial GLM ─────────────────────────────────────────────────────
@@ -206,6 +236,7 @@ def negative_binomial_regression(req: NegBinomRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
     X = pd.get_dummies(df[req.predictors], drop_first=True)
     X = sm.add_constant(X.astype(float))
@@ -242,7 +273,7 @@ def negative_binomial_regression(req: NegBinomRequest):
             "vif": vifs.get(str(var)),
         })
 
-    return {
+    return _sanitize({
         "model": f"Negative Binomial Regression{' [Robust SE]' if req.robust_se else ''}",
         "outcome": req.outcome,
         "n": int(model.nobs),
@@ -250,8 +281,9 @@ def negative_binomial_regression(req: NegBinomRequest):
         "aic": float(model.aic),
         "bic": float(model.bic),
         "deviance": float(model.deviance),
+        "warnings": cat_warnings,
         "coefficients": coefs,
-    }
+    })
 
 
 # ── Standalone GEE (Generalized Estimating Equations) ──────────────────────────
@@ -274,6 +306,7 @@ def gee_regression(req: GEERequest):
     n_total = len(df_full)
     cols = [req.outcome] + req.predictors + [req.group_col]
     df = apply_imputation(df_full, cols, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
 
     if req.group_col not in df.columns:
@@ -327,12 +360,13 @@ def gee_regression(req: GEERequest):
         "family": req.family,
         "cov_struct": req.cov_struct,
         "coefficients": coefs,
+        "warnings": cat_warnings,
         "result_text": _gee_results_text(req.family, req.cov_struct, n_clusters, result.nobs),
     }
 
     gee_report = check_gee_assumptions_placeholder(req.family, req.cov_struct)
     res = add_assumption_warnings_to_result(res, gee_report)
-    return res
+    return _sanitize(res)
 
 
 def _gee_results_text(family, cov_struct, n_clusters, n_obs):
@@ -480,6 +514,7 @@ def ordinal_regression(req: OrdinalRequest):
     df_full = _get_df(req.session_id)
     cols = [req.outcome] + req.predictors
     df = apply_imputation(df_full, cols, req.imputation or "listwise")
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = len(df_full) - len(df)
 
     y_raw = df[req.outcome]
@@ -567,13 +602,14 @@ def ordinal_regression(req: OrdinalRequest):
         "aic": round(float(result.aic), 4) if result.aic is not None else None,
         "bic": round(float(result.bic), 4) if result.bic is not None else None,
         "brant_proportional_odds": _brant_test(np.asarray(y), X),
+        "warnings": cat_warnings,
         "result_text": "",
     }
     res["result_text"] = _ordinal_results_text(len(cats), len(df), res["brant_proportional_odds"])
 
     ordinal_report = check_ordinal_assumptions_placeholder()
     res = add_assumption_warnings_to_result(res, ordinal_report)
-    return res
+    return _sanitize(res)
 
 
 def _ordinal_results_text(n_categories, n_obs, brant: dict | None = None):
