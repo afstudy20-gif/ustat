@@ -168,17 +168,12 @@ export default function UploadZone() {
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       <div className="flex flex-col items-center gap-3">
-        {/* The logo PNG ships with a cream rectangle background AND a beige
-            decorative ring baked in. Zoom into the inner ~55% (chart + brain
-            emblem only) and clip to a circle so only the emblem shows on the
-            page background. */}
-        <div className="w-24 h-24 rounded-full overflow-hidden bg-surface flex items-center justify-center shadow-card">
-          <img
-            src="/logo.png"
-            alt="uSTAT logo"
-            className="w-full h-full object-cover scale-[1.85] origin-center"
-          />
-        </div>
+        <img
+          src="/logo.png"
+          alt="uSTAT logo"
+          className="w-24 h-24 object-contain"
+          style={{ filter: "drop-shadow(0 9px 22px rgba(31,72,128,0.18))" }}
+        />
         <div className="text-center">
           <h1 className="font-serif text-5xl font-medium text-slate-950 leading-none tracking-tight">uSTAT</h1>
           <p className="text-sm text-slate-400 leading-none mt-3 tracking-wide">Statistical Analysis Platform</p>
