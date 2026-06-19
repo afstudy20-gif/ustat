@@ -1532,10 +1532,6 @@ function DataTableBody({ session }: { session: Session }) {
               </p>
             </div>
           )}
-          <button onClick={() => { toggleSort(ctxMenu.col); setCtxMenu(null); }}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-            ⇅ Sort
-          </button>
           <button onClick={() => sendToEnd(ctxMenu.col)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ➡️ Send to end

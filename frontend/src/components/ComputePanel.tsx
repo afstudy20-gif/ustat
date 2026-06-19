@@ -20,6 +20,7 @@ import {
   getUniqueValues,
 } from "../api";
 import { Tip } from "./Tip";
+import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -154,8 +155,8 @@ function FormulaTab({
   columns: ColMeta[];
   onResult: (r: ComputeResult) => void;
 }) {
-  const [formula, setFormula] = useState("");
-  const [newCol, setNewCol] = useState("");
+  const [formula, setFormula] = usePersistedPanelState<string>("compute_formula", "formula", "");
+  const [newCol, setNewCol] = usePersistedPanelState<string>("compute_formula", "newCol", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<ComputeResult | null>(null);
@@ -378,9 +379,9 @@ function TransformTab({
   numCols: ColMeta[];
   onResult: (r: ComputeResult) => void;
 }) {
-  const [srcCol, setSrcCol] = useState(numCols[0]?.name ?? "");
-  const [transform, setTransform] = useState("ln");
-  const [newCol, setNewCol] = useState("");
+  const [srcCol, setSrcCol] = usePersistedPanelState<string>("compute_transform", "srcCol", numCols[0]?.name ?? "");
+  const [transform, setTransform] = usePersistedPanelState<string>("compute_transform", "transform", "ln");
+  const [newCol, setNewCol] = usePersistedPanelState<string>("compute_transform", "newCol", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<ComputeResult | null>(null);
@@ -467,9 +468,11 @@ function RecodeTab({
   onResult: (r: ComputeResult) => void;
 }) {
   const firstCol = columns[0]?.name ?? "";
-  const [newCol, setNewCol] = useState("NewVar");
-  const [elseVal, setElseVal] = useState("");
-  const [rules, setRules] = useState<Rule[]>([
+  // Persist the rule-builder state across tab switches so navigating to Data
+  // (or any other tab) and back doesn't wipe the user's in-progress recode.
+  const [newCol, setNewCol] = usePersistedPanelState<string>("compute_recode", "newCol", "NewVar");
+  const [elseVal, setElseVal] = usePersistedPanelState<string>("compute_recode", "elseVal", "");
+  const [rules, setRules] = usePersistedPanelState<Rule[]>("compute_recode", "rules", [
     { conditions: [{ col: firstCol, op: "<", val: "" }], result: "" },
   ]);
   const [loading, setLoading] = useState(false);
@@ -477,7 +480,7 @@ function RecodeTab({
   const [success, setSuccess] = useState<ComputeResult | null>(null);
 
   // Value labels for the new recode column
-  const [valueLabels, setValueLabels] = useState<Record<string, string>>({});
+  const [valueLabels, setValueLabels] = usePersistedPanelState<Record<string, string>>("compute_recode", "valueLabels", {});
 
   // Cache of unique values per column (fetched on demand)
   const [colValues, setColValues] = useState<Record<string, string[]>>({});
@@ -1236,7 +1239,7 @@ export default function ComputePanel() {
   const removeSessionColumn = useStore((s) => s.removeSessionColumn);
 
   // Hooks must be called before any early return
-  const [tab, setTab] = useState<Tab>("Formula");
+  const [tab, setTab] = usePersistedPanelState<Tab>("compute_panel", "tab", "Formula");
   // Track which columns were computed this session (stored in component state)
   const [computedNames, setComputedNames] = useState<string[]>([]);
 
