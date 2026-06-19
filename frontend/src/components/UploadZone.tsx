@@ -156,7 +156,7 @@ export default function UploadZone() {
           <PowerPanel />
         </main>
         <footer className="text-center py-2 border-t border-line bg-surface">
-          <p className="text-[11px] text-slate-300">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
+          <p className="text-xs text-slate-500 tracking-wide">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
         </footer>
       </div>
     );
@@ -391,7 +391,7 @@ export default function UploadZone() {
         <RefreshAppButton variant="inline" />
       </div>
 
-      <p className="text-[11px] text-gray-300 mt-2">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
+      <p className="text-xs text-slate-500 tracking-wide mt-2">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
       <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400 mt-1">
         <a href="/privacy" target="_blank" rel="noreferrer" className="hover:text-indigo-500">Privacy</a>
         <span className="text-gray-200">·</span>
