@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional
 
+from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column, sentinel_values
+
 
 def apply_imputation(df: pd.DataFrame, cols: List[str], strategy: str = "listwise") -> pd.DataFrame:
     """Return a cleaned DataFrame after applying `strategy` to `cols`."""
@@ -127,13 +129,26 @@ def missing_info(df: pd.DataFrame, cols: List[str]) -> dict:
 
     per_col: dict = {}
     for col in valid_cols:
-        n = int(df[col].isna().sum())
+        max_plausible = plausibility_max_for_column(col)
+        raw_missing = df[col].isna()
+        implausible = flag_sentinels(df[col], max_plausible)
+        n = int((raw_missing | implausible).sum())
         per_col[col] = {
             "count": n,
+            "raw_count": int(raw_missing.sum()),
+            "n_implausible": int(implausible.sum()),
+            "implausible_values": sorted(sentinel_values(df[col], max_plausible)),
             "pct": round(n / total * 100, 1) if total > 0 else 0.0,
         }
 
-    rows_affected = int(df[valid_cols].isna().any(axis=1).sum()) if valid_cols else 0
+    if valid_cols:
+        masks = []
+        for col in valid_cols:
+            max_plausible = plausibility_max_for_column(col)
+            masks.append(df[col].isna() | flag_sentinels(df[col], max_plausible))
+        rows_affected = int(pd.concat(masks, axis=1).any(axis=1).sum())
+    else:
+        rows_affected = 0
     return {
         "total_rows": total,
         "rows_affected": rows_affected,

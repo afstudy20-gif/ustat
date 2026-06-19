@@ -521,6 +521,8 @@ def fit_mice(req):
         mask = series.isna()
         if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
             mask = mask | series.astype(str).str.strip().eq("")
+        from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column
+        mask = mask | flag_sentinels(series, plausibility_max_for_column(series.name))
         return mask
 
     # Check there are actually missing values, including blank text cells.

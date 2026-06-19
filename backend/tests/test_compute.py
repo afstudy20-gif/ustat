@@ -150,6 +150,30 @@ def test_transform_missing_column(client, synth):
     assert r.status_code == 422, r.text
 
 
+def test_quantile_transforms_preserve_missing_with_duplicate_edges(client):
+    sid = make_session(pd.DataFrame({"X": [1, 1, 1, 2, 2, np.nan, 3, 3, 4, 4]}), "tcomp_tf_bins_missing")
+
+    for transform in ("tertile", "quartile"):
+        new_col = f"X_{transform}"
+        r = client.post(f"{BASE}/{sid}/transform",
+                        json={"source_col": "X", "transform": transform, "new_col": new_col})
+        assert r.status_code == 200, r.text
+        out = store.get(sid)[new_col]
+        assert pd.isna(out.iloc[5])
+        assert out.dropna().min() >= 1
+
+
+def test_median_split_preserves_missing(client):
+    sid = make_session(pd.DataFrame({"X": [1, 2, np.nan, 4]}), "tcomp_tf_median_missing")
+    r = client.post(f"{BASE}/{sid}/transform",
+                    json={"source_col": "X", "transform": "median_split", "new_col": "X_med"})
+    assert r.status_code == 200, r.text
+    out = store.get(sid)["X_med"]
+    assert out.tolist()[:2] == [0.0, 0.0]
+    assert pd.isna(out.iloc[2])
+    assert out.iloc[3] == 1.0
+
+
 # ── Recode ────────────────────────────────────────────────────────────────────
 
 def test_recode_numeric_rules(client, synth):
@@ -181,6 +205,23 @@ def test_recode_string_result(client, synth):
     r = client.post(f"{BASE}/{sid}/recode", json=payload)
     assert r.status_code == 200, r.text
     assert r.json()["name"] == "AGE_LABEL"
+
+
+def test_recode_missing_source_returns_jsonable_preview(client):
+    sid = make_session(pd.DataFrame({"GROUP": ["A", None, "B", pd.NA]}), "tcomp_recode_missing")
+    payload = {
+        "new_col": "GROUP_A",
+        "else_val": None,
+        "rules": [
+            {"conditions": [{"col": "GROUP", "op": "==", "val": "A"}], "result": "yes"},
+        ],
+    }
+    r = client.post(f"{BASE}/{sid}/recode", json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["preview_values"] == ["yes", None, None, None]
+    out = store.get(sid)["GROUP_A"]
+    assert out.iloc[0] == "yes"
+    assert out.iloc[1:].isna().all()
 
 
 def test_recode_no_rules(client, synth):

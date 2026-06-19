@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 
 from services import store
+from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column, sentinel_values
 from services.impute import add_survival_auxiliary_variables, apply_imputation, apply_passive_imputation
 
 router = APIRouter()
@@ -46,17 +47,29 @@ def pattern(req: PatternRequest):
 
     # ── Per-column missing stats ─────────────────────────────────────────
     per_column = []
+    missing_masks = {}
     for col in cols:
-        n_missing = int(sub[col].isnull().sum())
+        max_plausible = plausibility_max_for_column(col)
+        raw_missing = sub[col].isnull()
+        implausible = flag_sentinels(sub[col], max_plausible)
+        missing_mask = raw_missing | implausible
+        missing_masks[col] = missing_mask
+        n_missing = int(missing_mask.sum())
+        n_raw_missing = int(raw_missing.sum())
+        n_implausible = int(implausible.sum())
         pct_missing = round(n_missing / n_rows * 100, 2) if n_rows > 0 else 0.0
         per_column.append({
             "col": col,
             "n_missing": n_missing,
+            "n_missing_raw": n_raw_missing,
+            "n_implausible": n_implausible,
+            "implausible_values": sorted(sentinel_values(sub[col], max_plausible)),
+            "review_flag": "implausible (review)" if n_implausible else None,
             "pct_missing": pct_missing,
         })
 
     # ── Missing pattern table ────────────────────────────────────────────
-    is_null = sub.isnull()
+    is_null = pd.DataFrame(missing_masks, index=sub.index) if missing_masks else sub.isnull()
     # Group rows by their missing pattern
     pattern_strs = is_null.apply(lambda row: tuple(row.values), axis=1)
     pattern_counts = pattern_strs.value_counts()

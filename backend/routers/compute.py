@@ -21,6 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services import store
+from services.dirty_value_guard import flag_sentinels, mask_sentinels, plausibility_max_for_column, sentinel_values
 
 router = APIRouter()
 
@@ -38,10 +39,24 @@ def _col_kind(series: pd.Series) -> str:
     return _detect_kind(series)
 
 
+def _jsonable_value(value: Any) -> Any:
+    if pd.isna(value):
+        return None
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    return value
+
+
 def _build_result(df: pd.DataFrame, col: str) -> dict:
     """Build the standard response dict after adding a new column."""
     series = df[col]
-    preview_vals = series.head(2000).where(pd.notna(series.head(2000)), other=None).tolist()
+    preview_vals = [_jsonable_value(v) for v in series.head(2000).tolist()]
     return {
         "name": col,
         "dtype": str(series.dtype),
@@ -56,6 +71,26 @@ def _validate_col_name(new_col: str):
     if not new_col or not new_col.strip():
         raise HTTPException(status_code=422, detail="New column name cannot be empty")
     return new_col.strip()
+
+
+def _quantile_groups(col: pd.Series, q: int) -> pd.Series:
+    """Return 1-based quantile groups while preserving missing source values."""
+    result = pd.Series(np.nan, index=col.index, dtype="float64")
+    valid = col.dropna()
+    if valid.empty:
+        raise HTTPException(status_code=422, detail="No numeric values available for this transform")
+    if valid.nunique(dropna=True) < 2:
+        raise HTTPException(status_code=422, detail="Need at least two distinct numeric values for quantile grouping")
+
+    try:
+        grouped = pd.qcut(valid, q=q, labels=False, duplicates="drop")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Could not create quantile groups: {exc}")
+
+    if grouped.notna().sum() == 0:
+        raise HTTPException(status_code=422, detail="Could not create quantile groups from this column")
+    result.loc[grouped.index] = grouped.astype(float) + 1
+    return result
 
 
 # ── 1. Formula Builder ────────────────────────────────────────────────────────
@@ -192,7 +227,9 @@ def transform_compute(session_id: str, req: TransformRequest):
     if req.transform not in TRANSFORMS:
         raise HTTPException(status_code=422, detail=f"Unknown transform '{req.transform}'. Valid: {list(TRANSFORMS.keys())}")
 
-    col = pd.to_numeric(df[req.source_col], errors="coerce")
+    max_plausible = plausibility_max_for_column(req.source_col)
+    sentinel_mask = flag_sentinels(df[req.source_col], max_plausible)
+    col = mask_sentinels(df[req.source_col], max_plausible)
     df = df.copy()
 
     if req.transform == "ln":
@@ -213,15 +250,23 @@ def transform_compute(session_id: str, req: TransformRequest):
             raise HTTPException(status_code=422, detail="Standard deviation is 0 — cannot compute Z-score for a constant column")
         df[new_col] = (col - mu) / sd
     elif req.transform == "tertile":
-        df[new_col] = pd.qcut(col, q=3, labels=[1, 2, 3], duplicates="drop").astype(float)
+        df[new_col] = _quantile_groups(col, 3)
     elif req.transform == "quartile":
-        df[new_col] = pd.qcut(col, q=4, labels=[1, 2, 3, 4], duplicates="drop").astype(float)
+        df[new_col] = _quantile_groups(col, 4)
     elif req.transform == "median_split":
         med = col.median()
-        df[new_col] = (col > med).astype(float)  # 0 = ≤ median, 1 = > median
+        if pd.isna(med):
+            raise HTTPException(status_code=422, detail="No numeric values available for median split")
+        df[new_col] = (col > med).where(col.notna(), np.nan).astype(float)  # 0 = ≤ median, 1 = > median
 
     store.save(session_id, df)
-    return _build_result(df, new_col)
+    result = _build_result(df, new_col)
+    if sentinel_mask.any():
+        result["warnings"] = [
+            f"{int(sentinel_mask.sum())} implausible value(s) in '{req.source_col}' were treated as missing for this transform."
+        ]
+        result["n_implausible"] = int(sentinel_mask.sum())
+    return result
 
 
 # ── 3. Recode / Binning ───────────────────────────────────────────────────────
@@ -248,8 +293,8 @@ _OPS = {
     ">=":       lambda s, v: s >= v,
     "==":       lambda s, v: s == v,
     "!=":       lambda s, v: s != v,
-    "contains": lambda s, v: s.astype(str).str.contains(str(v), case=False, na=False),
-    "!contains": lambda s, v: ~s.astype(str).str.contains(str(v), case=False, na=False),
+    "contains": lambda s, v: s.astype("string").str.contains(str(v), case=False, na=False),
+    "!contains": lambda s, v: ~s.astype("string").str.contains(str(v), case=False, na=False),
 }
 
 
@@ -309,11 +354,11 @@ def recode_compute(session_id: str, req: RecodeRequest):
                     col_s = col_num
                     v = val_num
                 else:
-                    col_s = raw_col.astype(str).str.strip()
+                    col_s = raw_col.astype("string").str.strip()
                     v = str(val).strip()
             else:
                 # String comparison (value is text, or == / != on text column)
-                col_s = raw_col.astype(str).str.strip()
+                col_s = raw_col.astype("string").str.strip()
                 v = str(val).strip()
 
             try:
@@ -321,7 +366,7 @@ def recode_compute(session_id: str, req: RecodeRequest):
             except Exception as exc:
                 raise HTTPException(status_code=422, detail=f"Condition error ({cond.col} {cond.op} {cond.val}): {exc}")
             # NaN in source → False (row not matched)
-            cond_mask = cond_mask.fillna(False)
+            cond_mask = cond_mask.fillna(False) & raw_col.notna()
             mask = mask & cond_mask
         conditions.append(mask)
         # Try to cast result to numeric
@@ -332,7 +377,9 @@ def recode_compute(session_id: str, req: RecodeRequest):
 
     # Determine default
     default = np.nan
+    has_default = False
     if req.else_val is not None and str(req.else_val).strip() != "":
+        has_default = True
         try:
             default = float(req.else_val)
         except (TypeError, ValueError):
@@ -340,17 +387,23 @@ def recode_compute(session_id: str, req: RecodeRequest):
 
     df = df.copy()
 
-    # If all choices + default are numeric, use np.select normally
-    # If any is a string, cast everything to string to avoid mixed-type issues
+    # Rules are first-match-wins, like np.select. Build with pandas so missing
+    # defaults and string choices do not trigger NumPy dtype promotion errors.
     all_numeric = all(isinstance(c, (int, float)) for c in choices)
-    if default is not np.nan:
+    if has_default:
         try:
             float(default)
         except (TypeError, ValueError):
             all_numeric = False
 
     if all_numeric:
-        df[new_col] = np.select(conditions, choices, default=default)
+        result = pd.Series(default, index=df.index, dtype="float64")
+        unmatched = pd.Series(True, index=df.index)
+        for cond_mask, choice in zip(conditions, choices):
+            assign_mask = cond_mask & unmatched
+            result.loc[assign_mask] = choice
+            unmatched &= ~assign_mask
+        df[new_col] = result
         # Convert int-like float columns to int if no NaN
         if df[new_col].notna().all():
             try:
@@ -360,14 +413,13 @@ def recode_compute(session_id: str, req: RecodeRequest):
             except (ValueError, TypeError):
                 pass
     else:
-        # String mode: cast all choices to string
-        str_choices = [str(c) for c in choices]
-        str_default = "" if default is np.nan else str(default)
-        result = np.select(conditions, str_choices, default=str_default)
+        result = pd.Series(pd.NA if not has_default else str(default), index=df.index, dtype="object")
+        unmatched = pd.Series(True, index=df.index)
+        for cond_mask, choice in zip(conditions, choices):
+            assign_mask = cond_mask & unmatched
+            result.loc[assign_mask] = str(choice)
+            unmatched &= ~assign_mask
         df[new_col] = result
-        # Replace empty string default with NaN
-        if default is np.nan:
-            df.loc[df[new_col] == "", new_col] = np.nan
 
     store.save(session_id, df)
     return _build_result(df, new_col)
@@ -498,7 +550,31 @@ def _num(df: pd.DataFrame, cm: dict, key: str) -> pd.Series:
     col_name = cm.get(key)
     if not col_name:
         return pd.Series(np.nan, index=df.index)
-    return pd.to_numeric(df[col_name], errors="coerce")
+    max_plausible = plausibility_max_for_column(key) or plausibility_max_for_column(col_name)
+    return mask_sentinels(df[col_name], max_plausible)
+
+
+def _clinical_warnings(df: pd.DataFrame, cm: dict) -> list[str]:
+    warnings: list[str] = []
+    for key, col_name in (cm or {}).items():
+        if col_name not in df.columns:
+            continue
+        max_plausible = plausibility_max_for_column(key) or plausibility_max_for_column(col_name)
+        mask = flag_sentinels(df[col_name], max_plausible)
+        if mask.any():
+            vals = sorted(sentinel_values(df[col_name], max_plausible))
+            warnings.append(
+                f"{int(mask.sum())} implausible value(s) in '{col_name}' treated as missing: {vals}"
+            )
+    return warnings
+
+
+def _build_clinical_result(df: pd.DataFrame, new_col: str, cm: dict) -> dict:
+    result = _build_result(df, new_col)
+    warnings = _clinical_warnings(df, cm)
+    if warnings:
+        result["warnings"] = warnings
+    return result
 
 
 # ── BSA (Mosteller formula) ───────────────────────────────────────────────────
@@ -781,7 +857,7 @@ def clinical_h2fpef(session_id: str, req: ClinicalRequest):
     new_col = req.new_col or "H2FPEF"
     df[new_col] = score
     store.save(session_id, df)
-    return _build_result(df, new_col)
+    return _build_clinical_result(df, new_col, cm)
 
 
 # ── MAGGIC Heart Failure Risk Score ──────────────────────────────────────────
@@ -889,7 +965,7 @@ def clinical_maggic(session_id: str, req: ClinicalRequest):
     new_col = req.new_col or "MAGGIC_Score"
     df[new_col] = score.astype(int)
     store.save(session_id, df)
-    return _build_result(df, new_col)
+    return _build_clinical_result(df, new_col, cm)
 
 
 # ── QTc — Bazett's formula ────────────────────────────────────────────────────
@@ -948,18 +1024,21 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         source_pos = list(df.columns).index(req.column)
         df.insert(source_pos + 1, target, df[req.column].copy())
     col = df[target]
-    n_before = int(col.isna().sum() + (col.astype(str).str.strip() == "").sum())
+    max_plausible = plausibility_max_for_column(req.column)
+    sentinel_mask = flag_sentinels(col, max_plausible)
+    blank_mask = col.astype(str).str.strip() == ""
+    n_before = int((col.isna() | blank_mask | sentinel_mask).sum())
 
     method_label = req.value
 
     # Special fill strategies
     if req.value == "__mean__":
-        num_col = pd.to_numeric(col, errors="coerce")
+        num_col = mask_sentinels(col, max_plausible)
         fill_val = float(num_col.mean())
         method_label = f"mean ({fill_val:.2f})"
         df[target] = num_col.fillna(fill_val)
     elif req.value == "__median__":
-        num_col = pd.to_numeric(col, errors="coerce")
+        num_col = mask_sentinels(col, max_plausible)
         fill_val = float(num_col.median())
         method_label = f"median ({fill_val:.2f})"
         df[target] = num_col.fillna(fill_val)
@@ -974,7 +1053,7 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
             df.loc[df[target].astype(str).str.strip() == "", target] = fill_val
         method_label = f"most frequent ({fill_val})"
     elif req.value == "__mice__":
-        coerced = pd.to_numeric(col, errors="coerce")
+        coerced = mask_sentinels(col, max_plausible)
         is_numeric_col = pd.api.types.is_numeric_dtype(col) or (
             col.notna().any() and coerced.notna().mean() >= 0.8
         )
@@ -1041,6 +1120,11 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
     result.update({"column": target, "source_column": req.column,
                    "fill_value": method_label, "n_filled": n_filled,
                    "new_column": bool(req.new_column)})
+    if sentinel_mask.any():
+        result["n_implausible"] = int(sentinel_mask.sum())
+        result["warnings"] = [
+            f"{int(sentinel_mask.sum())} implausible value(s) in '{req.column}' were treated as missing for imputation."
+        ]
     return result
 
 
@@ -1072,8 +1156,13 @@ def missing_diagnostics(session_id: str, req: Optional[MissingDiagnosticsRequest
     columns = []
     any_mar = False
     for c in target_cols:
-        miss = df[c].isna() | (df[c].astype(str).str.strip() == "")
+        max_plausible = plausibility_max_for_column(c)
+        raw_miss = df[c].isna() | (df[c].astype(str).str.strip() == "")
+        implausible = flag_sentinels(df[c], max_plausible)
+        miss = raw_miss | implausible
         n_miss = int(miss.sum())
+        n_raw_miss = int(raw_miss.sum())
+        n_implausible = int(implausible.sum())
         if n_miss == 0:
             continue
         depends_on = []
@@ -1095,6 +1184,10 @@ def missing_diagnostics(session_id: str, req: Optional[MissingDiagnosticsRequest
         columns.append({
             "name": c,
             "n_missing": n_miss,
+            "n_missing_raw": n_raw_miss,
+            "n_implausible": n_implausible,
+            "implausible_values": sorted(sentinel_values(df[c], max_plausible)),
+            "review_flag": "implausible (review)" if n_implausible else None,
             "pct": round(100.0 * n_miss / n, 1) if n else 0.0,
             "kind": _col_kind(df[c]),
             "is_numeric": bool(pd.api.types.is_numeric_dtype(df[c])),

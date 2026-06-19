@@ -20,6 +20,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
 
+from services.dirty_value_guard import flag_sentinels, mask_sentinels, plausibility_max_for_column, sentinel_values
+
 
 @dataclass
 class ImputationResult:
@@ -142,13 +144,19 @@ def mice_multiple(
 
     original_missing = missing_pattern_summary(df, valid_cols)
 
+    work_df = df.copy()
+    for c in valid_cols:
+        max_plausible = plausibility_max_for_column(c)
+        if max_plausible is not None:
+            work_df[c] = mask_sentinels(work_df[c], max_plausible)
+
     def _has_missing(c: str) -> bool:
-        return bool((df[c].isna() | (df[c].astype(str).str.strip() == "")).any())
+        return bool((work_df[c].isna() | (work_df[c].astype(str).str.strip() == "")).any())
 
     target_cols = [c for c in valid_cols if _has_missing(c)]
     if not target_cols:
         return ImputationResult(
-            imputed_datasets=[df.copy() for _ in range(n_imputations)],
+            imputed_datasets=[work_df.copy() for _ in range(n_imputations)],
             original_missing_info=original_missing, n_imputations=n_imputations, method="pmm")
 
     # Features = every analysis column (carries MAR information across variables).
@@ -157,13 +165,13 @@ def mice_multiple(
     for i in range(n_imputations):
         rng = np.random.default_rng(random_state + i)
         try:
-            imputed_datasets.append(_chained_impute(df, target_cols, feature_cols, max_iter, rng))
+            imputed_datasets.append(_chained_impute(work_df, target_cols, feature_cols, max_iter, rng))
         except Exception:
             # Defensive fallback to sklearn IterativeImputer on numeric columns.
             from sklearn.experimental import enable_iterative_imputer  # noqa: F401
             from sklearn.impute import IterativeImputer
-            num_cols = [c for c in valid_cols if pd.api.types.is_numeric_dtype(df[c])]
-            df_imp = df.copy()
+            num_cols = [c for c in valid_cols if pd.api.types.is_numeric_dtype(work_df[c])]
+            df_imp = work_df.copy()
             if num_cols:
                 imp = IterativeImputer(max_iter=max_iter, random_state=random_state + i, skip_complete=True)
                 df_imp[num_cols] = imp.fit_transform(df_imp[num_cols])
@@ -183,14 +191,23 @@ def missing_pattern_summary(df: pd.DataFrame, cols: List[str]) -> Dict[str, Any]
     total = len(df)
 
     per_col = {}
+    missing_masks = {}
     for col in valid_cols:
-        n = int(df[col].isna().sum())
+        max_plausible = plausibility_max_for_column(col)
+        raw_missing = df[col].isna()
+        implausible = flag_sentinels(df[col], max_plausible)
+        missing_mask = raw_missing | implausible
+        missing_masks[col] = missing_mask
+        n = int(missing_mask.sum())
         per_col[col] = {
             "count": n,
+            "raw_count": int(raw_missing.sum()),
+            "n_implausible": int(implausible.sum()),
+            "implausible_values": sorted(sentinel_values(df[col], max_plausible)),
             "pct": round(n / total * 100, 1) if total > 0 else 0.0,
         }
 
-    rows_affected = int(df[valid_cols].isna().any(axis=1).sum()) if valid_cols else 0
+    rows_affected = int(pd.DataFrame(missing_masks, index=df.index).any(axis=1).sum()) if valid_cols else 0
 
     # Simple pattern classification
     pattern = "unknown"
