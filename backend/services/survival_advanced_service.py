@@ -799,7 +799,7 @@ def fit_fine_gray(req):
     # which the QA wave 1 audit flagged as CRITICAL — competing-risks output
     # was silently wrong on cohorts with one stray bad row.
     from services.survival_validation import validate_survival_inputs
-    validate_survival_inputs(df, req.duration_col, req.event_col)
+    validate_survival_inputs(df, req.duration_col, req.event_col, require_binary_event=False)
     if req.group_col and req.group_col not in df.columns:
         raise HTTPException(status_code=400, detail=f"Column '{req.group_col}' not found")
 
@@ -1358,12 +1358,18 @@ def fit_landmark(req):
                 raise HTTPException(status_code=400, detail=f"Predictor '{p}' not found")
             needed.append(p)
 
-    work = df[needed].dropna()
+    work = df[needed].dropna().copy()
+    work[req.duration_col] = pd.to_numeric(work[req.duration_col], errors="coerce")
+    work[req.event_col] = pd.to_numeric(work[req.event_col], errors="coerce")
     n_total = len(work)
+    from services.survival_validation import validate_survival_inputs
+    surv = validate_survival_inputs(work, req.duration_col, req.event_col, mode="drop_with_warning")
+    work = surv.df
 
     # Apply landmark: exclude subjects who had event before landmark
     lm_mask = work[req.duration_col] >= req.landmark_time
     lm_df = work[lm_mask].copy()
+    n_landmark_excluded = len(work) - len(lm_df)
     n_excluded = n_total - len(lm_df)
 
     if len(lm_df) < 10:
@@ -1482,7 +1488,7 @@ def fit_landmark(req):
 
     assumptions = [
         {"name": "Landmark exclusion", "met": True,
-         "detail": f"{n_excluded} subjects excluded (event or censored before t={req.landmark_time})."},
+         "detail": f"{n_landmark_excluded} subjects excluded (event or censored before t={req.landmark_time})."},
         {"name": "Sufficient sample", "met": len(lm_df) >= 20,
          "detail": f"{len(lm_df)} subjects remain after landmark."},
         {"name": "Landmark selection bias", "met": True,
@@ -1526,6 +1532,8 @@ def fit_landmark(req):
         "landmark_time": req.landmark_time,
         "n_total": n_total,
         "n_excluded": n_excluded,
+        "n_invalid_survival": int(surv.n_excluded),
+        "warnings": surv.warnings,
         "n_landmark": len(lm_df),
         "km_summaries": km_summaries,
         "logrank_p": logrank_p,
@@ -1562,6 +1570,8 @@ def _rmst_mi_pool(df_full, req, n_imputations: int = 10):
     base[req.duration_col] = pd.to_numeric(base[req.duration_col], errors="coerce")
     base[req.event_col] = pd.to_numeric(base[req.event_col], errors="coerce")
     base = base.dropna(subset=[req.duration_col, req.event_col])  # outcome complete-case
+    from services.survival_validation import validate_survival_inputs
+    base = validate_survival_inputs(base, req.duration_col, req.event_col, mode="drop_with_warning").df
     if not (base[gc].isna() | (base[gc].astype(str).str.strip() == "")).any():
         return None, None, None  # group fully observed → nothing to MI
 
@@ -1632,14 +1642,15 @@ def fit_rmst(req):
     df[req.duration_col] = pd.to_numeric(df[req.duration_col], errors="coerce")
     df[req.event_col] = pd.to_numeric(df[req.event_col], errors="coerce")
     df = df.dropna()
+    from services.survival_validation import validate_survival_inputs
+    surv = validate_survival_inputs(df, req.duration_col, req.event_col, mode="drop_with_warning")
+    df = surv.df
     if len(df) < 5:
         raise HTTPException(status_code=400, detail=f"Not enough complete rows (need ≥ 5, got {len(df)}).")
 
-    rmst_warnings: list[str] = []
+    rmst_warnings: list[str] = list(surv.warnings)
 
     t_all = df[req.duration_col].values.astype(float)
-    if np.any(t_all < 0):
-        raise HTTPException(status_code=422, detail="Negative durations are not allowed.")
     if req.tau > float(t_all.max()):
         raise HTTPException(
             status_code=422,
@@ -1793,7 +1804,6 @@ def fit_rmst(req):
          "detail": "RMST is a robust, PH-free summary (recommended when hazards cross or treatment effect is delayed)."},
     ]
 
-    rmst_warnings = []
     if req.tau > 0.9 * float(t_all.max()):
         rmst_warnings.append("τ is close to the maximum follow-up — RMST estimate has higher uncertainty in the tail.")
     if len(df) < 50:
@@ -1838,6 +1848,7 @@ def fit_rmst(req):
     return {
         "test": "Restricted Mean Survival Time",
         "n": n_total,
+        "n_invalid_survival": int(surv.n_excluded),
         "tau": float(req.tau),
         "rmst_by_group": rmst_by_group,
         "contrasts": contrasts,

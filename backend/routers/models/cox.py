@@ -30,6 +30,7 @@ from services.rcs_basis import (
     rcs_basis as _rcs_basis,
     resolve_knots as _resolve_knots,
 )
+from services.survival_validation import validate_survival_inputs
 
 router = APIRouter()
 
@@ -55,6 +56,19 @@ def _get_df(session_id: str) -> pd.DataFrame:
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return df
+
+
+def _drop_invalid_survival_rows(df: pd.DataFrame, duration_col: str, event_col: str):
+    res = validate_survival_inputs(df, duration_col, event_col, mode="drop_with_warning")
+    return res.df, res.warnings, res.n_excluded
+
+
+def _add_survival_warnings(result: dict, warnings: list[str], n_invalid: int) -> dict:
+    if warnings:
+        result["warnings"] = [*result.get("warnings", []), *warnings]
+    if n_invalid:
+        result["n_invalid_survival"] = int(n_invalid)
+    return result
 
 
 _MIN_AT_RISK = 10  # below this, a landmark estimate is flagged unreliable
@@ -334,6 +348,7 @@ def kaplan_meier(req: KMRequest):
 
     km_cols = [req.duration_col, req.event_col]
     df = apply_imputation(df_full, km_cols, req.imputation)
+    df, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df, req.duration_col, req.event_col)
     n_excluded = n_total - len(df)
 
     if len(df) == 0:
@@ -342,9 +357,6 @@ def kaplan_meier(req: KMRequest):
     event_vals = sorted(df[req.event_col].dropna().unique())
     if set(event_vals) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1 (0=censored, 1=event). Found: {event_vals[:10]}")
-
-    if (df[req.duration_col] < 0).any():
-        raise HTTPException(status_code=422, detail="Duration column contains negative values. All durations must be ≥ 0.")
 
     if req.stratify_col:
         if req.stratify_col not in df_full.columns:
@@ -358,14 +370,14 @@ def kaplan_meier(req: KMRequest):
             grp_results = _km_fit_groups(sub, req.duration_col, req.event_col, req.group_col, req.survival_times, req.risk_times, req.include_censors)
             lr = _km_logrank(sub, req.duration_col, req.event_col, req.group_col) if req.group_col else None
             strata_out.append({"label": str(sv), "n": int(len(sub)), "groups": grp_results, "logrank": lr})
-        return {
+        return _add_survival_warnings({
             "model": "Kaplan-Meier",
             "strata": strata_out,
             "stratify_col": req.stratify_col,
             "n_total": n_total,
             "n_excluded": n_excluded,
             "imputation": req.imputation,
-        }
+        }, survival_warnings, n_invalid_survival)
 
     results = _km_fit_groups(df, req.duration_col, req.event_col, req.group_col, req.survival_times, req.risk_times, req.include_censors)
     logrank = _km_logrank(df, req.duration_col, req.event_col, req.group_col) if req.group_col else None
@@ -374,7 +386,7 @@ def kaplan_meier(req: KMRequest):
         if (req.pairwise and req.group_col) else None
     )
 
-    return {
+    return _add_survival_warnings({
         "model": "Kaplan-Meier",
         "groups": results,
         "logrank": logrank,
@@ -385,7 +397,7 @@ def kaplan_meier(req: KMRequest):
         "n_total": n_total,
         "n_excluded": n_excluded,
         "imputation": req.imputation,
-    }
+    }, survival_warnings, n_invalid_survival)
 
 
 # ── Cox Proportional Hazards ───────────────────────────────────────────────────
@@ -417,10 +429,14 @@ async def cox_regression(req: CoxRequest):
         imputed_dfs = imp_result.imputed_datasets
 
         individual_results = []
+        first_validation = None
         for df_imp in imputed_dfs:
             try:
+                val_df, val_warnings, val_invalid = _drop_invalid_survival_rows(df_imp, req.duration_col, req.event_col)
+                if first_validation is None:
+                    first_validation = (val_df, val_warnings, val_invalid)
                 cph_imp = CoxPHFitter()
-                await asyncio.to_thread(cph_imp.fit, df_imp[cox_cols], duration_col=req.duration_col, event_col=req.event_col)
+                await asyncio.to_thread(cph_imp.fit, val_df[cox_cols], duration_col=req.duration_col, event_col=req.event_col)
                 loghrs = {var: float(np.log(cph_imp.hazard_ratios_.get(var, 1.0))) for var in req.predictors}
                 individual_results.append({"coefficients": loghrs})
             except Exception:
@@ -429,11 +445,15 @@ async def cox_regression(req: CoxRequest):
 
         pooled = pool_cox_results(individual_results) if individual_results else {}
 
-        df = imputed_dfs[0]
+        if first_validation is not None:
+            df, survival_warnings, n_invalid_survival = first_validation
+        else:
+            df, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(imputed_dfs[0], req.duration_col, req.event_col)
         n_excluded = n_total - len(df)
         use_mice_pooled = True
     else:
         df = apply_imputation(df_full, cox_cols, imputation_method)
+        df, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df, req.duration_col, req.event_col)
         n_excluded = n_total - len(df)
         use_mice_pooled = False
     if len(df) == 0:
@@ -442,8 +462,6 @@ async def cox_regression(req: CoxRequest):
     event_vals = sorted(df[req.event_col].dropna().unique())
     if set(event_vals) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {event_vals[:10]}")
-    if (df[req.duration_col] < 0).any():
-        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
 
     pred_raw = df[req.predictors].copy()
     numeric_pred: list[str] = []
@@ -541,6 +559,7 @@ async def cox_regression(req: CoxRequest):
     result = {
         "model": "Cox Proportional Hazards",
         "n": int(cph.event_observed.sum()),
+        "n_analyzed": int(len(fit_df)),
         "n_total": n_total,
         "n_excluded": n_excluded,
         "imputation": req.imputation,
@@ -562,7 +581,7 @@ async def cox_regression(req: CoxRequest):
     missing_info = missing_pattern_summary(df_full, cox_cols)
     result = add_missing_data_diagnostics(result, missing_info)
 
-    return result
+    return _add_survival_warnings(result, survival_warnings, n_invalid_survival)
 
 
 # ── Cox time-horizon sensitivity (forest) ──────────────────────────────────────
@@ -634,14 +653,13 @@ async def cox_horizons(req: CoxHorizonsRequest):
     df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
     work_cols = [req.duration_col, req.event_col, req.predictor] + cov
     df = apply_imputation(df_full, work_cols, req.imputation or "listwise")
+    df, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df, req.duration_col, req.event_col)
     if len(df) == 0:
         raise HTTPException(status_code=400, detail="No valid rows after coercing/imputing.")
 
     event_vals = sorted(df[req.event_col].dropna().unique())
     if set(event_vals) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {event_vals[:10]}")
-    if (df[req.duration_col] < 0).any():
-        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
 
     # Encode predictors once — the encoded design is reused across windows.
     enc, _num, _cat = _encode_predictors(df, [req.predictor] + cov)
@@ -764,17 +782,18 @@ async def cox_horizons(req: CoxHorizonsRequest):
         + ("".join(f' + {c}' for c in cov)) + ", data = dat)\n"
     )
 
-    return {
+    return _add_survival_warnings({
         "model": "Cox PH — time-horizon sensitivity",
         "predictor": req.predictor,
         "covariates": cov,
         "n_total": n_total,
         "n_analyzed": int(len(df)),
+        "n_excluded": int(n_total - len(df)),
         "horizons": horizon_results,
         "forest_rows": forest_rows,
         "interpretation": interpretation,
         "r_code": r_code,
-    }
+    }, survival_warnings, n_invalid_survival)
 
 
 # ── Cox with time-varying covariates ───────────────────────────────────────────
@@ -1335,14 +1354,13 @@ async def cox_rcs(req: CoxRCSRequest):
         df = apply_imputation(df, cols_needed, req.imputation)
     else:
         df = df.dropna()
+    df, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df, req.duration_col, req.event_col)
     n = len(df)
     if n < 15:
         raise HTTPException(status_code=400, detail="Not enough complete rows (need ≥ 15).")
 
     duration = df[req.duration_col].values.astype(float)
     event = df[req.event_col].values.astype(float)
-    if np.any(duration < 0):
-        raise HTTPException(status_code=422, detail=f"duration_col '{req.duration_col}' must be ≥ 0.")
     if set(sorted(set(event.tolist()))) - {0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"event_col '{req.event_col}' must be binary 0/1.")
     if event.sum() < 5:
@@ -1629,7 +1647,7 @@ async def cox_rcs(req: CoxRCSRequest):
     except Exception:
         logger.exception("Cox-RCS partial AIC extraction failed")
 
-    return {
+    return _add_survival_warnings({
         "n": int(n),
         "n_events": int(event.sum()),
         "concordance": float(cph_full.concordance_index_),
@@ -1652,7 +1670,7 @@ async def cox_rcs(req: CoxRCSRequest):
         "interaction": interaction_result,
         "curves_1d": curves_1d,
         "surface_2d": surface_2d,
-    }
+    }, survival_warnings, n_invalid_survival)
 
 
 # ── Unadjusted vs Adjusted Cox forest (paired univariable + multivariable) ─────
@@ -1748,11 +1766,10 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
     df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
     df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
 
+    df_full, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df_full, req.duration_col, req.event_col)
     ev = sorted(df_full[req.event_col].dropna().unique())
     if set(ev) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {ev[:10]}")
-    if (df_full[req.duration_col].dropna() < 0).any():
-        raise HTTPException(status_code=422, detail="Duration column contains negative values.")
 
     # Columns with value labels or a categorical kind override are treated as
     # multi-level categoricals (e.g. LDL groups 1/2/3 → contrast rows), even
@@ -1849,7 +1866,7 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
             "adjusted": adj_stats.get(t["term"]),
         })
 
-    return {
+    return _add_survival_warnings({
         "duration_col": req.duration_col,
         "event_col": req.event_col,
         "n": n_used,
@@ -1857,7 +1874,7 @@ async def cox_uni_multi(req: CoxUniMultiRequest):
         "n_pars": n_pars,
         "n_events_pars": n_events_pars,
         "rows": rows,
-    }
+    }, survival_warnings, n_invalid_survival)
 
 
 # ── Multiple model-specification forest (one exposure across adjustment sets) ───
@@ -1889,6 +1906,7 @@ async def cox_model_specs(req: CoxModelSpecsRequest):
     df_full[req.duration_col] = pd.to_numeric(df_full[req.duration_col], errors="coerce")
     df_full[req.event_col] = pd.to_numeric(df_full[req.event_col], errors="coerce")
 
+    df_full, survival_warnings, n_invalid_survival = _drop_invalid_survival_rows(df_full, req.duration_col, req.event_col)
     ev = sorted(df_full[req.event_col].dropna().unique())
     if set(ev) - {0, 1, 0.0, 1.0}:
         raise HTTPException(status_code=422, detail=f"Event column must be binary 0/1. Found: {ev[:10]}")
@@ -1946,10 +1964,10 @@ async def cox_model_specs(req: CoxModelSpecsRequest):
             "terms": spec_terms,
         })
 
-    return {
+    return _add_survival_warnings({
         "duration_col": req.duration_col,
         "event_col": req.event_col,
         "exposure": req.exposure,
         "exposure_terms": exp_terms,
         "specs": out_specs,
-    }
+    }, survival_warnings, n_invalid_survival)

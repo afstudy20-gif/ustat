@@ -24,6 +24,7 @@ from services.causal_sensitivity import (
     e_value,
     quantitative_bias_analysis,
 )
+from services.survival_validation import validate_survival_inputs
 
 router = APIRouter()
 
@@ -57,7 +58,7 @@ def logistic_diagnostics(req: LogisticDiagRequest):
 
     df_full = _get_df(req.session_id)
     all_cols = [req.outcome] + req.predictors
-    df = apply_imputation(df_full, all_cols, req.imputation or "listwise")
+    df = apply_imputation(df_full, all_cols, req.imputation or "listwise").copy()
 
     if len(df) < len(req.predictors) + 10:
         raise HTTPException(400, "Not enough observations for logistic regression diagnostics.")
@@ -269,7 +270,7 @@ def cox_diagnostics(req: CoxDiagRequest):
     if missing_cols:
         raise HTTPException(400, f"Columns not found: {missing_cols}")
 
-    df = apply_imputation(df_full, all_cols, req.imputation or "listwise")
+    df = apply_imputation(df_full, all_cols, req.imputation or "listwise").copy()
 
     if len(df) < len(req.predictors) + 10:
         raise HTTPException(400, "Not enough observations for Cox PH diagnostics.")
@@ -279,13 +280,14 @@ def cox_diagnostics(req: CoxDiagRequest):
     df[req.event_col] = pd.to_numeric(df[req.event_col], errors="coerce")
     for col in req.predictors:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df = df.dropna(subset=all_cols)
+    df = df.dropna(subset=all_cols).copy()
 
     if len(df) < len(req.predictors) + 10:
         raise HTTPException(400, "Not enough observations after cleaning.")
 
-    # Ensure positive durations
-    df = df[df[req.duration_col] > 0]
+    # Ensure positive durations with the same row policy as the main Cox fit.
+    surv = validate_survival_inputs(df, req.duration_col, req.event_col, mode="drop_with_warning")
+    df = surv.df
     if len(df) < 10:
         raise HTTPException(400, "Not enough observations with positive duration.")
 
@@ -372,6 +374,7 @@ def cox_diagnostics(req: CoxDiagRequest):
 
     # ── Warnings ─────────────────────────────────────────────────────────────
     warnings = []
+    warnings.extend(surv.warnings)
     if violated:
         warnings.append(f"PH assumption violated for: {', '.join(v['variable'] for v in violated)}. Consider time-varying coefficients or stratification.")
     if epv < 10:
@@ -414,8 +417,10 @@ def cox_diagnostics(req: CoxDiagRequest):
         f"concordance(model)  # C-index"
     )
 
-    return {
+    result = {
         "test": "Cox PH Diagnostics",
+        "n": n,
+        "n_events": n_events,
         "ph_test": ph_results,
         "c_index": c_index,
         "log_likelihood_ratio": {
@@ -428,6 +433,9 @@ def cox_diagnostics(req: CoxDiagRequest):
         "export_rows": export_rows,
         "r_code": r_code,
     }
+    if surv.n_excluded:
+        result["n_invalid_survival"] = int(surv.n_excluded)
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
