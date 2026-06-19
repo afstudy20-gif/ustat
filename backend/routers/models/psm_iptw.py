@@ -660,14 +660,29 @@ def _run_iptw(req: IPTWRequest):
     w = np.maximum(w, 0.0)
     w = np.where(np.isfinite(w), w, 0.0)
 
+    # Weighted SMD — Austin (2009) eqs 1 & 2: numerator uses weighted means,
+    # denominator uses the *unweighted* pooled SD so the metric stays
+    # comparable to the pre-weight value. Before this fix the "after" mean
+    # was computed unweighted, so smd_before always equalled smd_after and
+    # the panel claimed perfect balance for any weighting.
     smd_before = []
     smd_after = []
+    wt = pd.Series(w, index=X.index)
     for col in X.columns[:min(5, len(X.columns))]:
         s_t = X.loc[treat == 1, col]
         s_c = X.loc[treat == 0, col]
         smd_before.append(_compute_smd(s_t, s_c))
         denom = _pooled_sd(s_t, s_c) + 1e-9
-        smd_after.append(abs(s_t.mean() - s_c.mean()) / denom if denom > 0 else 0.0)
+        wt_t = wt.loc[treat == 1]
+        wt_c = wt.loc[treat == 0]
+        sw_t = float(wt_t.sum())
+        sw_c = float(wt_c.sum())
+        if sw_t > 0 and sw_c > 0:
+            mean_t = float((s_t * wt_t).sum() / sw_t)
+            mean_c = float((s_c * wt_c).sum() / sw_c)
+            smd_after.append(abs(mean_t - mean_c) / denom if denom > 0 else 0.0)
+        else:
+            smd_after.append(float("nan"))
 
     outcome_result = None
     if req.outcome_type == "binary" and req.outcome_col:

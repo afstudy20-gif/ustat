@@ -792,9 +792,12 @@ def _fine_gray_mi_pooled(df_cols, cols_needed, dur, event, cause, predictors,
 def fit_fine_gray(req):
     df = _get_df(req.session_id)
 
-    for c in [req.duration_col, req.event_col]:
-        if c not in df.columns:
-            raise HTTPException(status_code=400, detail=f"Column '{c}' not found")
+    # Reject impossible follow-up times / non-binary event flag up front. The
+    # fitter previously accepted fu_days = -10 (and plotted a CIF from it),
+    # which the QA wave 1 audit flagged as CRITICAL — competing-risks output
+    # was silently wrong on cohorts with one stray bad row.
+    from services.survival_validation import validate_survival_inputs
+    validate_survival_inputs(df, req.duration_col, req.event_col)
     if req.group_col and req.group_col not in df.columns:
         raise HTTPException(status_code=400, detail=f"Column '{req.group_col}' not found")
 
@@ -2373,6 +2376,9 @@ def fit_external_validation(req):
     Pass survival_probs (list of lists) at time_points for full IBS + tdAUC.
     """
     df = _get_df(req.session_id)
+    # Range guard — same impossible-times check the other survival endpoints use.
+    from services.survival_validation import validate_survival_inputs
+    validate_survival_inputs(df, req.duration_col, req.event_col)
 
     surv_probs_arr = np.array(req.survival_probs) if req.survival_probs else None
 
@@ -2396,6 +2402,16 @@ def fit_external_validation(req):
         warnings = []
         if result.get("integrated_brier_score", {}).get("ibs", 0) > 0.25:
             warnings.append("High Integrated Brier Score — predictions may be poorly calibrated on this population.")
+        # Without `dev_metrics` (or a second held-out cohort) there is no
+        # external comparison: the C-index/calibration numbers describe
+        # in-sample fit and are easily mistaken for transportability.
+        if not req.dev_metrics:
+            warnings.append(
+                "No development metrics supplied — reported numbers describe "
+                "in-sample fit on the validation_cohort columns provided, NOT "
+                "true external validation. Pass `dev_metrics` (or load a "
+                "held-out cohort separately) to compute transportability."
+            )
 
         result["assumptions"] = assumptions
         result["warnings"] = warnings
