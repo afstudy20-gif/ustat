@@ -1,8 +1,8 @@
 import os
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, RedirectResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from middleware.security_headers import SecurityHeadersMiddleware
@@ -22,6 +22,28 @@ from routers import (
 from services import store
 
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
+
+
+# ── Global handler: convert FastAPI's "Out of range float values are not JSON
+# compliant" crash into a usable 400. This happens when a statistic comes out
+# as NaN/Inf (e.g. ANCOVA on a tiny subgroup, Mantel-Haenszel on a degenerate
+# stratum) and the response can't be serialised. Returning the original 500
+# leaves the user staring at a blank crash.
+@app.exception_handler(ValueError)
+async def _value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
+    msg = str(exc)
+    if "JSON compliant" in msg or "Out of range float" in msg:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": (
+                "The test produced a non-finite statistic (NaN or Inf), often "
+                "caused by a very small subgroup or a degenerate stratum. "
+                "Check for outliers, dirty category codes, or empty groups."
+            )},
+        )
+    # Anything else: let FastAPI's default 500 handler take over.
+    raise exc
+
 
 app.add_middleware(SecurityHeadersMiddleware)
 

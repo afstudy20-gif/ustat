@@ -17,6 +17,7 @@ from services.missing_data import (
     missing_pattern_summary,
     add_missing_data_diagnostics,
 )
+from services.category_health import rare_level_warnings
 from services.regression import (
     stepwise_forward as _stepwise_forward,
     stepwise_backward as _stepwise_backward,
@@ -324,6 +325,19 @@ def logistic_regression(req: LogisticRequest):
     }
 
     result = add_assumption_warnings_to_result(result, logistic_assumption_report)
+
+    # Dirty / very rare categorical levels silently become extra dummy
+    # predictors with n<5 — that's how a typo'd 'sex' column ("M", "F", "x",
+    # "Female") destabilises the fit. Surface them so the user can decide.
+    cat_warnings = rare_level_warnings(df, req.predictors)
+    if cat_warnings:
+        existing = result.setdefault("warnings", [])
+        if not isinstance(existing, list):
+            existing = []
+            result["warnings"] = existing
+        for w in cat_warnings:
+            existing.append(w["note"])
+        result["rare_categories"] = cat_warnings
 
     if use_mice_pooled and 'pooled' in locals() and pooled:
         result["coefficients"] = pooled.get("coefficients", result.get("coefficients", []))
