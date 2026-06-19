@@ -364,11 +364,11 @@ function TestsCombo() {
   const [sub, setSub] = usePersistedPanelState<"hypothesis" | "repeated" | "categorical" | "reliability" | "noninferiority" | "gatekeeping" | "factor" | "bayesian">("combo_tests", "sub", "hypothesis");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-tint border-b border-line flex-shrink-0">
         {([["hypothesis", "Hypothesis"], ["repeated", "Repeated Measures"], ["categorical", "Categorical"], ["reliability", "Reliability"], ["noninferiority", "Non-Inferiority"], ["gatekeeping", "Gatekeeping"], ["factor", "Factor Analysis"], ["bayesian", "Bayesian Statistics"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              sub === id ? "bg-surface text-ink-600 shadow-card border border-line" : "text-slate-500 hover:text-slate-700 hover:bg-chip"
             }`}>
             {label}
           </button>
@@ -404,11 +404,11 @@ function SummaryCombo() {
   const [sub, setSub] = usePersistedPanelState<"descriptive" | "weighted">("combo_summary", "sub", "descriptive");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-tint border-b border-line flex-shrink-0">
         {([["descriptive", "Descriptive"], ["weighted", "Weighted (survey)"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              sub === id ? "bg-surface text-ink-600 shadow-card border border-line" : "text-slate-500 hover:text-slate-700 hover:bg-chip"
             }`}>
             {label}
           </button>
@@ -425,11 +425,11 @@ function ModelsCombo() {
   const [sub, setSub] = usePersistedPanelState<"regression" | "survival" | "rcs" | "ml" | "timeseries" | "validation">("combo_models", "sub", "regression");
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-tint border-b border-line flex-shrink-0">
         {([["regression", "Regression"], ["survival", "Survival Advanced"], ["rcs", "Restricted Cubic Spline"], ["ml", "Machine Learning"], ["timeseries", "Time Series"], ["validation", "Validation (internal / external)"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              sub === id ? "bg-surface text-ink-600 shadow-card border border-line" : "text-slate-500 hover:text-slate-700 hover:bg-chip"
             }`}>
             {label}
           </button>
@@ -462,7 +462,7 @@ function VisualChartsCombo() {
   }, [visualSubTab]);
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
-      <div className="flex gap-1 px-4 pt-2 pb-1 bg-gray-50 border-b border-gray-200 flex-shrink-0">
+      <div className="flex gap-1 px-4 pt-2 pb-1 bg-tint border-b border-line flex-shrink-0">
         {([
           ["models", "Models & Diagnostics"],
           ["addedvalue", "Added Predictive Value"],
@@ -472,7 +472,7 @@ function VisualChartsCombo() {
         ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
             className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-              sub === id ? "bg-white text-indigo-700 shadow-sm border border-gray-200" : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              sub === id ? "bg-surface text-ink-600 shadow-card border border-line" : "text-slate-500 hover:text-slate-700 hover:bg-chip"
             }`}>
             {label}
           </button>
@@ -675,7 +675,7 @@ export default function App() {
   if (!session) return <UploadZone />;
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-gray-50">
+    <div className="flex flex-col h-screen overflow-hidden bg-page">
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       {showSaveModal && (
@@ -688,7 +688,7 @@ export default function App() {
       )}
 
       {/* Header — two rows so tabs always have full width */}
-      <header className="border-b border-gray-200 bg-white flex-shrink-0 shadow-sm">
+      <header className="border-b border-line bg-surface flex-shrink-0 shadow-card">
         {/* Row 1: logo · filename · actions */}
         <div className="flex items-center gap-3 px-4 pt-2 pb-1.5">
           {/* Logo + wordmark — clickable. Returns to the landing screen
@@ -933,8 +933,8 @@ export default function App() {
               onClick={() => setActiveTab(id)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors flex-shrink-0
                 ${activeTab === id
-                  ? "bg-indigo-600 text-white"
-                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"}`}
+                  ? "bg-ink-500 text-surface"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-chip"}`}
             >
               <Icon size={14} />
               {label}

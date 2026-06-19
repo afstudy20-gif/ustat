@@ -125,27 +125,27 @@ export default function UploadZone() {
   // ── Power Analysis Mode ──
   if (mode === "power") {
     return (
-      <div className="flex flex-col h-screen bg-gray-50">
+      <div className="flex flex-col h-screen bg-page">
         {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
         {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
         {/* Header */}
-        <header className="flex items-center justify-between px-6 py-3 bg-white border-b border-gray-200 flex-shrink-0">
+        <header className="flex items-center justify-between px-6 py-3 bg-surface border-b border-line flex-shrink-0">
           <div className="flex items-center gap-3">
             <img src="/logo.png" alt="uSTAT" className="w-8 h-8 object-contain" />
-            <span className="text-sm font-bold text-gray-800">uSTAT</span>
-            <span className="text-xs text-gray-400">·</span>
-            <span className="text-xs text-indigo-600 font-medium">Power Analysis</span>
+            <span className="font-serif text-lg font-semibold text-slate-950 tracking-tight">uSTAT</span>
+            <span className="text-xs text-slate-300">·</span>
+            <span className="text-xs text-gold-600 font-medium">Power Analysis</span>
           </div>
           <div className="flex items-center gap-2">
             <RefreshAppButton />
             <button onClick={() => setShowHelp(true)}
               title="Open Help & Analysis Guide"
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-ink-500 border border-line rounded-lg px-3 py-1.5 hover:border-ink-200 transition-colors">
               <HelpCircle size={14} />
               Help &amp; Guide
             </button>
             <button onClick={exitPower}
-              className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-indigo-600 border border-gray-300 rounded-lg px-3 py-1.5 hover:border-indigo-300 transition-colors">
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-ink-500 border border-line rounded-lg px-3 py-1.5 hover:border-ink-200 transition-colors">
               <BarChart2 size={14} />
               Statistical Analysis
             </button>
@@ -155,8 +155,8 @@ export default function UploadZone() {
         <main className="flex-1 overflow-y-auto p-4">
           <PowerPanel />
         </main>
-        <footer className="text-center py-2 border-t border-gray-100 bg-white">
-          <p className="text-[11px] text-gray-300">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
+        <footer className="text-center py-2 border-t border-line bg-surface">
+          <p className="text-[11px] text-slate-300">&copy; 2026 Dr. Yusuf Ho&#x15F;o&#x11F;lu. All rights reserved.</p>
         </footer>
       </div>
     );
@@ -164,52 +164,52 @@ export default function UploadZone() {
 
   // ── Home / Upload Mode ──
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen gap-8 p-8 bg-gray-50">
+    <div className="flex flex-col items-center justify-center min-h-screen gap-8 p-8 bg-page">
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       <div className="flex flex-col items-center gap-3">
-        <img src="/logo.png" alt="uSTAT logo" className="w-32 h-32 object-contain drop-shadow-md" />
+        <img src="/logo.png" alt="uSTAT logo" className="w-24 h-24 object-contain shadow-soft rounded-full" />
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 leading-tight">uSTAT</h1>
-          <p className="text-sm text-gray-400 leading-none mt-1">Statistical Analysis Platform</p>
+          <h1 className="font-serif text-5xl font-medium text-slate-950 leading-none tracking-tight">uSTAT</h1>
+          <p className="text-sm text-slate-400 leading-none mt-3 tracking-wide">Statistical Analysis Platform</p>
         </div>
         <div
-          className="update-app-banner flex items-center gap-3 rounded-lg border border-indigo-200 bg-indigo-50/70 px-3.5 py-2 shadow-sm"
+          className="update-app-banner flex items-center gap-3 rounded-lg border border-ink-200 bg-ink-50 px-3.5 py-2 shadow-card"
           role="note"
         >
           <RefreshAppButton
             variant="inline"
             label="Update app"
-            className="!text-sm !font-semibold !text-indigo-600 hover:!text-indigo-700"
+            className="!text-sm !font-semibold !text-ink-600 hover:!text-ink-700"
           />
-          <p className="border-l border-indigo-200 pl-3 text-xs font-medium text-indigo-500">
+          <p className="border-l border-ink-200 pl-3 text-xs font-medium text-ink-500">
             If something isn&apos;t working, update your app.
           </p>
         </div>
       </div>
 
       {/* Mode selector — symmetric tiles */}
-      <div className="grid grid-cols-2 gap-3 w-full max-w-2xl">
+      <div className="grid grid-cols-2 gap-4 w-full max-w-2xl">
         {/* Statistical Analysis = drop zone */}
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           onClick={() => document.getElementById("file-input")?.click()}
-          className={`flex flex-col items-center justify-center gap-3 px-4 py-8 rounded-xl border-2 border-dashed cursor-pointer transition-colors min-h-[220px]
+          className={`flex flex-col items-center justify-center gap-3 px-6 py-10 rounded-card border-[1.5px] border-dashed cursor-pointer transition-all min-h-[232px]
             ${dragging
-              ? "border-indigo-500 bg-indigo-100"
-              : "border-indigo-400 bg-indigo-50 hover:border-indigo-500 hover:bg-indigo-100"}`}
+              ? "border-ink-500 bg-ink-150"
+              : "border-ink-200 bg-ink-50 hover:border-ink-500 hover:bg-ink-150 hover:-translate-y-0.5"}`}
         >
-          <div className="flex items-center gap-2 text-indigo-700">
+          <div className="flex items-center gap-2 text-ink-600">
             <BarChart2 size={22} />
-            <span className="text-base font-semibold">Statistical Analysis</span>
+            <span className="text-base font-semibold text-slate-800">Statistical Analysis</span>
           </div>
           <div className="flex flex-col items-center gap-1">
-            <Upload size={20} className="text-indigo-400" />
-            <p className="text-sm text-indigo-700 font-medium">Drop your data file here</p>
-            <p className="text-xs text-indigo-400">or click to browse</p>
-            <p className="text-[10px] text-indigo-300 mt-1 text-center px-2">CSV · Excel · SAS · SPSS · Stata · Session JSON</p>
+            <Upload size={22} className="text-ink-500" />
+            <p className="text-sm text-ink-600 font-semibold">Drop your data file here</p>
+            <p className="text-xs text-ink-500/80">or click to browse</p>
+            <p className="text-[11px] text-ink-300 mt-2 text-center px-2 tracking-wide">CSV · Excel · SPSS · SAS · Stata · Session JSON</p>
           </div>
           <input
             id="file-input"
@@ -223,13 +223,14 @@ export default function UploadZone() {
         {/* Power Analysis — separate, equal size */}
         <button
           onClick={enterPower}
-          className="flex flex-col items-center justify-center gap-3 px-4 py-8 rounded-xl border-2 border-gray-200 bg-white text-gray-600 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700 transition-colors min-h-[220px]"
+          className="flex flex-col items-center justify-center gap-3 px-6 py-10 rounded-card border-[1.5px] border-line bg-surface text-slate-400 hover:border-gold-400 hover:bg-gold-50 hover:text-gold-600 hover:-translate-y-0.5 transition-all min-h-[232px]"
         >
           <div className="flex items-center gap-2">
-            <Zap size={22} />
-            <span className="text-base font-semibold">Power Analysis</span>
+            <Zap size={22} className="text-gold-600" />
+            <span className="text-base font-semibold text-slate-800">Power Analysis</span>
           </div>
-          <span className="text-xs text-gray-400">No data needed</span>
+          <span className="text-xs text-slate-300">Sample size &amp; power — no data needed</span>
+          <span className="mt-2 text-xs font-semibold text-gold-600 border border-gold-200 bg-gold-100 rounded-full px-3.5 py-1">Open calculator</span>
         </button>
       </div>
 
