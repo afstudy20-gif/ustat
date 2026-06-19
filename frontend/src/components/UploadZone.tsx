@@ -168,7 +168,11 @@ export default function UploadZone() {
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       <div className="flex flex-col items-center gap-3">
-        <img src="/logo.png" alt="uSTAT logo" className="w-24 h-24 object-contain shadow-soft rounded-full" />
+        {/* Crop the logo PNG to its inner circle so its baked-in cream rectangle
+            doesn't clash with the new page background. */}
+        <div className="w-24 h-24 rounded-full overflow-hidden bg-surface flex items-center justify-center shadow-card">
+          <img src="/logo.png" alt="uSTAT logo" className="w-[140%] h-[140%] object-contain" />
+        </div>
         <div className="text-center">
           <h1 className="font-serif text-5xl font-medium text-slate-950 leading-none tracking-tight">uSTAT</h1>
           <p className="text-sm text-slate-400 leading-none mt-3 tracking-wide">Statistical Analysis Platform</p>
@@ -196,20 +200,20 @@ export default function UploadZone() {
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           onClick={() => document.getElementById("file-input")?.click()}
-          className={`flex flex-col items-center justify-center gap-3 px-6 py-10 rounded-card border-[1.5px] border-dashed cursor-pointer transition-all min-h-[232px]
+          className={`flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-card border-[1.5px] border-dashed cursor-pointer transition-all min-h-[150px]
             ${dragging
               ? "border-ink-500 bg-ink-150"
               : "border-ink-200 bg-ink-50 hover:border-ink-500 hover:bg-ink-150 hover:-translate-y-0.5"}`}
         >
           <div className="flex items-center gap-2 text-ink-600">
-            <BarChart2 size={22} />
-            <span className="text-base font-semibold text-slate-800">Statistical Analysis</span>
+            <BarChart2 size={18} />
+            <span className="text-sm font-semibold text-slate-800">Statistical Analysis</span>
           </div>
-          <div className="flex flex-col items-center gap-1">
-            <Upload size={22} className="text-ink-500" />
-            <p className="text-sm text-ink-600 font-semibold">Drop your data file here</p>
-            <p className="text-xs text-ink-500/80">or click to browse</p>
-            <p className="text-[11px] text-ink-300 mt-2 text-center px-2 tracking-wide">CSV · Excel · SPSS · SAS · Stata · Session JSON</p>
+          <div className="flex flex-col items-center gap-0.5">
+            <Upload size={18} className="text-ink-500" />
+            <p className="text-xs text-ink-600 font-semibold">Drop your data file here</p>
+            <p className="text-[11px] text-ink-500/80">or click to browse</p>
+            <p className="text-[10px] text-ink-300 mt-1 text-center px-2 tracking-wide">CSV · Excel · SPSS · SAS · Stata · Session JSON</p>
           </div>
           <input
             id="file-input"
@@ -223,14 +227,14 @@ export default function UploadZone() {
         {/* Power Analysis — separate, equal size */}
         <button
           onClick={enterPower}
-          className="flex flex-col items-center justify-center gap-3 px-6 py-10 rounded-card border-[1.5px] border-line bg-surface text-slate-400 hover:border-gold-400 hover:bg-gold-50 hover:text-gold-600 hover:-translate-y-0.5 transition-all min-h-[232px]"
+          className="flex flex-col items-center justify-center gap-2 px-4 py-5 rounded-card border-[1.5px] border-line bg-surface text-slate-400 hover:border-gold-400 hover:bg-gold-50 hover:text-gold-600 hover:-translate-y-0.5 transition-all min-h-[150px]"
         >
           <div className="flex items-center gap-2">
-            <Zap size={22} className="text-gold-600" />
-            <span className="text-base font-semibold text-slate-800">Power Analysis</span>
+            <Zap size={18} className="text-gold-600" />
+            <span className="text-sm font-semibold text-slate-800">Power Analysis</span>
           </div>
-          <span className="text-xs text-slate-300">Sample size &amp; power — no data needed</span>
-          <span className="mt-2 text-xs font-semibold text-gold-600 border border-gold-200 bg-gold-100 rounded-full px-3.5 py-1">Open calculator</span>
+          <span className="text-[11px] text-slate-400">Sample size &amp; power — no data needed</span>
+          <span className="mt-1 text-[11px] font-semibold text-gold-600 border border-gold-200 bg-gold-100 rounded-full px-3 py-0.5">Open calculator</span>
         </button>
       </div>
 

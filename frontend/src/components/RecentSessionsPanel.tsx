@@ -208,7 +208,7 @@ export default function RecentSessionsPanel() {
   if (!loaded) return null;
 
   return (
-    <div className="w-full max-w-3xl mt-2">
+    <div className="w-full max-w-2xl mt-2">
       <div className="flex items-center justify-between mb-2 px-1">
         <div className="flex items-center gap-1.5">
           <Clock size={14} className="text-indigo-500" />
