@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from services import store
+from services.dirty_value_guard import coerce_numeric, mask_sentinels, plausibility_max_for_column
 from services.stat_utils import sorted_groups
 
 router = APIRouter()
@@ -16,6 +17,31 @@ def _get_df(session_id: str) -> pd.DataFrame:
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return df
+
+
+def _plausibility_warnings(col: str, series: pd.Series) -> list[dict]:
+    numeric = coerce_numeric(series)
+    key = str(col).strip().lower()
+    mask = pd.Series(False, index=series.index)
+    rule = None
+    if key == "age":
+        mask = numeric.notna() & ((numeric < 0) | (numeric > 120))
+        rule = "expected 0 <= age <= 120"
+    elif key in {"bmi", "body_mass_index"} or "bmi" in key:
+        mask = numeric.notna() & ((numeric <= 10) | (numeric >= 100))
+        rule = "expected 10 < bmi < 100"
+    elif key in {"fu_days", "followup_days", "follow_up_days"}:
+        mask = numeric.notna() & (numeric <= 0)
+        rule = "expected fu_days > 0"
+    if not mask.any():
+        return []
+    return [{
+        "variable": col,
+        "n_implausible": int(mask.sum()),
+        "implausible_values": sorted({float(v) for v in numeric[mask].dropna().unique()}),
+        "rule": rule,
+        "note": "Values were retained for display but should be reviewed.",
+    }]
 
 
 class ChartRequest(BaseModel):
@@ -30,16 +56,24 @@ class ChartRequest(BaseModel):
 @router.post("/histogram")
 def histogram(req: ChartRequest):
     df = _get_df(req.session_id)
-    s = df[req.x].dropna()
+    if req.x not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{req.x}' not found")
+    s = coerce_numeric(df[req.x]).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(s) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 numeric values for a histogram.")
     counts, edges = np.histogram(s, bins=req.bins)
     kde_x = np.linspace(s.min(), s.max(), 200)
-    kde = scipy_stats.gaussian_kde(s)
+    kde_points = []
+    if len(s) >= 3 and float(s.std()) > 0:
+        kde = scipy_stats.gaussian_kde(s)
+        kde_points = [{"x": float(kx), "y": float(ky)} for kx, ky in zip(kde_x, kde(kde_x))]
     return {
         "type": "histogram",
         "x": req.x,
         "bins": [{"x0": float(edges[i]), "x1": float(edges[i+1]), "count": int(counts[i])} for i in range(len(counts))],
-        "kde": [{"x": float(kx), "y": float(ky)} for kx, ky in zip(kde_x, kde(kde_x))],
+        "kde": kde_points,
         "stats": {"mean": float(s.mean()), "median": float(s.median()), "std": float(s.std())},
+        "warnings": _plausibility_warnings(req.x, df[req.x]),
     }
 
 
@@ -356,7 +390,18 @@ def subgroup_bar(req: SubgroupBarRequest):
     # string) so multi-digit codes (1, 2, 10) don't sort as 1, 10, 2.
     subgroups = sorted_groups(sub[req.subgroup_col])
     x_vals = sorted_groups(sub[req.xaxis_col])
-    color_groups = sorted_groups(sub[req.color_col]) if req.color_col else ["All"]
+    color_groups = sorted_groups(sub[req.color_col]) if req.color_col else x_vals
+    warnings = []
+    if req.y_mode == "mean":
+        max_plausible = plausibility_max_for_column(req.y_col)
+        raw_y = sub[req.y_col]
+        masked_y = mask_sentinels(raw_y, max_plausible)
+        if masked_y.isna().sum() > coerce_numeric(raw_y).isna().sum():
+            warnings.append({
+                "variable": req.y_col,
+                "note": "Implausible high sentinel values were treated as missing for mean bars.",
+            })
+        sub[req.y_col] = masked_y
 
     # ── Percentage "success" level — resolved ONCE over the whole subset, not
     # per cell. Picking it per cell (the old behaviour) let different bars
@@ -392,7 +437,8 @@ def subgroup_bar(req: SubgroupBarRequest):
         tr = {"name": str(cg), "x_subgroup": [], "x_xaxis": [], "y": [],
               "error": [], "error_low": [], "error_high": [], "ns": []}
         for sg in subgroups:
-            for xv in x_vals:
+            iter_x_vals = x_vals if req.color_col else [cg]
+            for xv in iter_x_vals:
                 mask = (sub[req.subgroup_col] == sg) & (sub[req.xaxis_col] == xv)
                 if req.color_col:
                     mask = mask & (sub[req.color_col] == cg)
@@ -447,6 +493,7 @@ def subgroup_bar(req: SubgroupBarRequest):
         "target_value": pct_target if req.y_mode == "percentage" else req.target_value,
         "error_type": req.error_type,
         "traces": traces,
+        "warnings": warnings,
         "method_note": (
             "Means use a t-distribution CI (t_{n−1}); percentages use the Wilson "
             "score interval (bounded to 0–100%, accurate for small n and extreme "

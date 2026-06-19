@@ -11,6 +11,7 @@ from loguru import logger
 
 from services import store
 from services.category_health import clean_two_level
+from services.dirty_value_guard import coerce_numeric
 from services.stat_utils import sorted_groups
 from services.impute import apply_imputation, missing_info
 
@@ -35,6 +36,44 @@ def _sanitize(obj):
     if isinstance(obj, float) and (np.isnan(obj) or np.isinf(obj)):
         return None
     return obj
+
+
+def _stored_kind(session_id: str, df: pd.DataFrame, col: str, requested: Optional[str] = None) -> Optional[str]:
+    if requested:
+        return requested
+    try:
+        override = (store.get_kind_overrides(session_id) or {}).get(col)
+        if override:
+            return override
+    except Exception:
+        pass
+    return None
+
+
+def _plausibility_warnings(col: str, series: pd.Series) -> list[dict]:
+    numeric = coerce_numeric(series)
+    key = str(col).strip().lower()
+    mask = pd.Series(False, index=series.index)
+    rule = None
+    if key == "age":
+        mask = numeric.notna() & ((numeric < 0) | (numeric > 120))
+        rule = "expected 0 <= age <= 120"
+    elif key in {"bmi", "body_mass_index"} or "bmi" in key:
+        mask = numeric.notna() & ((numeric <= 10) | (numeric >= 100))
+        rule = "expected 10 < bmi < 100"
+    elif key in {"fu_days", "followup_days", "follow_up_days"}:
+        mask = numeric.notna() & (numeric <= 0)
+        rule = "expected fu_days > 0"
+    if not mask.any():
+        return []
+    vals = sorted({float(v) for v in numeric[mask].dropna().unique()})
+    return [{
+        "variable": col,
+        "n_implausible": int(mask.sum()),
+        "implausible_values": vals,
+        "rule": rule,
+        "note": "Values were retained for display but should be reviewed.",
+    }]
 
 
 # ── 1. Missing Data Summary ─────────────────────────────────────────────────────
@@ -80,9 +119,11 @@ def _normality_test(s_clean: pd.Series) -> tuple[float, str]:
 @router.get("/{session_id}/descriptive")
 def descriptive(session_id: str, column: Optional[str] = None):
     df = _get_df(session_id)
+    overrides = store.get_kind_overrides(session_id) or {}
     num_cols = df.select_dtypes(include="number").columns.tolist()
+    num_cols.extend([c for c, kind in overrides.items() if kind == "numeric" and c in df.columns and c not in num_cols])
     if column:
-        if column not in num_cols:
+        if column not in df.columns or column not in num_cols:
             raise HTTPException(status_code=400, detail="Column not numeric")
         num_cols = [column]
 
@@ -92,7 +133,8 @@ def descriptive(session_id: str, column: Optional[str] = None):
 
     results = {}
     for col in num_cols:
-        s = df[col].dropna().replace([np.inf, -np.inf], np.nan).dropna()
+        numeric = coerce_numeric(df[col]).replace([np.inf, -np.inf], np.nan)
+        s = numeric.dropna()
         if len(s) < 3:
             continue
         q1, q3 = s.quantile([0.25, 0.75])
@@ -116,6 +158,7 @@ def descriptive(session_id: str, column: Optional[str] = None):
             "normality_p": float(p_norm),
             "normality_test": norm_test,
             "normal": bool(p_norm >= 0.05),
+            "warnings": _plausibility_warnings(col, df[col]),
             # Suggested decimal places for displaying sample-valued stats
             # (mean, median, quartiles, min/max). Honours user overrides
             # and auto-detects integer-valued columns.
@@ -237,16 +280,19 @@ def column_summary(session_id: str, column: str, kind: Optional[str] = None):
         raise HTTPException(status_code=400, detail="Column not found")
     s = df[column]
 
-    if kind == "numeric":
+    resolved_kind = _stored_kind(session_id, df, column, kind)
+    if resolved_kind == "numeric":
         is_num = True
-    elif kind in ("categorical", "text", "boolean"):
+    elif resolved_kind in ("categorical", "text", "boolean"):
         is_num = False
     else:
         is_num = pd.api.types.is_numeric_dtype(s) and s.nunique() > 10
 
     if is_num:
-        s_clean = s.dropna().astype(float)
+        s_clean = coerce_numeric(s).replace([np.inf, -np.inf], np.nan).dropna()
         n_clean = len(s_clean)
+        if n_clean < 3:
+            raise HTTPException(status_code=400, detail="Need at least 3 numeric values.")
         n_bins = min(40, max(10, int(np.sqrt(n_clean))))
         counts, edges = np.histogram(s_clean, bins=n_bins)
         histogram = [
@@ -327,6 +373,7 @@ def column_summary(session_id: str, column: str, kind: Optional[str] = None):
             "normality_test": norm_test_name,
             "normal": bool(p_norm >= 0.05),
             "normality_label": "Normally distributed" if p_norm >= 0.05 else "Non-normal distribution",
+            "warnings": _plausibility_warnings(column, s),
         }
 
     else:
@@ -667,7 +714,12 @@ def table1(req: Table1Request):
             continue
         s = df[var]
 
-        provided_kind = (req.variable_kinds or {}).get(var)
+        provided_kind = _stored_kind(
+            req.session_id,
+            df,
+            var,
+            (req.variable_kinds or {}).get(var),
+        )
         if provided_kind == "numeric":
             is_num = True
         elif provided_kind in ("categorical", "text", "boolean"):
@@ -676,6 +728,9 @@ def table1(req: Table1Request):
             is_num = pd.api.types.is_numeric_dtype(s) and s.nunique() > 10
 
         if is_num:
+            s = coerce_numeric(s).replace([np.inf, -np.inf], np.nan)
+            df[var] = s
+            warnings.extend(_plausibility_warnings(var, s))
             s_all = s.dropna().astype(float)
             p_norm, norm_test_name = _normality_test(s_all)
             normal_overall = p_norm >= 0.05
@@ -913,12 +968,16 @@ def weighted_descriptive(req: WeightedDescriptiveRequest):
         raise HTTPException(status_code=422, detail="Select at least one value column.")
 
     cols = [req.weight_col, *req.value_cols] + ([req.group_col] if req.group_col else [])
-    df = apply_imputation(df_full[cols], cols, req.imputation or "listwise").reset_index(drop=True)
-    w_all = pd.to_numeric(df[req.weight_col], errors="coerce")
+    strategy = req.imputation or "listwise"
+    if strategy in ("listwise", "none", "", None):
+        df = df_full[cols].copy().reset_index(drop=True)
+    else:
+        df = apply_imputation(df_full[cols], cols, strategy).reset_index(drop=True)
+    w_all = coerce_numeric(df[req.weight_col])
 
     results: List[dict] = []
     for col in req.value_cols:
-        x = pd.to_numeric(df[col], errors="coerce")
+        x = coerce_numeric(df[col])
         mask = x.notna() & w_all.notna() & (w_all > 0)
         xv = x[mask].values.astype(float)
         wv = w_all[mask].values.astype(float)
@@ -953,10 +1012,11 @@ def weighted_descriptive(req: WeightedDescriptiveRequest):
 
     comparison = None
     if req.group_col:
-        groups = sorted_groups(df[req.group_col])
+        group_base = df[df[req.group_col].notna()] if req.group_col in df.columns else df
+        groups = sorted_groups(group_base[req.group_col])
         if len(groups) == 2:
             col = req.value_cols[0]
-            x = pd.to_numeric(df[col], errors="coerce")
+            x = coerce_numeric(df[col])
             parts = []
             for g in groups:
                 m = (df[req.group_col] == g) & x.notna() & w_all.notna() & (w_all > 0)
