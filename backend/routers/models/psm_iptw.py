@@ -12,6 +12,7 @@ from sklearn.preprocessing import StandardScaler
 from loguru import logger
 
 from services import store
+from services.category_health import clean_two_level, rare_level_warnings
 from services.impute import apply_imputation
 from services.psm import (
     _compute_smd,
@@ -80,6 +81,20 @@ def _sanitize_model_error(err: Exception, context: str = "model fitting") -> str
     if "convergence" in msg.lower() or "failed to converge" in msg.lower():
         return f"{context.capitalize()} failed to converge. Consider increasing iterations or simplifying the model."
     return f"{context.capitalize()} failed. Please check your data and predictors."
+
+
+def _clean_covariate_categories(df: pd.DataFrame, covariates: List[str]) -> tuple[pd.DataFrame, list]:
+    work = df.copy()
+    warnings = []
+    for col in covariates:
+        if col not in work.columns or pd.api.types.is_numeric_dtype(work[col]):
+            continue
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    work = work.dropna(subset=[c for c in covariates if c in work.columns])
+    warnings.extend(rare_level_warnings(work, covariates))
+    return work, warnings
 
 
 def _run_match_strata(
@@ -166,6 +181,9 @@ def _run_psm(req: PSMRequest):
     df_imputed_temp = apply_imputation(df_full[needed], needed, req.imputation or "listwise")
     df_full_imputed = df_full.loc[df_imputed_temp.index].copy().reset_index(drop=True)
     df = df_imputed_temp.reset_index(drop=True)
+    df, cat_warnings = _clean_covariate_categories(df, req.covariates)
+    df_full_imputed = df_full_imputed.loc[df.index].copy().reset_index(drop=True)
+    df = df.reset_index(drop=True)
 
     treat_vals = df[req.treatment_col].astype(float)
     if not set(treat_vals.unique().tolist()) <= {0, 1, 0.0, 1.0}:
@@ -252,6 +270,11 @@ def _run_psm(req: PSMRequest):
             status_code=422,
             detail=f"No matches found within caliper {req.caliper}. "
             "Try widening the caliper or check that treatment groups overlap in covariate space.",
+        )
+    if n_matched_treated + n_matched_controls < 10 and len(df) >= 20:
+        raise HTTPException(
+            status_code=422,
+            detail="Common-support/caliper settings left fewer than 10 matched units. Disable trimming or widen the caliper.",
         )
 
     matched_all_idx = matched_treated + matched_controls
@@ -587,6 +610,7 @@ def _run_psm(req: PSMRequest):
         "ps_distribution": ps_dist,
         "outcome_result": outcome_result,
         "rosenbaum": rosenbaum_result,
+        "warnings": cat_warnings,
         "matched_session_id": req.session_id + "_psm",
     }
 
@@ -616,6 +640,7 @@ def _run_iptw(req: IPTWRequest):
         needed += [req.survival_duration_col, req.survival_event_col]
 
     df = apply_imputation(df_full, [c for c in needed if c], req.imputation or "listwise")
+    df, cat_warnings = _clean_covariate_categories(df, req.covariates)
 
     treat = pd.to_numeric(df[req.treatment_col], errors="coerce").astype(int)
     X = pd.get_dummies(df[req.covariates], drop_first=True).astype(float)
@@ -718,7 +743,7 @@ def _run_iptw(req: IPTWRequest):
     weight_sum = float(np.sum(w))
     effective_n = float(np.sum(w) ** 2 / np.sum(w ** 2)) if np.sum(w ** 2) > 0 else 0.0
 
-    warnings = []
+    warnings = list(cat_warnings)
     if n_nonfinite > 0:
         warnings.append(f"{n_nonfinite} non-finite weights were replaced with 0")
     if n_truncated > 0:
@@ -727,6 +752,8 @@ def _run_iptw(req: IPTWRequest):
         warnings.append("All weights became zero after cleaning — results will be unreliable")
     if effective_n < 10:
         warnings.append(f"Very low effective sample size ({effective_n:.1f})")
+    if len(w) and float(np.max(w)) > 10:
+        warnings.append(f"Extreme IPTW weight detected (max={float(np.max(w)):.2f}); consider truncation or overlap weights.")
 
     return {
         "method": "iptw",

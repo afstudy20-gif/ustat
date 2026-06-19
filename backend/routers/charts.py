@@ -283,6 +283,8 @@ def forest_plot(req: ForestRequest):
     log_scale = req.x_axis == "log"
     for r in rows:
         if log_scale:
+            if r["est"] <= 0 or r["ci_low"] <= 0 or r["ci_high"] <= 0:
+                raise HTTPException(status_code=422, detail="Log-scale forest plots require positive est, ci_low, and ci_high values.")
             r["log_est"] = float(np.log(max(r["est"], 1e-12)))
             r["log_low"] = float(np.log(max(r["ci_low"], 1e-12)))
             r["log_high"] = float(np.log(max(r["ci_high"], 1e-12)))

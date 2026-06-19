@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 from services import store
+from services.category_health import clean_two_level, rare_level_warnings
 from services.impute import apply_imputation
 from services.decision_curve import (
     add_bootstrap_correction_to_dca,
@@ -32,6 +33,20 @@ def _get_df(session_id: str) -> pd.DataFrame:
 
 def _p_str(p: float) -> str:
     return "<0.001" if p < 0.001 else f"{p:.4f}"
+
+
+def _clean_predictor_categories(df: pd.DataFrame, predictors: List[str]) -> tuple[pd.DataFrame, list]:
+    work = df.copy()
+    warnings = []
+    for col in predictors:
+        if col not in work.columns or pd.api.types.is_numeric_dtype(work[col]):
+            continue
+        cleaned = clean_two_level(work[col])
+        work[col] = cleaned.series
+        warnings.extend(cleaned.warnings)
+    work = work.dropna(subset=[c for c in predictors if c in work.columns])
+    warnings.extend(rare_level_warnings(work, predictors))
+    return work, warnings
 
 
 def _hosmer_lemeshow(y: np.ndarray, probs: np.ndarray, n_groups: int = 10) -> dict:
@@ -132,6 +147,7 @@ def calibration(req: CalibrationRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation)
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
 
     if len(df) < 20:
@@ -224,6 +240,7 @@ def calibration(req: CalibrationRequest):
         "brier_score": brier,
         "hosmer_lemeshow": hl,
         "c_statistic": c_stat,
+        "warnings": cat_warnings,
         "n": len(df),
         "n_excluded": n_excluded,
         "plot_data": {
@@ -289,6 +306,7 @@ def hosmer_lemeshow_endpoint(req: HLRequest):
     df_full = _get_df(req.session_id)
     n_total = len(df_full)
     df = apply_imputation(df_full, [req.outcome] + req.predictors, req.imputation)
+    df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
 
     if len(df) < req.n_groups * 2:
@@ -299,6 +317,7 @@ def hosmer_lemeshow_endpoint(req: HLRequest):
     return {
         "test": "Hosmer-Lemeshow Goodness-of-Fit",
         **hl,
+        "warnings": cat_warnings,
         "n": int(len(df)),
         "n_excluded": int(n_excluded),
         "outcome": req.outcome,
@@ -363,6 +382,9 @@ def dca(req: DCARequest):
 
     needed_cols = list(dict.fromkeys(needed_cols))  # dedup preserve order
     df = apply_imputation(df_full, needed_cols, req.imputation) if needed_cols else df_full
+    cat_warnings = []
+    if req.predictors:
+        df, cat_warnings = _clean_predictor_categories(df, req.predictors)
     n_excluded = n_total - len(df)
 
     if len(df) < 20:
@@ -448,6 +470,8 @@ def dca(req: DCARequest):
     service_res["n"] = len(df)
     service_res["n_excluded"] = n_excluded
     service_res["session_id"] = req.session_id
+    if cat_warnings:
+        service_res["warnings"] = list(service_res.get("warnings") or []) + cat_warnings
 
     # Legacy curve shape for old clients
     if "curves" in service_res and isinstance(service_res["curves"], dict) and "model_net_benefit" in service_res["curves"]:

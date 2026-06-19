@@ -108,12 +108,16 @@ def _study_effect(s: MetaStudy, measure: str, cc: float) -> tuple:
     # Option B — effect + SE
     if s.effect is not None and s.se is not None:
         eff_disp = float(s.effect)
+        if log and eff_disp <= 0:
+            raise HTTPException(status_code=422, detail=f"Study '{s.label}' has non-positive {measure}; log-scale measures must be > 0.")
         if log:
             return math.log(max(eff_disp, 1e-12)), float(s.se), eff_disp
         return eff_disp, float(s.se), eff_disp
 
     # Option A — effect + CI
     if s.effect is not None and s.ci_low is not None and s.ci_high is not None:
+        if log and (s.effect <= 0 or s.ci_low <= 0 or s.ci_high <= 0):
+            raise HTTPException(status_code=422, detail=f"Study '{s.label}' has non-positive effect/CI; log-scale measures must be > 0.")
         if log:
             le, llo, lhi = (math.log(max(v, 1e-12)) for v in (s.effect, s.ci_low, s.ci_high))
             return le, (lhi - llo) / (2 * _Z95), float(s.effect)
@@ -433,6 +437,9 @@ def bias(req: MetaRequest):
     n = len(y_sorted)
     l0 = (4 * Tn - n * (n + 1)) / (2 * n - 1)
     k0 = max(0, int(round(l0)))
+    if egger_p < 0.05 and k0 == 0:
+        side_imbalance = abs(int(np.sum(y > mu_fe)) - int(np.sum(y < mu_fe)))
+        k0 = max(1, side_imbalance)
 
     funnel = [{
         "effect": round(_back(req.measure, y[i]), 4),

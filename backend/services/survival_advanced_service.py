@@ -1118,6 +1118,8 @@ def fit_evalue(req):
         "rr_converted": _safe(round(rr, 4)),
         "evalue_point": e_point,
         "evalue_ci": e_ci,
+        "e_value_point_estimate": e_point,
+        "e_value_ci": e_ci,
         "interpretation": interpretation,
         "assumptions": assumptions,
         "result_text": result_text,

@@ -777,7 +777,9 @@ def run_power(req: PowerRequest):
             z = abs(log_or) / se if se > 0 else 0.0
             return float(_norm.cdf(z - z_a))
 
-        if not req.log_or and req.effect_size is not None:
+        if req.solve_for == "effect_size":
+            log_or = None
+        elif not req.log_or and req.effect_size is not None:
             log_or = float(np.log(req.effect_size))
         elif req.log_or is not None:
             log_or = float(req.log_or) if req.log_or <= 0 else float(np.log(req.log_or))
@@ -798,6 +800,8 @@ def run_power(req: PowerRequest):
             curve  = _curve(pw, max(int(req.n) * 4, 200))
         else:
             from scipy.optimize import brentq
+            if req.n is None:
+                raise HTTPException(400, "Solving minimum detectable OR needs 'n'.")
             try:
                 or_solved = brentq(
                     lambda lo: _power_from_n(lo, req.p_event, int(req.n), a, r2, req.tails) - (req.power or 0.8),
@@ -816,7 +820,7 @@ def run_power(req: PowerRequest):
     elif req.test == "survival_cox":
         from scipy.stats import norm as _norm
 
-        if req.hr is None or req.hr <= 0:
+        if req.solve_for != "effect_size" and (req.hr is None or req.hr <= 0):
             raise HTTPException(400, "Cox power needs 'hr' > 0.")
         if req.event_rate is None or not (0 < req.event_rate < 1):
             raise HTTPException(400, "Cox power needs 'event_rate' in (0, 1).")
@@ -824,7 +828,7 @@ def run_power(req: PowerRequest):
         if not (0 < p_exp < 1):
             raise HTTPException(400, "'p_exposed' must be in (0, 1).")
         r2 = req.r2_other or 0.0
-        log_hr = float(np.log(req.hr))
+        log_hr = float(np.log(req.hr)) if req.hr is not None else None
 
         def _events_required(power_target):
             z_a = _norm.ppf(1 - a / (2 if req.tails == 2 else 1))
@@ -862,7 +866,14 @@ def run_power(req: PowerRequest):
                 lh = (z_a + z_b) / np.sqrt(d_total * p_exp * (1 - p_exp))
                 result = float(np.exp(lh))
                 label  = f"Minimum detectable HR = {result:.3f}"
-                curve = _curve(lambda n_: _power_from_n(n_), max(int(req.n) * 4, 200))
+                def _power_from_n_at_lh(n_total):
+                    d = n_total * req.event_rate * (1 - r2)
+                    if d <= 0:
+                        return 0.0
+                    se = float(np.sqrt(1.0 / (d * p_exp * (1 - p_exp))))
+                    z = abs(lh) / se if se > 0 else 0.0
+                    return float(_norm.cdf(z - z_a))
+                curve = _curve(_power_from_n_at_lh, max(int(req.n) * 4, 200))
             else:
                 result, label = None, "Insufficient events to solve for HR."
 

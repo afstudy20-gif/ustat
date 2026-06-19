@@ -902,6 +902,12 @@ def roc_combined(req: ROCCombinedRequest):
         auc = float(roc_auc_score(y, prob))
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"ROC computation failed: {exc}")
+    flipped = False
+    if auc < 0.5:
+        prob = 1.0 - prob
+        fpr, tpr, thresholds = roc_curve(y, prob)
+        auc = float(roc_auc_score(y, prob))
+        flipped = True
 
     j_scores = tpr - fpr
     best_idx = int(np.argmax(j_scores))
@@ -917,6 +923,7 @@ def roc_combined(req: ROCCombinedRequest):
         {"fpr": round(float(fpr[i]), 6), "tpr": round(float(tpr[i]), 6)}
         for i in indices
     ]
+    flip_note = "The combined score direction was auto-flipped because lower fitted scores predicted the event. " if flipped else ""
 
     return _sanitize({
         "test": "ROC Analysis (Combined Model)",
@@ -926,6 +933,8 @@ def roc_combined(req: ROCCombinedRequest):
         "n_positive": int(y.sum()),
         "n_negative": int((y == 0).sum()),
         "auc": round(auc, 4),
+        "direction_used": "lower" if flipped else "higher",
+        "direction_flipped": bool(flipped),
         "optimal": optimal,
         "curve": curve,
         "result_text": (
@@ -933,6 +942,7 @@ def roc_combined(req: ROCCombinedRequest):
             f"({', '.join(req.predictor_columns)}) was evaluated (n = {len(df)}). "
             f"The AUC was {auc:.3f}, indicating "
             f"{'excellent' if auc >= 0.9 else 'good' if auc >= 0.8 else 'fair' if auc >= 0.7 else 'poor'} discrimination. "
+            f"{flip_note}"
             f"At the optimal cutoff ({optimal['cutoff']:.3f}), sensitivity was {optimal['sensitivity']*100:.1f}% "
             f"and specificity was {optimal['specificity']*100:.1f}%."
         ),

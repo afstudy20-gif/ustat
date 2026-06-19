@@ -253,6 +253,15 @@ def mediation(req: MediationRequest):
     for c in [req.outcome, req.treatment, req.mediator]:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     df = df.dropna(subset=cols)
+    y_levels = sorted(df[req.outcome].dropna().unique().tolist())
+    if len(y_levels) == 2 and set(y_levels).issubset({0, 1, 0.0, 1.0}):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Linear mediation requires a continuous outcome. Binary outcomes "
+                "need a logistic mediation model, which is not implemented in this endpoint."
+            ),
+        )
     n = len(df)
     if n < len(cols) + 10:
         raise HTTPException(400, "Not enough complete observations for mediation analysis.")
@@ -592,6 +601,10 @@ def difference_in_differences(req: DiDRequest):
     df = df.assign(_g_=g, _t_=tm).dropna(subset=[req.outcome, "_g_", "_t_"] + req.covariates)
     if set(df["_g_"].unique()) - {0.0, 1.0} or set(df["_t_"].unique()) - {0.0, 1.0}:
         raise HTTPException(400, "Group and time must both be binary 0/1 (control/treated, pre/post).")
+    cell_counts = df.groupby(["_g_", "_t_"]).size()
+    missing_cells = [(g, t) for g in (0.0, 1.0) for t in (0.0, 1.0) if cell_counts.get((g, t), 0) == 0]
+    if missing_cells:
+        raise HTTPException(422, "Difference-in-differences requires non-empty control/treated × pre/post cells.")
     n = len(df)
     if n < len(req.covariates) + 12:
         raise HTTPException(400, "Not enough complete observations for difference-in-differences.")
