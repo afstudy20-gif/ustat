@@ -22,6 +22,7 @@ _undo: Dict[str, list] = {}   # {session_id: [DataFrame snapshots]}
 _redo: Dict[str, list] = {}
 _lock = Lock()
 MAX_UNDO = 30
+VALID_FILTER_OPERATORS = {"eq", "ne", "gt", "lt", "gte", "lte", "missing", "not_missing", "contains"}
 
 # Every per-session map, so cleanup/delete can drop a session completely
 # (a partial pop leaks the user's kinds/decimals/filename/filters after TTL).
@@ -140,6 +141,20 @@ def get_filter(session_id: str) -> List[dict]:
 
 def clear_filter(session_id: str) -> None:
     _filters.pop(session_id, None)
+
+
+def validate_conditions(df: pd.DataFrame, conditions: List[dict]) -> None:
+    for i, cond in enumerate(conditions or [], start=1):
+        col = cond.get("column", "")
+        if col not in df.columns:
+            raise HTTPException(status_code=404, detail=f"Condition {i}: column '{col}' not found")
+        op = cond.get("operator", "eq")
+        if op not in VALID_FILTER_OPERATORS:
+            allowed = ", ".join(sorted(VALID_FILTER_OPERATORS))
+            raise HTTPException(
+                status_code=422,
+                detail=f"Condition {i}: unsupported operator '{op}'. Use one of: {allowed}.",
+            )
 
 
 def _apply_conditions(df: pd.DataFrame, conditions: List[dict]) -> pd.DataFrame:

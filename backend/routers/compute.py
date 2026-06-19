@@ -1516,29 +1516,56 @@ def clean_outliers(session_id: str, req: OutliersRequest):
     n_before = len(df)
     
     keep_mask = np.ones(len(df), dtype=bool)
+    per_column_deleted: Dict[str, int] = {}
+    warnings: List[str] = []
     for c in req.columns:
         if c not in df.columns:
             continue
         col = pd.to_numeric(df[c], errors="coerce")
+        col_drop = pd.Series(False, index=df.index)
+        max_plausible = plausibility_max_for_column(c)
+        if max_plausible is not None:
+            impossible = (col > max_plausible).fillna(False)
+            if impossible.any():
+                col_drop |= impossible
+                warnings.append(
+                    f"{c}: removed {int(impossible.sum())} value(s) above the plausible maximum ({max_plausible:g})."
+                )
+
+        body = col[~col_drop]
         if req.method == "iqr":
-            q1 = col.quantile(0.25)
-            q3 = col.quantile(0.75)
+            q1 = body.quantile(0.25)
+            q3 = body.quantile(0.75)
             iqr = q3 - q1
             low = q1 - req.threshold * iqr
             high = q3 + req.threshold * iqr
-            keep_mask &= (col.isna() | ((col >= low) & (col <= high)))
+            if pd.notna(low) and pd.notna(high):
+                col_drop |= (col.notna() & ((col < low) | (col > high))).fillna(False)
         else:  # zscore
-            mean = col.mean()
-            std = col.std(ddof=1)
+            mean = body.mean()
+            std = body.std(ddof=1)
             if std > 0:
                 z = np.abs((col - mean) / std)
-                keep_mask &= (col.isna() | (z <= req.threshold))
+                col_drop |= (col.notna() & (z > req.threshold)).fillna(False)
+        per_column_deleted[c] = int(col_drop.sum())
+        keep_mask &= ~col_drop.to_numpy(dtype=bool)
                 
     df = df[keep_mask].reset_index(drop=True)
     n_deleted = n_before - len(df)
     store.save(session_id, df)
-    store.log_action(session_id, "clean_outliers", {"columns": req.columns, "method": req.method, "n_deleted": n_deleted})
-    return {"deleted": n_deleted, "remaining_rows": len(df)}
+    store.log_action(session_id, "clean_outliers", {
+        "columns": req.columns,
+        "method": req.method,
+        "n_deleted": n_deleted,
+        "per_column_deleted": per_column_deleted,
+    })
+    return {
+        "deleted": n_deleted,
+        "deleted_rows": n_deleted,
+        "remaining_rows": len(df),
+        "per_column_deleted": per_column_deleted,
+        "warnings": warnings,
+    }
 
 
 class FindReplaceRequest(BaseModel):
@@ -1552,9 +1579,12 @@ def find_replace(session_id: str, req: FindReplaceRequest):
     df = _get_df(session_id)
     df = df.copy()
     replaced_count = 0
+    per_column_replaced: Dict[str, int] = {}
+    missing_columns: List[str] = []
     
     for c in req.columns:
         if c not in df.columns:
+            missing_columns.append(c)
             continue
         
         # Try to coerce find/replace values if column is numeric
@@ -1577,12 +1607,25 @@ def find_replace(session_id: str, req: FindReplaceRequest):
                     r_val = np.nan
                     
         # Count replacements
-        replaced_count += int((df[c] == f_val).sum())
+        n_col = int((df[c] == f_val).sum())
+        replaced_count += n_col
+        per_column_replaced[c] = n_col
         df[c] = df[c].replace(f_val, r_val)
         
     store.save(session_id, df)
     store.log_action(session_id, "find_replace", {"columns": req.columns, "replaced_count": replaced_count})
-    return {"replaced_count": replaced_count}
+    warnings = []
+    if missing_columns:
+        warnings.append(f"Skipped missing column(s): {', '.join(missing_columns)}.")
+    if replaced_count == 0:
+        warnings.append("No matching values found; dataset was unchanged.")
+    return {
+        "replaced_count": replaced_count,
+        "found": replaced_count > 0,
+        "changed": replaced_count > 0,
+        "per_column_replaced": per_column_replaced,
+        "warnings": warnings,
+    }
 
 
 # ── Per-column value-map replace (in place) ─────────────────────────────────────

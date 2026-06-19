@@ -126,6 +126,18 @@ def _auto_grid_search(y: pd.Series, seasonal):
     return best, best_order
 
 
+def _max_abs_acf_after_differencing(y: pd.Series, d: int, max_lag: int = 6) -> Optional[float]:
+    signal = y.copy()
+    for _ in range(max(0, int(d))):
+        signal = signal.diff().dropna()
+    if len(signal) < 10:
+        return None
+    lag_max = min(max_lag, len(signal) // 3)
+    vals = [abs(float(signal.autocorr(lag=lag))) for lag in range(1, lag_max + 1)]
+    vals = [v for v in vals if np.isfinite(v)]
+    return max(vals) if vals else None
+
+
 @router.post("/arima")
 async def arima(req: ARIMARequest):
     from statsmodels.stats.diagnostic import acorr_ljungbox
@@ -231,6 +243,19 @@ async def arima(req: ARIMARequest):
     warnings = []
     if lb_p is not None and lb_p < 0.05:
         warnings.append("Residuals show significant autocorrelation — model may be misspecified.")
+    if grid_searched and chosen_order[0] == 0 and chosen_order[2] == 0:
+        warnings.append(
+            "Auto search selected p=0 and q=0; after differencing there is little AR/MA signal, "
+            "so treat this as a baseline/noise model rather than evidence of a useful time-series pattern."
+        )
+    if grid_searched and (chosen_order[0] > 0 or chosen_order[2] > 0):
+        max_abs_acf = _max_abs_acf_after_differencing(y, chosen_order[1])
+        acf_threshold = 1.96 / math.sqrt(len(y))
+        if max_abs_acf is not None and max_abs_acf <= acf_threshold:
+            warnings.append(
+                "Auto search selected AR/MA terms even though short-lag autocorrelation is weak; "
+                "this may be AIC overfit on near-iid data."
+            )
     if len(y) < 50:
         warnings.append("Small sample size — ARIMA estimates and forecasts have high uncertainty.")
 
@@ -301,6 +326,12 @@ def decompose(req: DecomposeRequest):
     var_ds = float(np.nanvar((seasonal + resid)))
     f_trend = max(0.0, 1 - var_resid / var_dt) if var_dt > 0 else 0.0
     f_seas = max(0.0, 1 - var_resid / var_ds) if var_ds > 0 else 0.0
+    seasonality_detected = f_seas >= 0.10
+    result_warnings = []
+    if not seasonality_detected:
+        result_warnings.append(
+            "Seasonal strength is very low; the seasonal component is likely decomposition noise and should not be interpreted as real seasonality."
+        )
 
     try:
         store.log_action(req.session_id, "ts_decompose",
@@ -321,10 +352,13 @@ def decompose(req: DecomposeRequest):
         "resid": _arr(resid),
         "strength_trend": round(f_trend, 4),
         "strength_seasonal": round(f_seas, 4),
+        "seasonality_detected": seasonality_detected,
+        "warnings": result_warnings,
         "interpretation": (
             f"{req.method.upper()} decomposition, period {period}. "
             f"Trend strength {f_trend:.2f}, seasonal strength {f_seas:.2f} "
             "(0 = none, 1 = dominant)."
+            + ("" if seasonality_detected else " Seasonality is weak; do not over-interpret the seasonal curve.")
         ),
     })
 

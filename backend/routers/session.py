@@ -267,7 +267,8 @@ def select_cases(session_id: str, body: SelectCasesRequest):
     df = store.get(session_id)
     if df is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from services.store import _apply_conditions
+    from services.store import _apply_conditions, validate_conditions
+    validate_conditions(df, body.conditions)
     df_filtered = _apply_conditions(df, body.conditions)
     if body.apply:
         store.save_filter(session_id, body.conditions)

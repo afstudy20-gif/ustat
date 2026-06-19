@@ -506,9 +506,7 @@ def _validate_table(rows, columns, footnotes, has_p, abbreviations):
         try:
             pv = float(p)
             decimals = len(p.split(".")[-1]) if "." in p else 0
-            if pv >= 0.05 and decimals > 2:
-                p_ok = False
-            if 0.001 <= pv < 0.05 and decimals < 3:
+            if 0.001 <= pv <= 1 and decimals != 3:
                 p_ok = False
         except ValueError:
             pass

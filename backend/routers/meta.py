@@ -355,7 +355,8 @@ def meta_regression(req: MetaRequest):
     ci = model.conf_int()
     slope_lo, slope_hi = float(ci[1][0]), float(ci[1][1])
 
-    # Residual heterogeneity + R² (proportion of τ² explained)
+    # Residual heterogeneity + weighted model R². This is the WLS fit R², not
+    # a direct "proportion of tau² explained" estimate.
     tau2_resid = max(0.0, tau2 * (1 - model.rsquared)) if tau2 > 0 else 0.0
     r2_analog = round(model.rsquared * 100, 2)
 
@@ -383,7 +384,10 @@ def meta_regression(req: MetaRequest):
         "intercept": round(intercept, 5), "slope": round(slope, 5),
         "slope_se": round(se_slope, 5), "slope_ci_low": round(slope_lo, 5),
         "slope_ci_high": round(slope_hi, 5), "slope_p": round(p_slope, 6),
-        "r2_pct": r2_analog, "tau2": round(tau2, 6), "tau2_resid": round(tau2_resid, 6),
+        "r2_pct": r2_analog,
+        "r2_label": "Weighted least-squares R² (%)",
+        "r2_note": "WLS model R² from the weighted meta-regression; not a direct proportion of tau² explained.",
+        "tau2": round(tau2, 6), "tau2_resid": round(tau2_resid, 6),
         "points": points, "line_x": line_x, "line_y": line_y,
         "log_scale": _log_scale(req.measure),
         "interpretation": interp, "result_text": interp,
