@@ -68,7 +68,7 @@ export function FindReplaceModal({
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-gray-200 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-gray-800">Find &amp; Replace</h3>
+            <h3 className="text-sm font-semibold text-gray-800">Convert value</h3>
             <p className="text-[11px] text-gray-400 mt-0.5">
               {colName}
               {col?.kind && <span className="ml-1 text-indigo-500">({col.kind})</span>}

@@ -1462,6 +1462,19 @@ function DataTableBody({ session }: { session: Session }) {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ✏️ Rename
           </button>
+          <button onClick={openSuggestNames}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            💡 Suggest names…
+          </button>
+          <button onClick={() => {
+            const col = columns.find((c) => c.name === ctxMenu.col);
+            setColumnAnalysisExcluded(ctxMenu.col, !(col?.analysis_excluded ?? false));
+            setCtxMenu(null);
+          }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            {columns.find((c) => c.name === ctxMenu.col)?.analysis_excluded
+              ? "✅ Include in analysis" : "🚫 Exclude from analysis"}
+          </button>
           <button onClick={() => copyColumn(ctxMenu.col)}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             📋 Copy column
@@ -1480,25 +1493,13 @@ function DataTableBody({ session }: { session: Session }) {
             🔤 Value Labels
           </button>
           <button onClick={() => { setFindReplaceCol(ctxMenu.col); setCtxMenu(null); }}
+            title="Convert value: swap codes (e.g. 1 ↔ 2) or recode missing → 0"
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-            🔁 Find &amp; Replace…
+            🔁 Convert value…
           </button>
           <button onClick={() => { setParseDateCol(ctxMenu.col); setCtxMenu(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             📅 Parse as date…
-          </button>
-          <button onClick={() => {
-            const col = columns.find((c) => c.name === ctxMenu.col);
-            setColumnAnalysisExcluded(ctxMenu.col, !(col?.analysis_excluded ?? false));
-            setCtxMenu(null);
-          }}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-            {columns.find((c) => c.name === ctxMenu.col)?.analysis_excluded
-              ? "✅ Include in analysis" : "🚫 Exclude from analysis"}
-          </button>
-          <button onClick={openSuggestNames}
-            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-            💡 Suggest names…
           </button>
           {/* Decimal places selector */}
           {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
