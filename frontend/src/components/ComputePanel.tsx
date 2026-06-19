@@ -535,6 +535,16 @@ function RecodeTab({
       conditions: rule.conditions.filter((_, i) => i !== ci),
     }));
 
+  const duplicateCond = (ri: number, ci: number) =>
+    setRules((r) => r.map((rule, idx) => idx !== ri ? rule : {
+      ...rule,
+      conditions: [
+        ...rule.conditions.slice(0, ci + 1),
+        { ...rule.conditions[ci] },  // copy so edits don't mutate the original
+        ...rule.conditions.slice(ci + 1),
+      ],
+    }));
+
   const updateCond = (ri: number, ci: number, patch: Partial<Condition>) =>
     setRules((r) => r.map((rule, idx) => idx !== ri ? rule : {
       ...rule,
@@ -543,6 +553,39 @@ function RecodeTab({
 
   const updateResult = (ri: number, val: string) =>
     setRules((r) => r.map((rule, idx) => idx !== ri ? rule : { ...rule, result: val }));
+
+  // Auto-suggest a short value label from the rule that produces each assigned
+  // value (e.g. value "1" from "Age < 51" → "Age<51"). The user can edit or
+  // clear it; once touched, we never overwrite their text.
+  const userTouchedLabels = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const condAbbrev = (c: Condition) => `${c.col}${c.op}${c.val}`.replace(/\s+/g, "");
+    const autoFor = (v: string): string => {
+      const rule = rules.find((r) => r.result.trim() === v);
+      if (rule) {
+        const s = rule.conditions.map(condAbbrev).join(" & ");
+        return s.length > 28 ? s.slice(0, 27) + "…" : s;
+      }
+      if (elseVal.trim() === v) return "Other";
+      return "";
+    };
+    const assigned = [
+      ...rules.map((r) => r.result.trim()).filter(Boolean),
+      ...(elseVal.trim() ? [elseVal.trim()] : []),
+    ];
+    const uniq = [...new Set(assigned)];
+    setValueLabels((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const v of uniq) {
+        if (userTouchedLabels.current.has(v)) continue;
+        const auto = autoFor(v);
+        if (auto && next[v] !== auto) { next[v] = auto; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [rules, elseVal]);
 
   const run = async () => {
     setLoading(true); setError(null); setSuccess(null);
@@ -661,6 +704,11 @@ function RecodeTab({
                     onChange={(e) => updateCond(ri, ci, { val: e.target.value })}
                   />
 
+                  <button
+                    onClick={() => duplicateCond(ri, ci)}
+                    title="Duplicate this condition (inserted directly below)"
+                    className="text-indigo-300 hover:text-indigo-600 text-xs"
+                  >⧉</button>
                   {rule.conditions.length > 1 && (
                     <button onClick={() => removeCond(ri, ci)} className="text-red-300 hover:text-red-500 text-xs">✕</button>
                   )}
@@ -739,7 +787,10 @@ function RecodeTab({
                       className="flex-1 text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:border-indigo-400"
                       placeholder={`Label for ${val}`}
                       value={valueLabels[val] ?? ""}
-                      onChange={(e) => setValueLabels((prev) => ({ ...prev, [val]: e.target.value }))}
+                      onChange={(e) => {
+                        userTouchedLabels.current.add(val);  // stop auto-fill from overwriting
+                        setValueLabels((prev) => ({ ...prev, [val]: e.target.value }));
+                      }}
                     />
                   </div>
                 ))}
