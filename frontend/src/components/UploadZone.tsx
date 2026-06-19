@@ -168,10 +168,16 @@ export default function UploadZone() {
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
       <div className="flex flex-col items-center gap-3">
-        {/* Crop the logo PNG to its inner circle so its baked-in cream rectangle
-            doesn't clash with the new page background. */}
+        {/* The logo PNG ships with a cream rectangle background AND a beige
+            decorative ring baked in. Zoom into the inner ~55% (chart + brain
+            emblem only) and clip to a circle so only the emblem shows on the
+            page background. */}
         <div className="w-24 h-24 rounded-full overflow-hidden bg-surface flex items-center justify-center shadow-card">
-          <img src="/logo.png" alt="uSTAT logo" className="w-[140%] h-[140%] object-contain" />
+          <img
+            src="/logo.png"
+            alt="uSTAT logo"
+            className="w-full h-full object-cover scale-[1.85] origin-center"
+          />
         </div>
         <div className="text-center">
           <h1 className="font-serif text-5xl font-medium text-slate-950 leading-none tracking-tight">uSTAT</h1>
