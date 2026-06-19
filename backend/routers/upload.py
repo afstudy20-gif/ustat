@@ -27,17 +27,42 @@ _DATE_PATTERNS = [
 
 _LEADING_ZERO_RE = re.compile(r"^0\d")  # 0123 — keep as text (likely an ID code)
 
+# Text values that mean "missing" in dirty CSV/SPSS/SAS exports. Recognised at
+# ingest so a column with "NA"/"n/a"/"?"/"." sprinkled in still classifies as
+# numeric (the sentinels become NaN instead of forcing the column to text).
+_TEXT_MISSING = frozenset({"", "na", "n/a", "?", "-", ".", "null", "missing", "none"})
+
+# Coverage threshold for the "almost-all numeric, a few text" case. When ≥98%
+# of non-blank values parse as a number, the column is numeric and the rest
+# are dirty sentinels we map to NaN.
+_NUMERIC_THRESHOLD = 0.98
+
+
+def _strip_meaningful(s: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Return (as_str, meaningful_mask). Lowercased text-missing sentinels are
+    *not* meaningful — they will be coerced to NaN downstream."""
+    as_str = s.astype(str).str.strip()
+    low = as_str.str.lower()
+    meaningful = s.notna() & (~low.isin(_TEXT_MISSING))
+    return as_str, meaningful
+
 
 def coerce_numeric_objects(df: pd.DataFrame) -> pd.DataFrame:
-    """Restore numeric dtype for object columns whose every non-empty value is
-    numeric-coercible.
+    """Restore numeric dtype for object columns whose meaningful values are
+    numeric-coercible. Handles two flavours of dirty input:
+
+    1. **Comma-decimals** (`"25,9"`): Turkish/EU locale leakage from Excel/CSV.
+       Replaced with `"."` before coercion so the column ends up float64
+       instead of object — every downstream that needs a number then works.
+
+    2. **Text-missing sentinels** (`"NA"`, `"n/a"`, `"?"`, …): mapped to NaN
+       so a single sentinel cell doesn't force the column to text.
 
     JSON session round-trips serialise with ``default_handler=str`` and some
     imports (Excel/SPSS with stray cells) leave genuinely-numeric columns as
-    strings. Those then misclassify as 'text' in the Data Dictionary even
-    though the data is numeric. We only convert when it is lossless — every
-    non-empty value parses as a number — and we skip values with a leading
-    zero (e.g. '0123') that are almost certainly identifier codes, not numbers.
+    strings. We coerce when it is *almost* lossless (≥98% of meaningful cells
+    parse) and skip values with a leading zero (e.g. ``"0123"``) that are
+    almost certainly identifier codes.
 
     Mutates a copy and returns it; the input is left untouched.
     """
@@ -46,16 +71,23 @@ def coerce_numeric_objects(df: pd.DataFrame) -> pd.DataFrame:
         s = out[col]
         if s.dtype != object:
             continue
-        as_str = s.astype(str).str.strip()
-        meaningful = s.notna() & (as_str != "") & (as_str.str.lower() != "nan")
+        as_str, meaningful = _strip_meaningful(s)
         n = int(meaningful.sum())
         if n == 0:
             continue
         # Preserve identifier-like codes with leading zeros.
         if as_str[meaningful].str.match(_LEADING_ZERO_RE).any():
             continue
-        coerced = pd.to_numeric(s, errors="coerce")
-        if int(coerced[meaningful].notna().sum()) == n:
+        # Try plain first; fall back to comma-decimal swap.
+        coerced = pd.to_numeric(as_str.where(meaningful), errors="coerce")
+        ok = int(coerced[meaningful].notna().sum())
+        if ok < n:
+            swapped = as_str.where(meaningful).str.replace(",", ".", regex=False)
+            coerced2 = pd.to_numeric(swapped, errors="coerce")
+            if int(coerced2[meaningful].notna().sum()) > ok:
+                coerced = coerced2
+                ok = int(coerced[meaningful].notna().sum())
+        if ok / n >= _NUMERIC_THRESHOLD:
             out[col] = coerced
     return out
 
@@ -166,6 +198,12 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     except Exception as e:
         logger.exception("upload: failed to parse {}", file.filename)
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
+
+    # Pass over object columns: salvage numeric ones that arrived dirty
+    # (comma-decimals, text-as-missing sentinels). Without this, a single
+    # "30,6" cell or "NA" pinned the whole column to text and every later
+    # statistical endpoint either crashed or silently dropped rows.
+    df = coerce_numeric_objects(df)
 
     session_id = str(uuid.uuid4())
     store.save(session_id, df)
