@@ -722,13 +722,27 @@ def melt_wide_to_long(req: MeltRequest):
 
     store.save(req.session_id, df_long)
 
+    # Sanitise the preview: NaN/Inf in value columns (e.g. a melted column
+    # that had missing values, like cholesterol) crash FastAPI's JSON
+    # serializer (allow_nan=False) and surface as a misleading "non-finite
+    # statistic" 400. Walk the records and turn non-finite floats into None
+    # (→ JSON null). (.where(notna, None) does NOT work on float dtype — it
+    # coerces the placeholder back to NaN, so an explicit walk is required.)
+    import math as _math
+    _raw_preview = df_long.head(10).to_dict(orient="records")
+    preview = [
+        {k: (None if isinstance(v, float) and not _math.isfinite(v) else v)
+         for k, v in rec.items()}
+        for rec in _raw_preview
+    ]
+
     return {
         "rows": len(df_long),
         "columns": list(df_long.columns),
         "time_var": req.time_var_name,
         "value_var": req.value_var_name,
         "time_points": labels,
-        "preview": df_long.head(10).to_dict(orient="records"),
+        "preview": preview,
     }
 
 
