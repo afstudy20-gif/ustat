@@ -32,6 +32,25 @@ def _sanitize(obj):
     return obj
 
 
+def _clean_corr_matrix(corr: pd.DataFrame) -> dict:
+    """Serialise a correlation matrix to a {col: {row: value|None}} dict,
+    turning every NaN/Inf into a real JSON null.
+
+    The naive ``corr.where(pd.notnull(corr), None)`` does NOT work: the
+    DataFrame keeps float64 dtype, so the ``None`` placeholder is coerced
+    back to NaN on the way out. A constant/degenerate column (std=0) makes
+    Spearman/Kendall produce NaN, and that leaked NaN then trips the global
+    "non-finite float" handler and returns a 500. Casting to object dtype
+    first lets the None survive to JSON."""
+    return (
+        corr.round(4)
+        .replace([np.inf, -np.inf], np.nan)
+        .astype(object)
+        .where(pd.notnull(corr), None)
+        .to_dict()
+    )
+
+
 # ── 1. GET Correlation Matrix ──────────────────────────────────────────────────
 
 @router.get("/{session_id}/correlation")
@@ -65,7 +84,7 @@ def correlation(session_id: str, method: str = "pearson"):
     return {
         "method": method,
         "columns": corr.columns.tolist(),
-        "matrix": corr.round(4).where(pd.notnull(corr), None).to_dict(),
+        "matrix": _clean_corr_matrix(corr),
         "p_values": p_values,
     }
 
@@ -285,7 +304,9 @@ def correlation_matrix_post(req: CorrelationMatrixRequest):
                     "severity": "high" if abs(r_val) >= 0.90 else "moderate",
                 })
 
-    matrix_dict = {c: {r: (float(corr.loc[r, c]) if not pd.isna(corr.loc[r, c]) else None)
+    matrix_dict = {c: {r: (float(corr.loc[r, c])
+                           if pd.notna(corr.loc[r, c]) and np.isfinite(corr.loc[r, c])
+                           else None)
                         for r in req.variables} for c in req.variables}
 
     return {
