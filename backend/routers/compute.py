@@ -136,12 +136,17 @@ def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Se
     }
     # Allow element-wise boolean combination of Series conditions (&, |, ^, ~)
     # in addition to simpleeval's defaults; needed for IF(A>0 & B<5, ...).
+    # Also override ast.Pow: simpleeval's default safe_power calls abs(base),
+    # which raises "truth value of a Series is ambiguous" when the base is a
+    # column Series (e.g. bmi**2). operator.pow applies ** element-wise to the
+    # Series with no guard, which is what we want for column arithmetic.
     operators = {
         **DEFAULT_OPERATORS,
         ast.BitAnd: op.and_,
         ast.BitOr:  op.or_,
         ast.BitXor: op.xor,
         ast.Invert: op.invert,
+        ast.Pow:    op.pow,
     }
     names = {col: df[col] for col in df.columns}
 
