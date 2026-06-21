@@ -178,167 +178,327 @@ the Data tab by clicking a column's type badge or via the Dictionary modal.)*
 ### 3.1 Data — load, type, clean
 ![Data tab](docs/manual/img/01-data.png)
 
-- **Get here:** the **Data** tab (default after upload).
-- **Set variable types:** click a column's small badge (`num` / `cat` / `txt` /
-  `date`) to cycle types, or open **Dictionary** for labels + value labels.
-  Correct typing matters — many pickers only list numeric or only categorical
-  columns. `Ordered Categorical` (ordinal) shows up in both.
-- **Missing values:** each header shows a badge like `103✕ · 13%` (count + % of
-  rows). Click **⚠ Missing** to view only rows with gaps.
-- **Subset:** **Select Cases** (rule-based row filter) and **Filter**
-  (per-column). **+ Row / + Column**, inline edit (double-click a cell),
-  Undo/Redo, Freeze columns.
-- **Tell the user:** clean and type the data here *first* — every other tab
-  reads these definitions.
+**How to do it (step by step):**
+1. Upload is automatic — drag your CSV/XLSX onto the dropzone, or click **Browse**.
+   The Data tab opens by default and is the first thing the user sees.
+2. **Type each variable.** In any column header, click the small type badge
+   (`num` / `cat` / `txt` / `date`) to cycle to the correct type. Do this for
+   *every* column before running analyses — pickers in other tabs only list the
+   columns whose type matches (e.g. a t-test only offers `num` outcomes).
+3. **Add labels (optional but recommended).** Click a column name → **Dictionary**
+   to set a human-readable label and value labels (e.g. `0 → No`, `1 → Yes`).
+   These labels appear on every chart and table downstream.
+4. **Check missingness.** Each header shows a red badge like `103✕ · 13%`
+   (count + percent missing). To see only the rows with gaps, click **⚠ Missing**
+   in the toolbar.
+5. **Clean if needed.** Use **Select Cases** (build a rule like `age ≥ 18 &
+   sex = M`) or per-column **Filter** to subset. **+ Row / + Column** to add
+   data; double-click any cell to edit it in place. **Undo/Redo** and **Freeze**
+   columns are in the toolbar.
+6. **Recompute after edits.** Any change shows an **Apply** / **Save** affordance;
+   confirm it so the typed/cleaned state persists for the other tabs.
+
+**Tell the user:** "Type and clean your data here first — every other tab reads
+these definitions. A mistyped variable (e.g. a number stored as text) silently
+disappears from downstream analyses."
+
+---
 
 ### 3.2 Summary — descriptives & distribution plots
 ![Summary tab](docs/manual/img/02-summary.png)
 
-- **Get here:** **Summary → Descriptive**. (**Weighted** sub-tab for survey
-  weights.)
-- **Steps:** pick a numeric variable → see mean/SD/median/IQR/range/skew, plus
-  **Histogram, Boxplot, Violin, Q-Q**. Add a categorical **group** to compare
-  distributions side by side.
-- **Use Q-Q** to judge normality before choosing a t-test vs Mann-Whitney.
+**How to do it:**
+1. Go to **Summary → Descriptive** (the **Weighted** sub-tab is for survey-weighted
+   data — bring a weights column).
+2. Pick one numeric variable from the **Variable** dropdown.
+3. Read the stat table: n, mean, SD, median, IQR, range, skewness, kurtosis, and a
+   Shapiro-Wilk normality p-value.
+4. Switch the plot with the buttons above the chart: **Histogram**, **Boxplot**,
+   **Violin**, **Q-Q**.
+5. **(Optional) Compare groups:** choose a categorical **Group by** variable to
+   split the distribution side-by-side.
+6. **Use the Q-Q plot to choose your test:** points on the line ≈ normal → use a
+   parametric test (t-test/ANOVA) in the Tests tab. Strong S-curve departure →
+   use the non-parametric equivalent (Mann-Whitney/Kruskal-Wallis).
+
+---
 
 ### 3.3 Table — clinical "Table 1"
 ![Table 1](docs/manual/img/03-table1.png)
 
-- **Get here:** **Table** tab.
-- **Steps:** choose a **grouping variable** (e.g. treatment arm) → tick the
-  baseline variables → uSTAT auto-picks mean±SD vs median[IQR] vs n(%) and the
-  right test per row, with a p-value column. Export to publication format.
+**How to do it:**
+1. Go to the **Table** tab.
+2. Pick the **Grouping variable** (e.g. `treatment_arm` with levels
+   *Placebo* / *Drug*). Leave it blank for a single-arm descriptive table.
+3. Tick the baseline variables you want in the left list.
+4. uSTAT auto-selects the right summary per row: mean±SD for normal numeric,
+   median[IQR] for skewed, n(%) for categorical — and the correct comparison
+   test (t-test / Mann-Whitney / χ² / Fisher) with a p-value column.
+5. Tweak defaults in the options panel (e.g. force median for a specific
+   variable, change the number of decimals).
+6. Click **Export** for a publication-ready (Word/CSV) table.
+
+---
 
 ### 3.4 Tests — hypothesis tests
 ![Tests tab](docs/manual/img/04-tests.png)
 
-- **Get here:** **Tests** tab. Sub-tabs: **Hypothesis** (t/ANOVA/Mann-Whitney/
-  Kruskal/Jonckheere/χ²/Fisher), **Repeated Measures** (paired t, Wilcoxon,
-  RM-ANOVA, Friedman, mixed ANOVA), **Categorical** (proportions, McNemar,
-  Cochran Q, Mantel-Haenszel, trend), **Reliability** (Cronbach, ICC, κ),
-  **Non-Inferiority**, **Gatekeeping**, **Factor Analysis** (PCA), **Bayesian
-  Statistics**.
-- **Steps:** pick the test in the left list → assign the outcome + group
-  variables in the form → **Run**. Each test shows a *When to use / Assumptions
-  / How to read* card (visible on the right) — point the user to it.
-- **Picking parametric vs non-parametric:** continuous + roughly normal (check
-  Summary Q-Q) → t-test/ANOVA; otherwise → Mann-Whitney/Kruskal.
+**How to do it:**
+1. Go to the **Tests** tab and pick the right **sub-tab** for your question:
+   - **Hypothesis** — t, ANOVA, Mann-Whitney, Kruskal-Wallis, Jonckheere, χ², Fisher
+   - **Repeated Measures** — paired t, Wilcoxon, RM-ANOVA, Friedman, mixed ANOVA
+   - **Categorical** — one/two proportions, McNemar, Cochran Q, Mantel-Haenszel, trend
+   - **Reliability** — Cronbach α, ICC, Cohen/Fleiss κ
+   - **Non-Inferiority**, **Gatekeeping**, **Factor Analysis** (PCA), **Bayesian**
+2. In the left list, click the **test name** you want.
+3. In the form that appears, assign the variables: **Outcome** (and **Group** /
+   **Paired column** / **Strata** where the test needs them).
+4. Read the *When to use / Assumptions / How to read* card on the right — it
+   tells the user whether the assumptions are met and how to interpret the result.
+5. Click **Run**. The result panel shows the statistic, p-value, effect size,
+   and a plain-English conclusion.
+6. **Picking parametric vs non-parametric:** check the Q-Q plot in Summary first.
+   Roughly normal → t-test/ANOVA. Not normal, or ordinal, or small n →
+   Mann-Whitney/Kruskal. Categorical counts → χ²/Fisher (Fisher when any
+   expected cell < 5).
 
 ### 3.5 Correlation
 ![Correlation tab](docs/manual/img/05-correlation.png)
 
-- **Get here:** **Correlation** tab.
-- **Steps:** select ≥2 numeric/ordinal variables → choose **Pearson** (linear,
-  normal), **Spearman** (monotonic/ranked), or **Kendall** → get the coefficient
-  matrix, p-values, and a heatmap/scatter.
+**How to do it:**
+1. Go to the **Correlation** tab.
+2. Tick ≥2 numeric or ordinal variables in the left list.
+3. Pick the method: **Pearson** (linear relationship, both variables normal),
+   **Spearman** (monotonic / ranked / ordinal / non-normal), or **Kendall**
+   (robust, small samples, ties).
+4. Click **Compute**. You get a coefficient matrix with p-values and a
+   color-coded heatmap; click any cell for the scatter with a fitted line.
+5. **Read it:** |r| < 0.3 weak, 0.3–0.6 moderate, > 0.6 strong. A p < 0.05 just
+   says the correlation is distinguishable from zero, not that it is strong.
+
+---
 
 ### 3.6 ROC — diagnostic accuracy
 ![ROC tab](docs/manual/img/06-roc.png)
 
-- **Get here:** **ROC** tab.
-- **Steps:** pick a numeric **score/marker** + a **binary outcome (0/1)** →
-  AUC with 95% CI, optimal cutoff (Youden), sensitivity/specificity. Switch to
-  **multi-curve** to compare several markers; **DeLong** tests whether two AUCs
-  differ; **Combined model** fits a logistic combination of markers.
+**How to do it:**
+1. Go to the **ROC** tab.
+2. Choose a numeric **Score / marker** (e.g. a lab value or a model's predicted
+   probability) and a binary **Outcome (0/1)**.
+3. Click **Compute**. You get AUC with 95% CI, the **optimal cutoff** (Youden J),
+   and sensitivity/specificity at that cutoff.
+4. **Compare markers:** switch to **Multi-curve** and tick several scores. The
+   **DeLong** test then tells you whether two AUCs differ significantly.
+5. **Combine markers:** use **Combined model** — uSTAT fits a logistic
+   combination of the selected markers and reports the combined AUC (is the
+   panel better than any single marker?).
+6. **Read it:** AUC 0.5 = no discrimination, 0.7 = acceptable, 0.8 = good,
+   0.9 = excellent. If the CI crosses 0.5, the marker is not informative.
+
+---
 
 ### 3.7 Models — Regression
 ![Models · Regression](docs/manual/img/07-models-regression.png)
 
-- **Get here:** **Models → Regression**.
-- **Steps:** pick the model in the left list (Linear, Logistic, Firth, OR/HR
-  table, Ordinal, Poisson, …) → choose the **Outcome** → tick **Predictors** →
-  options (Robust SE, imputation, interactions) → **Fit**. Output: coefficient
-  table (β / OR / IRR) with 95% CI + p, model fit, and a plain-English summary.
-- **Ordinal logistic** also reports the **Brant test** of the proportional-odds
-  assumption (green = assumption holds, amber = violated, with the offending
-  predictors named).
+**How to do it:**
+1. Go to **Models → Regression**.
+2. Pick the model in the left list matching your outcome type:
+   - **Linear** — continuous outcome (e.g. blood pressure)
+   - **Logistic / Firth** — binary 0/1 outcome (rare events → Firth penalized)
+   - **Poisson / Negative Binomial** — count outcome
+   - **Gamma** — strictly-positive continuous (e.g. cost, LOS)
+   - **Ordinal** — ordered categories (e.g. NYHA I–IV)
+3. Choose the **Outcome**, then tick the **Predictors**.
+4. (Optional) Set options: **Robust SE** (heteroscedasticity), **imputation**
+   (listwise / MICE), **interactions** (add e.g. `age×sex`), **scale factors**.
+5. Click **Fit**. Output: a coefficient table (β for linear, **OR** for
+   logistic, **IRR** for Poisson) with 95% CI + p, model-fit stats (R², AIC),
+   and a plain-English summary.
+6. **For ordinal logistic**, check the **Brant test** of the proportional-odds
+   assumption — green = holds, amber = violated (the offending predictors are
+   named; consider a multinomial or partial proportional-odds model).
+
+---
 
 ### 3.8 Models — Survival Advanced
 ![Models · Survival Advanced](docs/manual/img/08-models-survival.png)
 
-- **Get here:** **Models → Survival Advanced**. Left list = method
-  (Kaplan-Meier, Cox PH, Time-horizon HR, Landmark, RMST, Fine-Gray, Recurrent
-  LWYY, **Interval-censored**, E-value).
-- **Common inputs:** **Duration (time)** numeric + **Event (0/1)** + optional
-  **Group**/**Stratify**. For Cox, also tick **predictors**.
-- **Interval-censored** (event known only within a bracket — e.g. recurrence
-  found at a scheduled scan): pick the **lower** and **upper** bound columns
-  (leave the upper blank for still-event-free), optional covariates → Turnbull
-  NPMLE curve + Weibull time-ratio/HR table.
+**How to do it:**
+1. Go to **Models → Survival Advanced**. The left list holds the methods:
+   **Kaplan-Meier, Cox PH, Time-horizon HR, Landmark, RMST, Fine-Gray
+   (competing risks), Recurrent LWYY, Interval-censored, E-value**.
+2. **Common inputs** every method asks for: a numeric **Duration (time)** column
+   and a binary **Event (0/1)** column. Add a **Group** to compare curves, or a
+   **Stratify** variable to stratify the Cox model.
+3. **Kaplan-Meier:** pick Duration + Event + Group → curves with log-rank p.
+4. **Cox PH:** add the **predictors** you want hazard ratios for → coefficient
+   table with HR, 95% CI, p, and the proportional-hazards assumption test.
+5. **Interval-censored** (event only known within a bracket — e.g. recurrence
+   detected at a scheduled scan): pick the **lower** and **upper** bound columns
+   (leave upper blank for still-event-free subjects) + optional covariates →
+   Turnbull NPMLE curve + Weibull time-ratio / HR table.
+6. **Time-horizon HR / Landmark:** restrict the analysis to a fixed follow-up
+   window (e.g. 12-month HR) or a landmark time point — useful for
+   non-proportional hazards.
 
 ### 3.9 PSM — propensity-score matching
 ![PSM tab](docs/manual/img/09-psm.png)
 
-- **Get here:** **PSM** tab.
-- **Steps:** choose the **treatment** (binary), the **covariates** to balance
-  on, and the **outcome** → uSTAT estimates the propensity score, matches
-  treated/control, and reports balance (standardized mean differences, Love
-  plot) plus the matched treatment effect.
+**How to do it:**
+1. Go to the **PSM** tab.
+2. Choose the **Treatment** variable (must be binary 0/1 — encode this in the
+   Data tab first).
+3. Tick the **Covariates** you want to balance on (the confounders).
+4. Choose the **Outcome** (binary or survival). Pick a **caliper** (default
+   0.2 of the logit PS SD is standard) and the **matching ratio** (1:1, 1:2, …).
+5. Click **Run**. uSTAT estimates the propensity score, matches treated↔control,
+   and reports:
+   - **Balance diagnostics** — standardized mean differences before/after, a
+     **Love plot**, and common-support check.
+   - **Matched treatment effect** — the ATT (average treatment effect on the
+     treated) with CI.
+6. **Read it:** if post-match SMDs are all < 0.1, the groups are balanced and
+   the effect estimate is trustworthy. If not, tighten the caliper or add
+   exact-match variables.
+
+---
 
 ### 3.10 IPTW — inverse-probability weighting
 ![IPTW tab](docs/manual/img/10-iptw.png)
 
-- **Get here:** **IPTW** tab.
-- **Steps:** same inputs as PSM (treatment + covariates + outcome) but instead
-  of matching it weights every subject by 1/propensity → reports balance after
-  weighting and the weighted (ATE) effect. Use when you don't want to discard
-  unmatched subjects.
+**How to do it:**
+1. Go to the **IPTW** tab.
+2. Same first three inputs as PSM: **Treatment** (0/1), **Covariates**, **Outcome**.
+3. Pick the **estimand**: **ATE** (average treatment effect, whole population),
+   **ATT** (treated only), or **overlap** (substantive-effect population).
+4. (Optional) **Stabilize** the weights and set **truncation** (e.g. clip at the
+   99th percentile) if the weight distribution has extreme tails.
+5. Click **Run**. uSTAT reports: the propensity model, the weight distribution
+   (effective sample size), balance after weighting, and the weighted effect.
+6. **When to pick IPTW over PSM:** use IPTW when you don't want to discard
+   unmatched subjects, or when you want the ATE rather than the ATT.
+
+---
 
 ### 3.11 Causal+ — modern causal methods
 ![Causal+ tab](docs/manual/img/11-causal.png)
 
-- **Get here:** **Causal+** tab. Methods: **IV/2SLS** (instrument), **Mediation**
-  (treatment→mediator→outcome, ACME/ADE), **Target-trial emulation**,
-  **Difference-in-Differences**, **Regression discontinuity**, **DAG backdoor
-  analysis**.
-- **Steps:** pick the method → assign its specific roles (e.g. IV needs outcome
-  + endogenous exposure + instrument(s) + covariates) → **Run**.
+**How to do it:**
+1. Go to the **Causal+** tab and pick a method from the left list:
+   - **IV / 2SLS** — instrumental variable (needs an instrument that affects
+     exposure but not outcome directly)
+   - **Mediation** — decomposes a total effect into ACME (through the mediator)
+     + ADE (direct), with bootstrap CIs
+   - **Target-trial emulation** — formal emulation of a pragmatic trial
+   - **Difference-in-Differences** — pre/post × treated/control
+   - **Regression discontinuity** — sharp/soft cutoff on a running variable
+   - **DAG backdoor analysis** — paste a graph, get the minimal adjustment set
+2. Assign the method-specific roles. Examples:
+   - **IV/2SLS:** Outcome + Endogenous exposure + Instrument(s) + Covariates
+   - **Mediation:** Outcome + Treatment + Mediator + Covariates
+   - **DiD:** Outcome + Group (0/1) + Time (0/1) + Covariates
+3. Click **Run**. Each method reports its estimate, the identifying assumption,
+   and a sensitivity check where available.
+
+---
 
 ### 3.12 DCA — decision-curve analysis
 ![DCA tab](docs/manual/img/12-dca.png)
 
-- **Get here:** **DCA** tab.
-- **Steps:** provide predicted risks (or predictors uSTAT will model) + the
-  **binary outcome** → net-benefit curve across threshold probabilities vs
-  *treat-all* / *treat-none*. Shows where a model is clinically useful.
+**How to do it:**
+1. Go to the **DCA** tab.
+2. Either provide a column of **predicted risks** directly, or give uSTAT the
+   **predictors** + **binary outcome (0/1)** and it fits a logistic model to
+   derive the risks.
+3. (Optional) Set the **threshold probability range** to scan (default 1–99%).
+4. Click **Compute**. The net-benefit curve plots your model against the
+   *treat-all* and *treat-none* reference strategies across thresholds.
+5. **Read it:** the model is **clinically useful** over a threshold range where
+   its net benefit is higher than both treat-all and treat-none. Use this to
+   justify a prediction model's clinical value beyond AUC.
 
 ### 3.13 Meta — meta-analysis
 ![Meta tab](docs/manual/img/13-meta.png)
 
-- **Get here:** **Meta** tab.
-- **Steps:** supply per-study effect sizes + variances (or 2×2 counts) →
-  random/fixed-effects pooled estimate, **forest plot**, I²/τ² heterogeneity,
-  **subgroup** analysis, **meta-regression**, and **publication-bias** checks
-  (Egger, Begg, funnel, trim-and-fill).
+**How to do it:**
+1. Go to the **Meta** tab.
+2. **Enter one row per study.** For each study provide either:
+   - an **effect estimate + 95% CI** (or + SE), or
+   - a **2×2 table** (`e1, n1, e2, n2`) for OR/RR/RD measures.
+3. Pick the **measure** (OR / RR / RD / SMD / MD). OR/RR/RD are analyzed on the
+   log scale automatically.
+4. Click **Analyze**. You get a random-effects pooled estimate (DerSimonian-Laird
+   by default; switch to PM in options), a **forest plot**, and heterogeneity
+   diagnostics: **I², τ², Q-test**.
+5. **Subgroup analysis:** add a `subgroup` label to each study, then run
+   **Subgroup** to pool within groups and test between-group heterogeneity.
+6. **Meta-regression:** add a numeric `moderator` (e.g. mean age) and run
+   **Regression** to see if it explains the between-study variance.
+7. **Publication bias:** run **Bias** for the Egger test, Begg rank test,
+   funnel plot, and trim-and-fill adjusted estimate.
+
+---
 
 ### 3.14 Missing — audit & imputation
 ![Missing tab](docs/manual/img/14-missing.png)
 
-- **Get here:** **Missing** tab.
-- **Steps:** see the per-variable missingness pattern + mechanism hints, then
-  run **MICE** multiple imputation to produce completed datasets that downstream
-  models can pool (Rubin's rules). Recommend this before regression when data
-  are not missing-completely-at-random.
+**How to do it:**
+1. Go to the **Missing** tab.
+2. The **pattern** view shows a heatmap of which cells are missing per variable
+   and which patterns co-occur, plus per-variable counts and percentages.
+3. Run **Little's MCAR test** — p > 0.05 ⇒ data are consistent with
+   missing-completely-at-random (simple imputation is OK); p < 0.05 ⇒
+   missing-at-random, use MICE.
+4. **MNAR sensitivity** (if you suspect data are missing-not-at-random): run the
+   delta-adjustment / pattern-mixture analysis to see how robust the conclusion
+   is to varying the missingness assumption.
+5. **Impute with MICE:** choose the columns to impute + number of imputations
+   (default 5) → uSTAT produces completed datasets that downstream models pool
+   using **Rubin's rules** (the regression tabs accept MICE imputation in their
+   options).
+6. **Compare strategies** side-by-side: mean / median / MICE / listwise to see
+   how each changes the estimate.
+
+---
 
 ### 3.15 Visual — model visuals, charts, forest builder
 ![Visual tab](docs/manual/img/15-visual.png)
 
-- **Get here:** **Visual** tab. Sub-tabs: **Models & Diagnostics**, **Charts**
-  (custom plots), **Subgroup Bar**, **Forest plot** (publication-ready forest
-  builder — paste rows or load from a model), **Added Predictive Value**
-  (ΔAUC / NRI / IDI for whether a new marker improves a model).
+**How to do it (per sub-tab):**
+1. **Models & Diagnostics** — pick a fitted model (from the Models tab) to view
+   its diagnostic plots: residuals vs fitted, Q-Q, leverage, VIF, coefficient
+   forest.
+2. **Charts** — build a custom plot from scratch: choose **Histogram / Boxplot /
+   Violin / Scatter / Bar / Line**, assign the axes, add a group/color, export PNG.
+3. **Subgroup Bar** — compare a numeric (mean + CI) or percentage outcome across
+   two factors (e.g. mean age by treatment × sex). Great for interaction
+   visualizations.
+4. **Forest plot** — the publication-ready forest builder. Either **paste rows**
+   (label, estimate, CI, weight) directly, or **load from a model** (Cox /
+   logistic / meta). Toggle log vs linear scale, sort by effect or p, add group
+   sub-headings, and run the built-in random-effects meta-analysis for a pooled
+   diamond + I²/τ².
+5. **Added Predictive Value** — compare a base model vs base + new marker:
+   **ΔAUC, NRI, IDI** to decide whether the new marker improves prediction.
+
+---
 
 ### 3.16 Power — power & sample size
 ![Power tab](docs/manual/img/16-power.png)
 
-- **Get here:** **Power** tab (also reachable from the splash screen — *no data
-  needed*).
-- **Steps:** pick the test (**t-test, ANOVA, correlation, proportions,
-  χ², logistic regression, Cox**) → choose **solve for** (sample size / power /
-  minimum detectable effect) → enter the effect size + α + power and the
-  test-specific fields (e.g. logistic needs the odds ratio + event prevalence;
-  Cox needs the hazard ratio + event rate + exposed fraction) → read the result
-  + power curve. Great for protocol/grant sample-size justification.
+**How to do it:**
+1. Go to the **Power** tab (also reachable from the splash screen — **no data
+   upload needed**).
+2. Pick the **test**: t-test, ANOVA, correlation, proportions, χ², logistic
+   regression, or Cox.
+3. Choose **solve for**: **sample size** (given a target power), **power**
+   (given n), or **minimum detectable effect** (given n and power).
+4. Enter the shared inputs: **α** (usually 0.05), **power** (usually 0.80 or
+   0.90), and the **effect size**.
+5. Add the test-specific fields — e.g. logistic needs the OR + event prevalence;
+   Cox needs the HR + event rate + exposed fraction; proportions needs p₁ and p₂.
+6. Read the result + the **power curve** (how power changes with n). Use this for
+   protocol / grant sample-size justification.
 
 ---
 
