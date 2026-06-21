@@ -1,11 +1,12 @@
 import {
   X, BookOpen, FlaskConical, Brain, Settings, ShieldCheck, HelpCircle, Code,
-  CheckCircle2, Info, Target, Activity, LineChart, GitBranch,
+  CheckCircle2, Info, Target, Activity, LineChart, GitBranch, MonitorPlay,
 } from "lucide-react";
 import { useState } from "react";
 
 type TabId =
   | "quickstart"
+  | "tours"
   | "hypothesis"
   | "regression"
   | "causal"
@@ -18,6 +19,7 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
 
   const tabs = [
     { id: "quickstart",  label: "Quick Start",          icon: BookOpen },
+    { id: "tours",       label: "Tab Tours",            icon: MonitorPlay },
     { id: "hypothesis",  label: "Hypothesis Tests",     icon: FlaskConical },
     { id: "regression",  label: "Regression & Survival",icon: LineChart },
     { id: "causal",      label: "Causal Inference",     icon: GitBranch },
@@ -131,6 +133,9 @@ export default function HelpModal({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
             )}
+
+            {/* ────────────────────────────────────── TAB TOURS ──── */}
+            {activeTab === "tours" && <TabTours />}
 
             {/* ─────────────────────────────────── HYPOTHESIS / TESTS ─── */}
             {activeTab === "hypothesis" && (
@@ -509,3 +514,302 @@ function Block({ title, body }: { title: string; body: React.ReactNode }) {
 
 // Silence unused-icon imports (kept in case theming changes need them).
 void Brain;
+
+// ─── Tab Tours: per-app-tab screenshot + step-by-step how-to ──────────
+
+interface TourTab {
+  id: string;
+  label: string;
+  img: string;
+  blurb: string;
+  steps: string[];
+  read?: string;
+}
+
+const TOUR_TABS: TourTab[] = [
+  {
+    id: "data",
+    label: "Data",
+    img: "/manual/01-data.png",
+    blurb: "Load, type, and clean your dataset — the foundation every other tab reads.",
+    steps: [
+      "Upload is automatic — drag your CSV/XLSX/SAV onto the dropzone, or click Browse. The Data tab opens by default.",
+      "Type each variable: in any column header, click the small badge (num / cat / txt / date) to cycle to the correct type. Do this for every column.",
+      "Add labels (optional): click a column name → Dictionary to set a label and value labels (0 → No, 1 → Yes).",
+      "Check missingness: each header shows a red badge like '103✕ · 13%'. Click ⚠ Missing to see only rows with gaps.",
+      "Clean if needed: use Select Cases (rule-based row filter) or per-column Filter. +Row/+Column to add; double-click a cell to edit in place.",
+    ],
+    read: "Type and clean here first — a mistyped variable (e.g. a number as text) silently disappears from downstream analyses.",
+  },
+  {
+    id: "summary",
+    label: "Summary",
+    img: "/manual/02-summary.png",
+    blurb: "Descriptive statistics and distribution plots. Use it to judge normality before picking a test.",
+    steps: [
+      "Go to Summary → Descriptive (Weighted sub-tab for survey weights).",
+      "Pick one numeric variable from the Variable dropdown.",
+      "Read the stat table: n, mean, SD, median, IQR, range, skew, kurtosis, Shapiro-Wilk p.",
+      "Switch the plot with the buttons above: Histogram, Boxplot, Violin, Q-Q.",
+      "Optional: choose a categorical Group by to split distributions side-by-side.",
+    ],
+    read: "Use the Q-Q plot to choose your test: points on the line ≈ normal → parametric (t-test/ANOVA); strong S-curve → non-parametric (Mann-Whitney).",
+  },
+  {
+    id: "table1",
+    label: "Table",
+    img: "/manual/03-table1.png",
+    blurb: 'Clinical baseline "Table 1" by group, with auto-selected summary + test per row.',
+    steps: [
+      "Go to the Table tab.",
+      "Pick the Grouping variable (e.g. treatment arm). Leave blank for a single-arm table.",
+      "Tick the baseline variables you want in the left list.",
+      "uSTAT auto-selects mean±SD / median[IQR] / n(%) and the correct test (t / Mann-Whitney / χ² / Fisher) per row, with a p-value column.",
+      "Click Export for a publication-ready Word/CSV table.",
+    ],
+  },
+  {
+    id: "tests",
+    label: "Tests",
+    img: "/manual/04-tests.png",
+    blurb: "Classic hypothesis tests: t, ANOVA, Mann-Whitney, Kruskal, χ², Fisher, McNemar, reliability, Bayesian.",
+    steps: [
+      "Go to the Tests tab and pick the right sub-tab (Hypothesis / Repeated Measures / Categorical / Reliability / Non-Inferiority / Gatekeeping / Factor / Bayesian).",
+      "In the left list, click the test name you want.",
+      "In the form, assign the variables: Outcome (+ Group / Paired column / Strata as needed).",
+      "Read the When-to-use / Assumptions / How-to-read card on the right.",
+      "Click Run → statistic, p-value, effect size, plain-English conclusion.",
+    ],
+    read: "Parametric vs non-parametric: check the Q-Q in Summary first. Normal → t/ANOVA; not normal → Mann-Whitney/Kruskal.",
+  },
+  {
+    id: "correlation",
+    label: "Correlation",
+    img: "/manual/05-correlation.png",
+    blurb: "Pearson / Spearman / Kendall correlation matrix with p-values and heatmap.",
+    steps: [
+      "Go to the Correlation tab.",
+      "Tick ≥2 numeric or ordinal variables in the left list.",
+      "Pick the method: Pearson (linear, normal), Spearman (monotonic/ranked), or Kendall (robust, small samples).",
+      "Click Compute → coefficient matrix with p-values + color-coded heatmap.",
+      "Click any cell for the scatter with a fitted line.",
+    ],
+    read: "|r| < 0.3 weak, 0.3–0.6 moderate, > 0.6 strong. p < 0.05 says it's non-zero, not that it's strong.",
+  },
+  {
+    id: "roc",
+    label: "ROC",
+    img: "/manual/06-roc.png",
+    blurb: "ROC curve, AUC, DeLong comparison, combined multi-marker model.",
+    steps: [
+      "Go to the ROC tab.",
+      "Choose a numeric Score/marker and a binary Outcome (0/1).",
+      "Click Compute → AUC with 95% CI, optimal cutoff (Youden J), sensitivity/specificity.",
+      "Multi-curve: tick several scores to overlay. DeLong tests whether two AUCs differ.",
+      "Combined model: fits a logistic combination of markers → combined AUC.",
+    ],
+    read: "AUC 0.5 = none, 0.7 = acceptable, 0.8 = good, 0.9 = excellent. If CI crosses 0.5, the marker is not informative.",
+  },
+  {
+    id: "models-reg",
+    label: "Models · Regression",
+    img: "/manual/07-models-regression.png",
+    blurb: "Linear, logistic, Firth, Poisson, gamma, ordinal, polynomial — full coefficient tables.",
+    steps: [
+      "Go to Models → Regression.",
+      "Pick the model matching your outcome (Linear / Logistic / Firth / Poisson / NegBinom / Gamma / Ordinal).",
+      "Choose the Outcome, then tick the Predictors.",
+      "Optional: Robust SE, imputation, interactions, scale factors.",
+      "Click Fit → coefficient table (β / OR / IRR) with 95% CI + p, model-fit (R², AIC), plain-English summary.",
+    ],
+    read: "Ordinal logistic: check the Brant test — green = proportional-odds holds, amber = violated (offending predictors named).",
+  },
+  {
+    id: "models-surv",
+    label: "Models · Survival",
+    img: "/manual/08-models-survival.png",
+    blurb: "Kaplan-Meier, Cox PH, time-horizon HR, Fine-Gray, RMST, interval-censored.",
+    steps: [
+      "Go to Models → Survival Advanced. Left list holds the methods.",
+      "Common inputs: numeric Duration (time) + binary Event (0/1) + optional Group/Stratify.",
+      "Kaplan-Meier: Duration + Event + Group → curves with log-rank p.",
+      "Cox PH: add predictors → HR table with 95% CI + p + PH assumption test.",
+      "Interval-censored: pick lower + upper bound columns + covariates → Turnbull curve + Weibull HR.",
+    ],
+  },
+  {
+    id: "psm",
+    label: "PSM",
+    img: "/manual/09-psm.png",
+    blurb: "Propensity-score matching: balance confounders, estimate the matched treatment effect.",
+    steps: [
+      "Go to the PSM tab.",
+      "Choose the Treatment variable (binary 0/1).",
+      "Tick the Covariates to balance on.",
+      "Choose the Outcome + caliper (0.2 default) + matching ratio.",
+      "Run → balance diagnostics (SMDs, Love plot) + matched ATT with CI.",
+    ],
+    read: "Post-match SMDs all < 0.1 → balanced → estimate is trustworthy. Otherwise tighten the caliper.",
+  },
+  {
+    id: "iptw",
+    label: "IPTW",
+    img: "/manual/10-iptw.png",
+    blurb: "Inverse-probability-of-treatment weighting — the ATE without discarding subjects.",
+    steps: [
+      "Go to the IPTW tab. Same inputs as PSM: Treatment + Covariates + Outcome.",
+      "Pick the estimand: ATE (whole population), ATT (treated only), or overlap.",
+      "Optional: Stabilize weights + truncation if tails are extreme.",
+      "Run → propensity model, weight distribution (ESS), balance after weighting, weighted effect.",
+    ],
+    read: "Use IPTW over PSM when you don't want to discard unmatched subjects, or want the ATE rather than the ATT.",
+  },
+  {
+    id: "causal",
+    label: "Causal+",
+    img: "/manual/11-causal.png",
+    blurb: "IV/2SLS, mediation, target-trial emulation, DiD, RDD, DAG backdoor.",
+    steps: [
+      "Go to the Causal+ tab and pick a method: IV/2SLS, Mediation, Target-trial, DiD, RDD, DAG.",
+      "Assign the method-specific roles (e.g. IV needs outcome + endogenous exposure + instrument(s); Mediation needs treatment + mediator + outcome).",
+      "Click Run → estimate, identifying assumption, sensitivity check.",
+    ],
+  },
+  {
+    id: "dca",
+    label: "DCA",
+    img: "/manual/12-dca.png",
+    blurb: "Decision-curve analysis — net benefit across threshold probabilities.",
+    steps: [
+      "Go to the DCA tab.",
+      "Provide predicted risks directly, or give predictors + binary outcome (uSTAT fits logistic).",
+      "Optional: set threshold probability range (default 1–99%).",
+      "Compute → net-benefit curve vs treat-all / treat-none.",
+    ],
+    read: "The model is clinically useful over a threshold range where its net benefit beats both treat-all and treat-none.",
+  },
+  {
+    id: "meta",
+    label: "Meta",
+    img: "/manual/13-meta.png",
+    blurb: "Random/fixed-effects meta-analysis, forest plot, subgroup, meta-regression, bias.",
+    steps: [
+      "Go to the Meta tab.",
+      "Enter one row per study: effect + 95% CI (or +SE), or a 2×2 table (e1,n1,e2,n2).",
+      "Pick the measure (OR / RR / RD / SMD / MD).",
+      "Analyze → pooled estimate (DerSimonian-Laird), forest plot, I²/τ²/Q.",
+      "Subgroup: add a subgroup label per study. Regression: add a numeric moderator. Bias: Egger, Begg, funnel, trim-and-fill.",
+    ],
+  },
+  {
+    id: "missing",
+    label: "Missing",
+    img: "/manual/14-missing.png",
+    blurb: "Missingness audit, Little's MCAR test, MICE imputation, MNAR sensitivity.",
+    steps: [
+      "Go to the Missing tab.",
+      "The pattern view shows a heatmap of which cells are missing + per-variable counts.",
+      "Run Little's MCAR test: p > 0.05 → MCAR (simple imputation OK); p < 0.05 → MAR (use MICE).",
+      "Impute with MICE: choose columns + number of imputations (default 5). Downstream models pool via Rubin's rules.",
+      "Compare strategies side-by-side: mean / median / MICE / listwise.",
+    ],
+  },
+  {
+    id: "visual",
+    label: "Visual",
+    img: "/manual/15-visual.png",
+    blurb: "Model diagnostics, custom charts, subgroup bar, forest builder, added predictive value.",
+    steps: [
+      "Models & Diagnostics — pick a fitted model → residual, Q-Q, leverage, VIF plots.",
+      "Charts — build a custom plot (Histogram/Box/Violin/Scatter/Bar/Line) from scratch.",
+      "Subgroup Bar — compare a mean+CI or % outcome across two factors.",
+      "Forest plot — paste rows (label, estimate, CI, weight) or load from a model. Toggle log/linear, sort, add group sub-headings, run built-in meta-analysis for a pooled diamond.",
+      "Added Predictive Value — base vs base+marker: ΔAUC, NRI, IDI.",
+    ],
+  },
+  {
+    id: "power",
+    label: "Power",
+    img: "/manual/16-power.png",
+    blurb: "Power / sample-size calculator (no data upload needed).",
+    steps: [
+      "Go to the Power tab (also on the splash screen — no data needed).",
+      "Pick the test: t-test, ANOVA, correlation, proportions, χ², logistic, Cox.",
+      "Choose solve for: sample size / power / minimum detectable effect.",
+      "Enter α, power, effect size + test-specific fields (logistic: OR + event prevalence; Cox: HR + event rate + exposed fraction).",
+      "Read the result + power curve (how power changes with n).",
+    ],
+    read: "Use this for protocol / grant sample-size justification.",
+  },
+];
+
+function TabTours() {
+  const [activeTour, setActiveTour] = useState(TOUR_TABS[0].id);
+  const tour = TOUR_TABS.find((t) => t.id === activeTour) ?? TOUR_TABS[0];
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="border-b pb-2 mb-3">
+        <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          🖼 Tab Tours — screenshot + how-to for every tab
+        </h3>
+        <p className="text-[10px] text-slate-500 mt-1">
+          Pick a tab on the left, see its screenshot and the exact click-by-click steps.
+        </p>
+      </div>
+      <div className="flex gap-3 flex-1 min-h-0">
+        {/* Left: tab selector */}
+        <div className="w-32 flex-shrink-0 overflow-y-auto pr-1 space-y-0.5">
+          {TOUR_TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTour(t.id)}
+              className={`w-full text-left text-[11px] px-2 py-1.5 rounded-lg transition-colors ${
+                activeTour === t.id
+                  ? "bg-indigo-600 text-white font-semibold"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        {/* Right: screenshot + steps */}
+        <div className="flex-1 min-w-0 overflow-y-auto pr-1">
+          <div key={tour.id} className="space-y-3">
+            <div>
+              <p className="text-[11px] text-slate-600">{tour.blurb}</p>
+            </div>
+            <img
+              src={tour.img}
+              alt={`${tour.label} tab`}
+              className="w-full rounded-lg border border-slate-200 shadow-sm"
+              loading="lazy"
+            />
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-600">
+                How to do it
+              </p>
+              {tour.steps.map((step, i) => (
+                <div key={i} className="flex gap-2">
+                  <div className="flex-shrink-0 w-5 h-5 rounded-full bg-indigo-600 text-white text-[9px] font-bold flex items-center justify-center">
+                    {i + 1}
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed">{step}</p>
+                </div>
+              ))}
+            </div>
+            {tour.read && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 mt-2">
+                <p className="text-[10px] text-amber-800 leading-relaxed">
+                  <span className="font-bold">💡 Read it: </span>
+                  {tour.read}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
