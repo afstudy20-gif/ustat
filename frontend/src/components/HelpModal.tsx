@@ -668,11 +668,22 @@ const TOUR_TABS: TourTab[] = [
     id: "causal",
     label: "Causal+",
     img: "/manual/11-causal.png",
-    blurb: "IV/2SLS, mediation, target-trial emulation, DiD, RDD, DAG backdoor.",
+    blurb: "IV/2SLS, mediation, SEM / Path analysis, target-trial emulation, DiD, RDD, DAG backdoor.",
     steps: [
-      "Go to the Causal+ tab and pick a method: IV/2SLS, Mediation, Target-trial, DiD, RDD, DAG.",
-      "Assign the method-specific roles (e.g. IV needs outcome + endogenous exposure + instrument(s); Mediation needs treatment + mediator + outcome).",
+      "Go to the Causal+ tab and pick a method: IV/2SLS, Mediation, SEM / Path analysis, Target-trial, DiD, RDD, DAG.",
+      "Assign the method-specific roles (e.g. IV needs outcome + endogenous exposure + instrument(s); Mediation needs treatment + mediator + outcome; SEM needs ≥1 treatments + mediators + outcomes).",
       "Click Run → estimate, identifying assumption, sensitivity check.",
+    ],
+  },
+  {
+    id: "sem",
+    label: "SEM / Path analysis",
+    img: "/manual/11-causal.png", // TODO: SEM-specific screenshot (orchestrator will swap)
+    blurb: "SEM / path analysis: multi-treatment, parallel or serial mediators, multi-outcome; lavaan models + bootstrap CIs + fit indices.",
+    steps: [
+      "Go to Causal+ → SEM / Path analysis. Pick ≥1 Treatments, ≥1 Mediators (enable Serial chain for chains), ≥1 continuous Outcomes (+ optional covariates).",
+      "Set bootstrap (default 5000) or paste custom lavaan spec in Advanced. Run.",
+      "Inspect indirect effects table (95% bootstrap CI excluding 0 = significant); check fit: CFI/TLI ≥0.95, RMSEA ≤0.06, SRMR ≤0.08.",
     ],
   },
   {

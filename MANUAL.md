@@ -37,7 +37,7 @@ After the user uploads a file, the top navigation bar shows these **tabs**
 | **Models** | Regression · Survival Advanced · Restricted Cubic Spline · Machine Learning · Time Series · Validation | Regression, survival, ML, forecasting, validation |
 | **PSM** | — | Propensity-score matching |
 | **IPTW** | — | Inverse-probability-of-treatment weighting |
-| **Causal+** | — | IV/2SLS, mediation, target trial, DiD, RDD, DAG |
+| **Causal+** | — | IV/2SLS, mediation, SEM / Path analysis, target trial, DiD, RDD, DAG |
 | **DCA** | — | Decision-curve analysis (net benefit) |
 | **Meta** | — | Meta-analysis, subgroup, meta-regression, publication bias |
 | **Missing** | — | Missing-data audit + multiple imputation (MICE) |
@@ -143,6 +143,7 @@ the Data tab by clicking a column's type badge or via the Dictionary modal.)*
 | IPTW (inverse-probability weighting) | IPTW | treatment cat + covariates + outcome |
 | Instrumental variable (2SLS) | Causal+ | outcome + endogenous + instrument(s) + covariates |
 | Causal mediation (ACME/ADE) | Causal+ | treatment + mediator + outcome |
+| SEM / Path analysis (multi-Y, parallel/serial) | Causal+ | ≥1 treatment + ≥1 mediator + ≥1 outcome (+covariates) |
 | Target-trial emulation | Causal+ | eligibility + treatment + outcome |
 | Difference-in-Differences | Causal+ | outcome + time + group |
 | Regression discontinuity (RDD) | Causal+ | outcome + running var + cutoff |
@@ -389,6 +390,7 @@ disappears from downstream analyses."
      exposure but not outcome directly)
    - **Mediation** — decomposes a total effect into ACME (through the mediator)
      + ADE (direct), with bootstrap CIs
+   - **SEM / Path analysis** — multi-treatment, multi-mediator (parallel or serial chain), multi-outcome; lavaan-style models, bootstrap CIs on indirects, global fit (CFI/TLI/RMSEA/SRMR)
    - **Target-trial emulation** — formal emulation of a pragmatic trial
    - **Difference-in-Differences** — pre/post × treated/control
    - **Regression discontinuity** — sharp/soft cutoff on a running variable
@@ -399,6 +401,29 @@ disappears from downstream analyses."
    - **DiD:** Outcome + Group (0/1) + Time (0/1) + Covariates
 3. Click **Run**. Each method reports its estimate, the identifying assumption,
    and a sensitivity check where available.
+
+**SEM / Path analysis (new tab inside Causal+):**
+
+Use when you need multiple outcomes, multiple parallel mediators, serial mediator chains
+(M1 → M2 → Y), or multiple treatments in one model (Hayes PROCESS 4/6/80/81 and beyond).
+The single-mediator / single-outcome case is still simpler in the dedicated **Mediation** tab.
+
+**How to do it (step by step):**
+1. Go to **Causal+** and select **SEM / Path analysis** from the left list.
+2. Pick **Treatments** (multi-select; ≥1 required).
+3. Pick **Mediators** (multi-select; ≥1 required). If ≥2 mediators and you want a
+   serial chain (M1→M2→…→Y) rather than all parallel, tick **Serial chain**.
+4. Pick **Outcomes** (multi-select; ≥1 required; continuous variables).
+5. (Optional) Pick **Covariates** to adjust for.
+6. Set **Bootstrap resamples** (default 5000 = PROCESS standard; allowed 100–20000).
+7. (Advanced) If desired, paste a custom lavaan model string into the textarea
+   — this completely overrides the auto-built syntax.
+8. Click **Run**.
+9. Read the **indirect effects table**: a 95% bootstrap CI that does not contain
+   zero means the indirect (mediated) effect is significant.
+10. Check the **fit indices block**: CFI / TLI ≥ 0.95, RMSEA ≤ 0.06 and SRMR ≤ 0.08
+    together indicate good global model fit. Also review the path coefficients,
+    direct effects, total effects, and the echoed lavaan specification.
 
 ---
 
