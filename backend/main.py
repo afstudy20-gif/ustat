@@ -17,7 +17,7 @@ from routers import (
     pub_tables, categorical, agreement, reliability, missing_data, decision_curve,
     model_compare, diagnostics, model_diagnostics, pub_export, nomogram,
     survival_advanced, article_parser, code_runner, ml, timeseries, meta,
-    multiplicity, factor, bayesian, causal
+    multiplicity, factor, bayesian, causal, causal_sem
 )
 from services import store
 
@@ -97,6 +97,7 @@ app.include_router(multiplicity.router, prefix="/api/multiplicity", tags=["multi
 app.include_router(factor.router, prefix="/api/factor", tags=["factor"])
 app.include_router(bayesian.router, prefix="/api/bayesian", tags=["bayesian"])
 app.include_router(causal.router, prefix="/api/causal", tags=["causal"])
+app.include_router(causal_sem.router, prefix="/api/causal", tags=["causal"])
 
 
 @app.get("/.well-known/security.txt", response_class=PlainTextResponse)
