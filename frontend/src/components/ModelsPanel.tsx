@@ -284,6 +284,7 @@ export default function ModelsPanel() {
           <h3 className="text-sm font-semibold text-gray-700">Model</h3>
           {([
             ["linear",   "Linear Regression",       "Predict a continuous outcome (e.g. blood pressure) from one or more predictors. Output: β coefficients, R², p-values."],
+            ["multi_outcome", "Multi-outcome regression", "Simultaneous linear regression of ≥2 continuous outcomes on shared predictors/covariates. Produces consolidated table with B, SE, β, 95% CI, p per outcome (APA-style)."],
             ["logistic", "Logistic Regression",      "Predict a binary outcome (0/1, yes/no) — outputs Odds Ratios showing how each predictor changes the odds of the event."],
             ["firth",    "Firth Logistic (penalized)", "Bias-corrected logistic regression (Firth 1993). Use when standard logistic fails or returns infinite ORs from rare events / separation. Same output shape as Logistic but with Jeffreys-prior penalty."],
             ["ortable",  "OR Table (Uni + Multi)",   "Run univariate logistic regression for each predictor separately, then all significant ones together in a multivariate model. Standard for clinical papers."],
@@ -291,7 +292,6 @@ export default function ModelsPanel() {
             ["ordinal",  "Ordinal Logistic (proportional odds)", "For an ordered categorical outcome with ≥3 levels (NYHA, Killip, none/mild/severe). Proportional-odds model: one OR per predictor shared across the cumulative thresholds. Mark the outcome 'Ordered Categorical' in the Data tab."],
             ["hrtable",  "HR Table (Uni + Multi)",   "Cox survival version of the OR table (publication Table 3). Each predictor's univariable HR, its parsimonious-model HR (a subset you tick), and its fully-adjusted HR — side by side. Needs a duration + binary event column."],
             ["poisson",  "Poisson Regression",       "Count outcome model (e.g. number of events). Outputs Incidence Rate Ratios (IRR = eβ). Use when the outcome is a non-negative integer (event counts, re-admissions, etc.)."],
-            ["multi_outcome", "Multi-outcome regression", "Simultaneous linear regression of ≥2 continuous outcomes on shared predictors/covariates. Produces consolidated table with B, SE, β, 95% CI, p per outcome (APA-style)."],
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
               <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); setSelectedCoefIdx(null); }} className="accent-indigo-500 mt-0.5" />
