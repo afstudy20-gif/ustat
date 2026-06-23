@@ -217,6 +217,7 @@ const BASE_LAYOUT = {
   xaxis: { gridcolor: "#e5e7eb", zerolinecolor: "#d1d5db" },
   yaxis: { gridcolor: "#e5e7eb", zerolinecolor: "#d1d5db" },
 };
+const SUMMARY_CHART_HEIGHT = 360;
 
 // ── Main chart for numeric columns ──────────────────────────────────────────
 
@@ -356,7 +357,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummar
         <div className="relative">
         <TitledPlot plotRefOut={histRef} storageKey="desc:hist"
           data={histData}
-          layout={{ ...BASE_LAYOUT, autosize: true, bargap: 0.02,
+          layout={{ ...BASE_LAYOUT, autosize: true, height: SUMMARY_CHART_HEIGHT, bargap: 0.02,
             xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Value" } },
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Count" } },
           }}
@@ -376,6 +377,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummar
           layout={{
             ...BASE_LAYOUT,
             autosize: true,
+            height: SUMMARY_CHART_HEIGHT,
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Value" } },
             xaxis: { ...BASE_LAYOUT.xaxis, showticklabels: false, zeroline: false, showgrid: false },
             showlegend: false,
@@ -453,6 +455,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummar
           layout={{
             ...BASE_LAYOUT,
             autosize: true,
+            height: SUMMARY_CHART_HEIGHT,
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Value" } },
             xaxis: { ...BASE_LAYOUT.xaxis, showticklabels: false, zeroline: false, showgrid: false },
             showlegend: false,
@@ -481,7 +484,7 @@ function NumericView({ summary, loadSummary, selected }: { summary: ColumnSummar
         <div className="relative">
         <TitledPlot plotRefOut={qqRef} storageKey="desc:qq"
           data={qqData}
-          layout={{ ...BASE_LAYOUT, autosize: true,
+          layout={{ ...BASE_LAYOUT, autosize: true, height: SUMMARY_CHART_HEIGHT,
             xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Theoretical quantiles" } },
             yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: "Sample quantiles" } },
           }}
@@ -538,6 +541,7 @@ function CategoricalView({ summary }: { summary: ColumnSummary }) {
           paper_bgcolor: "transparent", plot_bgcolor: "transparent",
           font: { color: "#374151", size: 11 }, margin: { t: 10, r: 160, b: 10, l: 10 },
           autosize: true,
+          height: SUMMARY_CHART_HEIGHT,
           legend: { font: { color: "#374151" }, bgcolor: "transparent" },
         }}
         config={{ responsive: true, displaylogo: false, displayModeBar: false }}
@@ -548,7 +552,7 @@ function CategoricalView({ summary }: { summary: ColumnSummary }) {
       />
       <TitledPlot plotRefOut={barRef} storageKey="desc:cat:bar"
         data={barData}
-        layout={{ ...BASE_LAYOUT, autosize: true,
+        layout={{ ...BASE_LAYOUT, autosize: true, height: SUMMARY_CHART_HEIGHT,
           xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: "Count" } },
           yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, automargin: true },
           margin: { ...BASE_LAYOUT.margin, l: 90 },
@@ -781,6 +785,7 @@ function ScatterView({
               layout={{
                 ...BASE_LAYOUT,
                 autosize: true,
+                height: SUMMARY_CHART_HEIGHT,
                 xaxis: { ...BASE_LAYOUT.xaxis, showgrid: showGrid, title: { text: xCol } },
                 yaxis: { ...BASE_LAYOUT.yaxis, showgrid: showGrid, title: { text: yCol } },
                 legend: { font: { color: "#374151", size: 11 }, bgcolor: "rgba(249,250,251,0.9)", bordercolor: "#e5e7eb", borderwidth: 1 },
