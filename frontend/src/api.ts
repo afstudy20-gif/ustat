@@ -39,6 +39,7 @@ export const runSubgroupBar = (data: object) => api.post("/api/charts/subgroup_b
 
 
 export const runLinear   = (data: object) => api.post("/api/models/linear", data);
+export const runMultiOutcomeRegression = (data: object) => api.post("/api/models/multi_outcome_regression", data);
 export const runRCS      = (data: object) => api.post("/api/models/rcs", data);
 export const runLogistic = (data: object) => api.post("/api/models/logistic", data);
 export const runFirthLogistic = (data: object) => api.post("/api/models/firth_logistic", data);
