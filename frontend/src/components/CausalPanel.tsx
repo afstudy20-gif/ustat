@@ -221,6 +221,7 @@ function MediationTab() {
   const [treatment, setTreatment] = useState("");
   const [mediator, setMediator] = useState("");
   const [covariates, setCovariates] = useState<string[]>([]);
+  const [bootstrap, setBootstrap] = useState<number>(5000);
   const [result, setResult] = useState<MediationResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -228,7 +229,8 @@ function MediationTab() {
   const run = async () => {
     setLoading(true); setError(null); setResult(null);
     try {
-      const r = await runMediation({ session_id: sid, outcome, treatment, mediator, covariates, bootstrap: 1000 });
+      const reps = Math.max(100, Math.min(20000, Math.round(bootstrap || 0)));
+      const r = await runMediation({ session_id: sid, outcome, treatment, mediator, covariates, bootstrap: reps });
       setResult(r.data as MediationResult);
     } catch (e: unknown) {
       setError(getErrorDetail(e, "Mediation analysis failed."));
@@ -278,6 +280,16 @@ function MediationTab() {
           </div>
           <MultiPick label="Covariates (optional)" accent="accent-indigo-500" columns={cols}
             exclude={[outcome, treatment, mediator]} value={covariates} onChange={setCovariates} />
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Bootstrap resamples</label>
+            <input
+              type="number" min={100} max={20000} step={500}
+              className="input w-full"
+              value={bootstrap}
+              onChange={(e) => setBootstrap(Number(e.target.value))}
+            />
+            <p className="text-[10px] text-gray-400 mt-1">PROCESS standard: 5000. Range 100–20000.</p>
+          </div>
           <button className="btn-primary w-full" onClick={run} disabled={!canRun}>
             {loading ? "Running…" : "Run mediation"}
           </button>
