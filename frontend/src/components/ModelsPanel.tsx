@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { useStore } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { runLinear, runLogistic, runFirthLogistic, runKM, runCox, runLogisticTable, runPoisson, runCoxUniMulti, runOrdinal, runMultiOutcomeRegression } from "../api";
@@ -7,7 +7,6 @@ import ResultExporter from "./ResultExporter";
 import { fmtP, pCellTitle } from "../lib/format";
 import { MissingGuard, type ImputationStrategy } from "./MissingGuard";
 import { PALETTES, type ColMeta } from "../store";
-import { useResizableRightCol } from "../hooks/useResizableRightCol";
 import { CoefTable, ORTable, ForestPlot, PredictionPanel, CoefDetailPanel, ModelSummaryTable } from "./models/resultViews";
 import CoxHRTable from "./models/CoxHRTable";
 import { useModelData } from "./models/useModelData";
@@ -109,8 +108,6 @@ function SparklineMini({ data, type }: { data: number[]; type: string }) {
 
 export default function ModelsPanel() {
   const session  = useStore((s) => s.session);
-  const { w: rightColW, onDragStart: onResizeStart, onReset: onResizeReset } =
-    useResizableRightCol("ModelsPanel.result", 480);
 
   const { numCols: numColsRaw, allCols: allColsRaw, binaryCols: binaryColsRaw, missingCounts, sparklines } = useModelData(session);
 
@@ -819,22 +816,9 @@ export default function ModelsPanel() {
           ) : isMultiOutcome ? (
             <MultiOutcomeResult result={result} standardize={moStandardize} />
           ) : (
-          <div
-            className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_var(--right-col)] gap-4 auto-rows-min items-start xl:grid-flow-dense relative"
-            style={{ ["--right-col" as string]: `${rightColW}px` } as CSSProperties}
-          >
-            {/* Draggable column divider — desktop only */}
-            <div
-              role="separator"
-              aria-orientation="vertical"
-              title="Drag: middle / right column width · Double-click: reset"
-              onPointerDown={onResizeStart}
-              onDoubleClick={onResizeReset}
-              className="hidden xl:block absolute top-0 bottom-0 w-1.5 rounded-full bg-gray-300/60 hover:bg-indigo-400/80 cursor-col-resize z-20 transition-colors"
-              style={{ right: `calc(${rightColW}px + 5px)` }}
-            />
+          <div className="space-y-4">
             {/* Summary cards */}
-            <div className="panel xl:col-start-2">
+            <div className="panel">
               <h4 className="font-semibold text-gray-900 mb-3">{result.model}</h4>
               <div className="grid grid-cols-3 gap-3">
                 {[
@@ -945,7 +929,7 @@ export default function ModelsPanel() {
 
             {/* Coefficients table + detail panel */}
             {result.coefficients && (
-              <div className="panel xl:col-start-2">
+              <div className="panel">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="font-semibold text-gray-900">
                     {model === "cox" ? "Coefficients (Hazard Ratios)" : (model === "logistic" || model === "firth" || model === "ordinal") ? "Coefficients (Odds Ratios)" : model === "poisson" ? "Coefficients (Incidence Rate Ratios)" : "Coefficients"}
@@ -995,24 +979,9 @@ export default function ModelsPanel() {
               </div>
             )}
 
-            {/* Forest plot — logistic or cox */}
-            {result.coefficients && (model === "logistic" || model === "firth" || model === "cox" || model === "ordinal") &&
-              result.coefficients.filter((c) => c.variable !== "const").length > 0 && (
-              <div className="panel xl:col-start-1">
-                <h4 className="font-semibold text-gray-900 mb-2">
-                  Forest Plot
-                  <Tip text="Each row shows one predictor. The square is the point estimate (OR or HR); the horizontal line is the 95% Confidence Interval. If the CI crosses 1 (the vertical dashed line), the effect is not statistically significant. Larger squares = more precise estimate." wide />
-                  <span className="ml-2 text-xs font-normal text-gray-400">
-                    {model === "cox" ? "HR" : "OR"} with 95% CI — colored = p&lt;0.05, square size = precision
-                  </span>
-                </h4>
-                <ForestPlot result={result} modelType={model} outcome={result.outcome} />
-              </div>
-            )}
-
             {/* Results text for all regression models */}
             {result.result_text && !result.table && !isMultiOutcome && (
-              <div className="panel xl:col-start-2">
+              <div className="panel">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
                   <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
@@ -1023,7 +992,7 @@ export default function ModelsPanel() {
 
             {/* OR Table (Uni + Multi) */}
             {result.table && (
-              <div className="panel xl:col-start-2">
+              <div className="panel">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Univariate &amp; Multivariate OR Table
                   <Tip text="Univariate: each predictor tested alone against the outcome. Multivariate: all selected predictors tested together, adjusting for each other. Compare both columns — a variable that is significant univariately but not multivariately may be confounded by another predictor." wide />
@@ -1040,7 +1009,7 @@ export default function ModelsPanel() {
 
             {/* SPSS-style model stats for OR Table multivariate model */}
             {result.model_stats && (
-              <div className="panel xl:col-start-2">
+              <div className="panel">
                 <h4 className="font-semibold text-gray-900 mb-2">Multivariate Model Summary</h4>
                 <ModelSummaryTable s={result.model_stats} />
               </div>
@@ -1048,7 +1017,7 @@ export default function ModelsPanel() {
 
             {/* Auto-generated results text */}
             {result.result_text && !isMultiOutcome && (
-              <div className="panel xl:col-start-2">
+              <div className="panel">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
                   <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
@@ -1057,9 +1026,24 @@ export default function ModelsPanel() {
               </div>
             )}
 
-            {/* Forest plot — OR table */}
+            {/* Forest plot — logistic / firth / cox / ordinal (rendered after tables) */}
+            {result.coefficients && (model === "logistic" || model === "firth" || model === "cox" || model === "ordinal") &&
+              result.coefficients.filter((c) => c.variable !== "const").length > 0 && (
+              <div className="panel">
+                <h4 className="font-semibold text-gray-900 mb-2">
+                  Forest Plot
+                  <Tip text="Each row shows one predictor. The square is the point estimate (OR or HR); the horizontal line is the 95% Confidence Interval. If the CI crosses 1 (the vertical dashed line), the effect is not statistically significant. Larger squares = more precise estimate." wide />
+                  <span className="ml-2 text-xs font-normal text-gray-400">
+                    {model === "cox" ? "HR" : "OR"} with 95% CI — colored = p&lt;0.05, square size = precision
+                  </span>
+                </h4>
+                <ForestPlot result={result} modelType={model} outcome={result.outcome} />
+              </div>
+            )}
+
+            {/* Forest plot — OR table (rendered after tables) */}
             {result.table && result.table.length > 0 && (
-              <div className="panel xl:col-start-1">
+              <div className="panel">
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot
                   <span className="ml-2 text-xs font-normal text-gray-400">
