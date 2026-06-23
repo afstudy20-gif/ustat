@@ -1281,18 +1281,26 @@ export default function DescriptivePanel() {
                   </div>
                 </div>
 
-                {/* Stats strip (numeric) */}
+                {/* Stats strip (numeric) — inline single-line for max vertical space */}
                 {summary.type === "numeric" && (
-                  <div className="flex gap-2 px-4 py-2 border-b border-gray-200 overflow-x-auto flex-shrink-0">
-                    <StatBadge label="Mean" value={fmt(summary.mean)} />
-                    <StatBadge label="SD" value={fmt(summary.std)} />
-                    <StatBadge label="Median" value={fmt(summary.median)} />
-                    <StatBadge label="Q1" value={fmt(summary.q1)} />
-                    <StatBadge label="Q3" value={fmt(summary.q3)} />
-                    <StatBadge label="IQR" value={fmt(summary.iqr)} />
-                    <StatBadge label="Min" value={fmt(summary.min)} />
-                    <StatBadge label="Max" value={fmt(summary.max)} />
-                    <StatBadge label="Skew" value={fmt(summary.skewness)} />
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-4 py-1.5 border-b border-gray-200 text-xs flex-shrink-0">
+                    {[
+                      ["Mean", fmt(summary.mean)],
+                      ["SD", fmt(summary.std)],
+                      ["Median", fmt(summary.median)],
+                      ["Q1", fmt(summary.q1)],
+                      ["Q3", fmt(summary.q3)],
+                      ["IQR", fmt(summary.iqr)],
+                      ["Min", fmt(summary.min)],
+                      ["Max", fmt(summary.max)],
+                      ["Skew", fmt(summary.skewness)],
+                    ].map(([k, v], i) => (
+                      <span key={k as string} className="whitespace-nowrap">
+                        {i > 0 && <span className="text-gray-300 mr-3">·</span>}
+                        <span className="text-gray-400">{k}</span>{" "}
+                        <span className="font-mono font-semibold text-gray-800">{v}</span>
+                      </span>
+                    ))}
                   </div>
                 )}
                 {/* Interpretation guidance */}
@@ -1329,7 +1337,7 @@ export default function DescriptivePanel() {
                 <div className="p-4">
                   <div
                     className="relative border border-gray-200 rounded-lg bg-white shadow-sm overflow-hidden"
-                    style={{ width: `${distPlotW}px`, height: `${distPlotH}px`, minWidth: 520, minHeight: 320 }}
+                    style={{ width: `${distPlotW}px`, height: `${distPlotH}px`, maxHeight: "calc(100vh - 240px)", minWidth: 520, minHeight: 320 }}
                   >
                     {/* The actual distribution plot content */}
                     <div className="absolute inset-0 overflow-auto p-4">
