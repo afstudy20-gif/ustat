@@ -974,9 +974,7 @@ export default function ModelsPanel() {
 
             {/* Prediction Panel — linear only */}
             {model === "linear" && result.predictor_info && Object.keys(result.predictor_info).length > 0 && (
-              <div className="xl:col-start-2">
-                <PredictionPanel result={result} />
-              </div>
+              <PredictionPanel result={result} />
             )}
 
             {/* Results text for all regression models */}
