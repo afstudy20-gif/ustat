@@ -182,6 +182,7 @@ export const runTargetTrial    = (data: object) => api.post("/api/causal/target_
 export const runDiD            = (data: object) => api.post("/api/causal/did", data);
 export const runRDD            = (data: object) => api.post("/api/causal/rdd", data);
 export const runDAGAdjustment  = (data: object) => api.post("/api/causal/dag_adjustment", data);
+export const runSEM            = (data: object) => api.post("/api/causal/sem", data);
 
 // Survival advanced
 export const runMICE       = (data: object) => api.post("/api/survival_advanced/mice", data);

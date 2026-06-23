@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { useStore } from "../store";
-import { runIV2SLS, runMediation, runTargetTrial, runDiD, runRDD, runDAGAdjustment } from "../api";
+import { runIV2SLS, runMediation, runTargetTrial, runDiD, runRDD, runDAGAdjustment, runSEM } from "../api";
 import ResultExporter from "./ResultExporter";
 import { fmtP } from "../lib/format";
 
-type Method = "iv" | "mediation" | "target" | "did" | "rdd" | "dag";
+type Method = "iv" | "mediation" | "target" | "did" | "rdd" | "dag" | "sem";
 
 function getErrorDetail(e: unknown, fallback: string): string {
   const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
@@ -669,6 +669,235 @@ function DAGTab() {
   );
 }
 
+interface SEMPath { label: string | null; from: string; to: string; est: number | null; se: number | null; z: number | null; p: number | null }
+interface SEMIndirect { label: string; treatment: string; chain: string[]; outcome: string; est: number | null; boot_ci: [number, number] | null; significant: boolean }
+interface SEMDirect { treatment: string; outcome: string; est: number | null; se: number | null; p: number | null; ci: [number, number] | null }
+interface SEMTotal { treatment: string; outcome: string; est: number | null; boot_ci: [number, number] | null }
+interface SEMFit { chi2?: number | null; df?: number | null; p?: number | null; cfi?: number | null; tli?: number | null; rmsea?: number | null; srmr?: number | null; aic?: number | null; bic?: number | null; n: number }
+interface SEMResult { result_text: string; n: number; lavaan_spec: string; paths: SEMPath[]; indirect_effects: SEMIndirect[]; direct_effects: SEMDirect[]; total_effects: SEMTotal[]; fit: SEMFit; serial: boolean; bootstrap_used: number }
+
+function SEMTab() {
+  const session = useStore((s) => s.session);
+  const cols = (session?.columns ?? []).map((c) => c.name);
+  const sid = session?.session_id ?? "";
+
+  const [treatments, setTreatments] = useState<string[]>([]);
+  const [mediators, setMediators] = useState<string[]>([]);
+  const [outcomes, setOutcomes] = useState<string[]>([]);
+  const [covariates, setCovariates] = useState<string[]>([]);
+  const [serial, setSerial] = useState(false);
+  const [bootstrap, setBootstrap] = useState<number>(5000);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [lavaanSpec, setLavaanSpec] = useState("");
+  const [result, setResult] = useState<SEMResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const run = async () => {
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const reps = Math.max(100, Math.min(20000, Math.round(bootstrap || 0)));
+      const payload: Record<string, unknown> = {
+        session_id: sid, treatments, mediators, outcomes, covariates,
+        serial: serial && mediators.length >= 2, bootstrap: reps,
+      };
+      const spec = lavaanSpec.trim();
+      if (spec) payload.lavaan_spec = spec;
+      const r = await runSEM(payload);
+      setResult(r.data as SEMResult);
+    } catch (e: unknown) {
+      setError(getErrorDetail(e, "SEM fit failed."));
+    } finally { setLoading(false); }
+  };
+
+  const canRun = !!sid && !loading && (
+    lavaanSpec.trim().length > 0 ||
+    (treatments.length >= 1 && mediators.length >= 1 && outcomes.length >= 1)
+  );
+  const serialAvail = mediators.length >= 2;
+  const fmtN = (v: number | null | undefined, d = 4) =>
+    v === null || v === undefined || Number.isNaN(v) ? "—" : v.toFixed(d);
+  const fmtCI = (ci?: [number, number] | null) =>
+    ci ? `[${ci[0].toFixed(3)}, ${ci[1].toFixed(3)}]` : "—";
+
+  return (
+    <div className="flex gap-4">
+      <div className="w-72 flex-shrink-0 space-y-4">
+        <div className="panel bg-indigo-50 border-indigo-200 space-y-1">
+          <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">SEM / Path Analysis</p>
+          <p className="text-xs text-indigo-800 leading-relaxed">
+            Fit a structural equation / path model with <b>multiple outcomes</b>, <b>parallel</b> or
+            <b> serial mediators</b>, and global model fit indices. Equivalent to Hayes PROCESS
+            Models 4 / 6 / 80 / 81 and beyond.
+          </p>
+        </div>
+        <div className="panel space-y-3">
+          <MultiPick label="Treatment(s) — exposure X" accent="accent-rose-500" columns={cols}
+            exclude={[...mediators, ...outcomes, ...covariates]} value={treatments} onChange={setTreatments} />
+          <MultiPick label="Mediator(s) — M" accent="accent-amber-500" columns={cols}
+            exclude={[...treatments, ...outcomes, ...covariates]} value={mediators} onChange={setMediators} />
+          <MultiPick label="Outcome(s) — Y (continuous)" accent="accent-emerald-500" columns={cols}
+            exclude={[...treatments, ...mediators, ...covariates]} value={outcomes} onChange={setOutcomes} />
+          <MultiPick label="Covariates (optional)" accent="accent-indigo-500" columns={cols}
+            exclude={[...treatments, ...mediators, ...outcomes]} value={covariates} onChange={setCovariates} />
+          <label className={`flex items-center gap-2 text-xs ${serialAvail ? "text-gray-700" : "text-gray-400"}`}>
+            <input type="checkbox" checked={serial && serialAvail} disabled={!serialAvail}
+              onChange={(e) => setSerial(e.target.checked)} />
+            Serial chain (M1 → M2 → … → Y)
+            {!serialAvail && <span className="text-[10px]">(needs ≥2 mediators)</span>}
+          </label>
+          <div>
+            <label className="text-xs text-gray-400 block mb-1">Bootstrap resamples</label>
+            <input type="number" min={100} max={20000} step={500} className="input w-full"
+              value={bootstrap} onChange={(e) => setBootstrap(Number(e.target.value))} />
+            <p className="text-[10px] text-gray-400 mt-1">PROCESS standard: 5000. Range 100–20000.</p>
+          </div>
+          <div>
+            <button type="button" className="text-xs text-indigo-600 hover:underline"
+              onClick={() => setAdvancedOpen((o) => !o)}>
+              {advancedOpen ? "▾" : "▸"} Advanced: lavaan model spec
+            </button>
+            {advancedOpen && (
+              <div className="mt-2 space-y-1">
+                <textarea className="input w-full font-mono text-[11px]" rows={6}
+                  placeholder={"# overrides everything above\nM ~ a*X\nY ~ b*M + cp*X"}
+                  value={lavaanSpec} onChange={(e) => setLavaanSpec(e.target.value)} />
+                <p className="text-[10px] text-gray-400">When non-empty, the model is built verbatim from this spec; structure inputs above are ignored.</p>
+              </div>
+            )}
+          </div>
+          <button className="btn-primary w-full" onClick={run} disabled={!canRun}>
+            {loading ? "Fitting…" : "Run SEM"}
+          </button>
+          {error && <p className="text-red-500 text-xs">{error}</p>}
+        </div>
+      </div>
+
+      <div className="flex-1 min-w-0 space-y-4">
+        {!result ? (
+          <div className="panel h-64 flex items-center justify-center text-gray-400 text-sm text-center">
+            Pick ≥1 treatment, ≥1 mediator, and ≥1 outcome — then run SEM.<br />
+            Or supply a custom lavaan spec under Advanced.
+          </div>
+        ) : (
+          <>
+            <div className="panel border border-indigo-200 bg-indigo-50">
+              <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p>
+              <div className="text-[11px] text-gray-500 mt-2">n = {result.n}</div>
+            </div>
+
+            <div className="panel">
+              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Model fit</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                <div>χ²({result.fit.df ?? "—"}) = {fmtN(result.fit.chi2)}</div>
+                <div>p = {fmtP(result.fit.p ?? null)}</div>
+                <div>CFI = {fmtN(result.fit.cfi, 3)}</div>
+                <div>TLI = {fmtN(result.fit.tli, 3)}</div>
+                <div>RMSEA = {fmtN(result.fit.rmsea, 3)}</div>
+                <div>SRMR = {fmtN(result.fit.srmr, 3)}</div>
+                <div>AIC = {fmtN(result.fit.aic, 1)}</div>
+                <div>BIC = {fmtN(result.fit.bic, 1)}</div>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2">Good fit: CFI/TLI ≥ 0.95, RMSEA ≤ 0.06, SRMR ≤ 0.08.</p>
+            </div>
+
+            {result.indirect_effects.length > 0 && (
+              <div className="panel">
+                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Indirect effects (bootstrap CIs)</h3>
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500">
+                    <tr><th className="text-left py-1">Path</th><th className="text-right">Est.</th><th className="text-right">95% boot CI</th><th className="text-right">Sig.</th></tr>
+                  </thead>
+                  <tbody>
+                    {result.indirect_effects.map((ie) => (
+                      <tr key={ie.label} className="border-t border-gray-100">
+                        <td className="py-1">{ie.label}</td>
+                        <td className="text-right">{fmtN(ie.est)}</td>
+                        <td className="text-right">{fmtCI(ie.boot_ci)}</td>
+                        <td className={`text-right font-semibold ${ie.significant ? "text-emerald-600" : "text-gray-400"}`}>{ie.significant ? "✓" : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {result.direct_effects.length > 0 && (
+              <div className="panel">
+                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Direct effects (X → Y, holding M)</h3>
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500">
+                    <tr><th className="text-left py-1">Treatment</th><th className="text-left">Outcome</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right">p</th><th className="text-right">95% CI</th></tr>
+                  </thead>
+                  <tbody>
+                    {result.direct_effects.map((de, i) => (
+                      <tr key={`${de.treatment}-${de.outcome}-${i}`} className="border-t border-gray-100">
+                        <td className="py-1">{de.treatment}</td><td>{de.outcome}</td>
+                        <td className="text-right">{fmtN(de.est)}</td>
+                        <td className="text-right">{fmtN(de.se)}</td>
+                        <td className="text-right">{fmtP(de.p)}</td>
+                        <td className="text-right">{fmtCI(de.ci)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {result.total_effects.length > 0 && (
+              <div className="panel">
+                <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Total effects (X → Y, all paths)</h3>
+                <table className="w-full text-xs">
+                  <thead className="text-gray-500">
+                    <tr><th className="text-left py-1">Treatment</th><th className="text-left">Outcome</th><th className="text-right">Est.</th><th className="text-right">95% boot CI</th></tr>
+                  </thead>
+                  <tbody>
+                    {result.total_effects.map((te, i) => (
+                      <tr key={`${te.treatment}-${te.outcome}-${i}`} className="border-t border-gray-100">
+                        <td className="py-1">{te.treatment}</td><td>{te.outcome}</td>
+                        <td className="text-right">{fmtN(te.est)}</td>
+                        <td className="text-right">{fmtCI(te.boot_ci)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="panel">
+              <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">All path coefficients</h3>
+              <table className="w-full text-xs">
+                <thead className="text-gray-500">
+                  <tr><th className="text-left py-1">From</th><th className="text-left">To</th><th className="text-left">Label</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right">z</th><th className="text-right">p</th></tr>
+                </thead>
+                <tbody>
+                  {result.paths.map((p, i) => (
+                    <tr key={`${p.from}-${p.to}-${i}`} className="border-t border-gray-100">
+                      <td className="py-1">{p.from}</td><td>{p.to}</td>
+                      <td className="text-gray-400">{p.label ?? "—"}</td>
+                      <td className="text-right">{fmtN(p.est)}</td>
+                      <td className="text-right">{fmtN(p.se)}</td>
+                      <td className="text-right">{fmtN(p.z, 2)}</td>
+                      <td className="text-right">{fmtP(p.p)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <details className="panel">
+              <summary className="text-xs font-bold text-gray-700 uppercase tracking-wider cursor-pointer">lavaan spec (echo)</summary>
+              <pre className="text-[11px] mt-2 whitespace-pre-wrap">{result.lavaan_spec}</pre>
+            </details>
+
+            <ResultExporter title="sem" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function CausalPanel() {
   const [method, setMethod] = useState<Method>("iv");
   const tabs: [Method, string][] = [
@@ -678,6 +907,7 @@ export default function CausalPanel() {
     ["did", "Difference-in-Differences"],
     ["rdd", "Regression Discontinuity"],
     ["dag", "DAG Backdoor"],
+    ["sem", "SEM / Path analysis"],
   ];
   return (
     <div className="space-y-3">
@@ -696,7 +926,8 @@ export default function CausalPanel() {
         : method === "target" ? <TargetTrialTab />
         : method === "did" ? <DiDTab />
         : method === "rdd" ? <RDDTab />
-        : <DAGTab />}
+        : method === "dag" ? <DAGTab />
+        : <SEMTab />}
     </div>
   );
 }
