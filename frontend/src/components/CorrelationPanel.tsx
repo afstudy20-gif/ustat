@@ -255,7 +255,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
     <div className="panel">
       <TitledPlot
         plotRefOut={corrScatterRef}
-        storageKey="corr:pairwise:scatter"
+        storageKey={`corr:pairwise:scatter:${active.var1}:${active.var2}`}
         defaultTitle=""
         defaultSubtitle=""
         defaultXAxis={active.var1}
