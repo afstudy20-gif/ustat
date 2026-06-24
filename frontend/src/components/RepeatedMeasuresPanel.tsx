@@ -310,17 +310,6 @@ function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
           ))}
         </div>
 
-        {guidance && (
-          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">When to use</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.when}</p>
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">Assumptions</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.assumptions}</p>
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">How to read</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.reading}</p>
-          </div>
-        )}
-
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
 
@@ -397,7 +386,17 @@ function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
       </div>
 
       {/* Right: results */}
-      <div className="flex-1">
+      <div className="flex-1 space-y-3">
+        {guidance && (
+          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">When to use</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.when}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">Assumptions</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.assumptions}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">How to read</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{guidance.reading}</p>
+          </div>
+        )}
         {result ? <ResultCard result={result} /> : (
           <div className="panel text-center text-gray-400 py-12">
             Select a test and configure variables to begin

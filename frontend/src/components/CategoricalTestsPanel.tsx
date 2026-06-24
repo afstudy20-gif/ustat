@@ -202,14 +202,6 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
             </button>
           </div>
         )}
-        {g && (
-          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
-            <p className="text-[10px] font-bold text-indigo-900 uppercase">When to use</p>
-            <p className="text-xs text-indigo-800">{g.when}</p>
-            <p className="text-[10px] font-bold text-indigo-900 uppercase mt-2">How to read</p>
-            <p className="text-xs text-indigo-800">{g.reading}</p>
-          </div>
-        )}
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           <div>
@@ -272,7 +264,15 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
           {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
       </div>
-      <div className="flex-1">
+      <div className="flex-1 space-y-3">
+        {g && (
+          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
+            <p className="text-[10px] font-bold text-indigo-900 uppercase">When to use</p>
+            <p className="text-xs text-indigo-800">{g.when}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase mt-2">How to read</p>
+            <p className="text-xs text-indigo-800">{g.reading}</p>
+          </div>
+        )}
         {result ? <ResultCard result={result} /> : (
           <div className="panel text-center text-gray-400 py-12">Select a test and configure variables</div>
         )}

@@ -499,6 +499,14 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
   const toggle = (c: string) =>
     setSelected(selected.includes(c) ? selected.filter((x) => x !== c) : [...selected, c]);
 
+  const fetchRaw = (cols: string[]) => {
+    setRawLoading(true);
+    getRawColumns(sessionId, cols)
+      .then((r) => setRawData(r.data))
+      .catch(() => {})
+      .finally(() => setRawLoading(false));
+  };
+
   const run = async () => {
     if (selected.length < 2) { setError("Select at least 2 variables"); return; }
     setError("");
@@ -506,6 +514,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
     try {
       const res = await runCorrelationMatrix({ session_id: sessionId, variables: selected, method, imputation: "listwise" });
       setData(res.data as MatrixResult);
+      if (displayMode === "splom") fetchRaw(selected);
     } catch (e: unknown) {
       setError(getErrorDetail(e));
     } finally {
@@ -515,11 +524,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
 
   useEffect(() => {
     if (displayMode !== "splom" || selected.length < 2) return;
-    setRawLoading(true);
-    getRawColumns(sessionId, selected)
-      .then((r) => setRawData(r.data))
-      .catch(() => {})
-      .finally(() => setRawLoading(false));
+    fetchRaw(selected);
     // Use a primitive join of `selected` so we re-fetch only when the column
     // set actually changes — not on every array identity tick.
     // eslint-disable-next-line react-hooks/exhaustive-deps

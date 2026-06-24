@@ -389,18 +389,6 @@ function HypothesisPanelBody({ session }: { session: Session }) {
           ))}
         </div>
 
-        {/* Test guidance */}
-        {TEST_GUIDANCE[test] && (
-          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">When to use</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].when}</p>
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">Assumptions</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].assumptions}</p>
-            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">How to read</p>
-            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].reading}</p>
-          </div>
-        )}
-
         <div className="panel space-y-3">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           {!isMancova && (
@@ -509,7 +497,17 @@ function HypothesisPanelBody({ session }: { session: Session }) {
         </div>
       </div>
 
-      <div className="flex-1">
+      <div className="flex-1 space-y-3">
+        {TEST_GUIDANCE[test] && (
+          <div className="panel bg-indigo-50 border-indigo-200 space-y-2">
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider">When to use</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].when}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">Assumptions</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].assumptions}</p>
+            <p className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mt-2">How to read</p>
+            <p className="text-xs text-indigo-800 leading-relaxed">{TEST_GUIDANCE[test].reading}</p>
+          </div>
+        )}
         {result ? <ResultCard result={result} /> : (
           <div className="panel h-64 flex items-center justify-center text-gray-400">
             Configure and run a hypothesis test
