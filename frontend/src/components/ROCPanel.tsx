@@ -319,27 +319,27 @@ function ROCPanelBody({ session }: { session: Session }) {
 
   // ── Single-curve state ──
   const [scoreCol,     setScoreCol]     = usePersistedPanelState<string>("roc", "scoreCol", numCols[0] ?? "");
-  const [manualCutoff, setManualCutoff] = useState("");
+  const [manualCutoff, setManualCutoff] = usePersistedPanelState<string>("roc", "manualCutoff", "");
   // Score direction for ROC. "auto" flips the score sign when the naive
   // AUC < 0.5 so protective biomarkers (albumin, eGFR, Hb) report the
   // correct ~0.69 instead of the inverted ~0.31 — see Heinze (2002) and
   // pROC's `direction="auto"` for the same convention.
   const [scoreDirection, setScoreDirection]   = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection", "auto");
   const [scoreDirection2, setScoreDirection2] = usePersistedPanelState<"auto" | "higher" | "lower">("roc", "scoreDirection2", "auto");
-  const [useManual,    setUseManual]    = useState(false);
-  const [result,       setResult]       = useState<ROCResult | null>(null);
+  const [useManual,    setUseManual]    = usePersistedPanelState<boolean>("roc", "useManual", false);
+  const [result,       setResult]       = usePersistedPanelState<ROCResult | null>("roc", "result", null);
   const [error,        setError]        = useState<string | null>(null);
   const [loading,      setLoading]      = useState(false);
-  const [imputation,   setImputation]   = useState<ImputationStrategy>("listwise");
+  const [imputation,   setImputation]   = usePersistedPanelState<ImputationStrategy>("roc", "imputation", "listwise");
 
-  const [showCompare, setShowCompare] = useState(false);
+  const [showCompare, setShowCompare] = usePersistedPanelState<boolean>("roc", "showCompare", false);
   const [scoreCol2,   setScoreCol2]   = usePersistedPanelState<string>("roc", "scoreCol2", numCols[1] ?? numCols[0] ?? "");
-  const [cmpResult,   setCmpResult]   = useState<ROCCompareResult | null>(null);
+  const [cmpResult,   setCmpResult]   = usePersistedPanelState<ROCCompareResult | null>("roc", "cmpResult", null);
   const [cmpError,    setCmpError]    = useState<string | null>(null);
   const [cmpLoading,  setCmpLoading]  = useState(false);
 
-  const [singleStyle, setSingleStyle] = useState<CurveStyle>({ color: _p0(), width: 2.5, dash: "solid" });
-  const [chanceStyle, setChanceStyle] = useState<CurveStyle>({ color: "#9ca3af", width: 1,   dash: "dash"  });
+  const [singleStyle, setSingleStyle] = usePersistedPanelState<CurveStyle>("roc", "singleStyle", { color: _p0(), width: 2.5, dash: "solid" });
+  const [chanceStyle, setChanceStyle] = usePersistedPanelState<CurveStyle>("roc", "chanceStyle", { color: "#9ca3af", width: 1,   dash: "dash"  });
 
   useEffect(() => {
     if (result) { setSingleStyle({ color: _p0(), width: 2.5, dash: "solid" }); }
@@ -351,15 +351,15 @@ function ROCPanelBody({ session }: { session: Session }) {
 
   // ── Multi-curve state ──
   const [multiCols,    setMultiCols]    = usePersistedPanelState<string[]>("roc", "multiCols", []);
-  const [multiResults, setMultiResults] = useState<MultiResult[]>([]);
-  const [multiStyles,  setMultiStyles]  = useState<CurveStyle[]>([]);
+  const [multiResults, setMultiResults] = usePersistedPanelState<MultiResult[]>("roc", "multiResults", []);
+  const [multiStyles,  setMultiStyles]  = usePersistedPanelState<CurveStyle[]>("roc", "multiStyles", []);
   const [multiLoading, setMultiLoading] = useState(false);
   const [multiError,   setMultiError]   = useState<string | null>(null);
   // Multi-curve DeLong pairwise matrix (K-way generalisation of /roc_compare).
-  const [multiDelong,    setMultiDelong]    = useState<ROCMultiDelong | null>(null);
+  const [multiDelong,    setMultiDelong]    = usePersistedPanelState<ROCMultiDelong | null>("roc", "multiDelong", null);
   const [multiDelongErr, setMultiDelongErr] = useState<string | null>(null);
   const [multiPAdjust,   setMultiPAdjust]   = usePersistedPanelState<"holm" | "bonferroni" | "none">("roc", "multiPAdjust", "holm");
-  const [multiChance,  setMultiChance]  = useState<CurveStyle>({ color: "#9ca3af", width: 1, dash: "dash" });
+  const [multiChance,  setMultiChance]  = usePersistedPanelState<CurveStyle>("roc", "multiChance", { color: "#9ca3af", width: 1, dash: "dash" });
 
   // Re-run pairwise DeLong with the new adjustment when the user changes
   // the dropdown — only valid when we already have per-curve results.
@@ -390,11 +390,11 @@ function ROCPanelBody({ session }: { session: Session }) {
   }, [multiPAdjust]);
 
   // ── Combined model state ──
-  const [showCombined,     setShowCombined]     = useState(false);
+  const [showCombined,     setShowCombined]     = usePersistedPanelState<boolean>("roc", "showCombined", false);
   const [combinedCols,     setCombinedCols]     = usePersistedPanelState<string[]>("roc", "combinedCols", []);
-  const [combinedName,     setCombinedName]     = useState("Combined Model");
-  const [combinedResult,   setCombinedResult]   = useState<MultiResult | null>(null);
-  const [combinedStyle,    setCombinedStyle]    = useState<CurveStyle>({ color: "#dc2626", width: 3, dash: "solid" });
+  const [combinedName,     setCombinedName]     = usePersistedPanelState<string>("roc", "combinedName", "Combined Model");
+  const [combinedResult,   setCombinedResult]   = usePersistedPanelState<MultiResult | null>("roc", "combinedResult", null);
+  const [combinedStyle,    setCombinedStyle]    = usePersistedPanelState<CurveStyle>("roc", "combinedStyle", { color: "#dc2626", width: 3, dash: "solid" });
   const [combinedLoading,  setCombinedLoading]  = useState(false);
   const [combinedError,    setCombinedError]    = useState<string | null>(null);
   const [multiFilter,     setMultiFilter]     = useState("");
@@ -675,7 +675,7 @@ function ROCPanelBody({ session }: { session: Session }) {
       <div className="w-[340px] flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
 
         {/* Mode toggle */}
-        <div className="flex rounded-lg overflow-hidden border border-gray-300">
+        <div className="flex rounded-lg overflow-hidden border border-gray-300 sticky top-0 z-10 bg-white">
           <button
             onClick={() => setMode("single")}
             className={`flex-1 text-xs py-1.5 font-medium transition-colors
@@ -1108,7 +1108,7 @@ function ROCPanelBody({ session }: { session: Session }) {
         )}
 
         {/* Plot */}
-        <div className="flex-1 panel min-h-0" style={{ minHeight: 380 }}>
+        <div className="flex-1 panel min-h-0 flex flex-col gap-4 overflow-y-auto" style={{ minHeight: 380 }}>
 
           {/* ── Single plot ── */}
           {mode === "single" && result && (() => {
@@ -1164,7 +1164,7 @@ function ROCPanelBody({ session }: { session: Session }) {
             }
 
             return (
-            <div className="relative" style={{ width: "100%", height: "100%" }}>
+            <div className="relative flex-shrink-0" style={{ width: "100%", minHeight: 420 }}>
             <TitledPlot
               plotRefOut={rocSingleRef}
               storageKey={`roc:single:${scoreCol}:${outcomeCol}`}
@@ -1226,7 +1226,7 @@ function ROCPanelBody({ session }: { session: Session }) {
 
           {/* ── DeLong comparison plot (publication quality) ── */}
           {mode === "single" && cmpResult && cmpResult.curve_1 && cmpResult.curve_2 && (
-            <div className="relative" style={{ width: "100%", height: "100%" }}>
+            <div className="relative flex-shrink-0" style={{ width: "100%", minHeight: 420 }}>
             <TitledPlot
               plotRefOut={rocCompareRef}
               storageKey={`roc:delong:${cmpResult.score_1}:${cmpResult.score_2}`}
@@ -1298,8 +1298,8 @@ function ROCPanelBody({ session }: { session: Session }) {
           )}
 
           {/* ── Multi-curve plot ── */}
-          {mode === "multi" && multiResults.length > 0 && (
-            <div className="relative" style={{ width: "100%", height: "100%" }}>
+          {mode === "multi" && (multiResults.length > 0 || (showCombined && combinedResult && !combinedResult.error)) && (
+            <div className="relative flex-shrink-0" style={{ width: "100%", minHeight: 420 }}>
             <TitledPlot
               plotRefOut={rocMultiRef}
               storageKey={`roc:multi:${outcomeCol}`}
@@ -1334,7 +1334,7 @@ function ROCPanelBody({ session }: { session: Session }) {
           )}
 
           {/* ── Empty state ── */}
-          {((mode === "single" && !result) || (mode === "multi" && !multiResults.length)) && (
+          {((mode === "single" && !result) || (mode === "multi" && !multiResults.length && !(showCombined && combinedResult && !combinedResult?.error))) && (
             <div className="h-full flex flex-col items-center justify-center gap-2 text-gray-400">
               <span className="text-3xl">📈</span>
               <span className="text-sm text-center">
