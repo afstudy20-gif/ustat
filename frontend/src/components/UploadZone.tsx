@@ -131,8 +131,15 @@ export default function UploadZone() {
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-3 bg-surface border-b border-line flex-shrink-0">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="uSTAT" className="w-8 h-8 object-contain" />
-            <span className="font-serif text-lg font-semibold text-slate-950 tracking-tight">uSTAT</span>
+            <button
+              type="button"
+              onClick={exitPower}
+              title="Karşılama ekranına dön"
+              className="flex items-center gap-3 rounded-lg -m-1 p-1 hover:bg-ink-50 focus:outline-none focus:ring-2 focus:ring-ink-200 transition-colors"
+            >
+              <img src="/logo.png" alt="uSTAT" className="w-8 h-8 object-contain" />
+              <span className="font-serif text-lg font-semibold text-slate-950 tracking-tight">uSTAT</span>
+            </button>
             <span className="text-xs text-slate-300">·</span>
             <span className="text-xs text-gold-600 font-medium">Power Analysis</span>
           </div>
