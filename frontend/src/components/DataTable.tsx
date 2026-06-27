@@ -912,25 +912,41 @@ function DataTableBody({ session }: { session: Session }) {
       ArrowLeft: [0, -1],
       ArrowRight: [0, 1],
     };
-    if (e.key in directions && selFocus) {
+    // Seed a focus cell the first time an arrow / Tab / Enter is pressed while
+    // the grid has keyboard focus but nothing is selected yet — otherwise the
+    // whole navigation scheme silently does nothing until the user clicks a cell.
+    const ensureSeedFocus = (): { row: number; col: string } | null => {
+      if (selFocus) return selFocus;
+      const rows = visibleRowIds();
+      if (rows.length === 0 || columns.length === 0) return null;
+      const seed = { row: rows[0], col: columns[0].name };
+      selectSingleCell(seed.row, seed.col);
+      return seed;
+    };
+
+    if (e.key in directions) {
       e.preventDefault();
+      if (!ensureSeedFocus()) return;
       const [rowDelta, colDelta] = directions[e.key];
       moveSelectionFocus(rowDelta, colDelta, e.shiftKey, mod);
       return;
     }
-    if (e.key === "Tab" && selFocus) {
+    if (e.key === "Tab") {
       e.preventDefault();
+      if (!ensureSeedFocus()) return;
       moveSelectionFocus(0, e.shiftKey ? -1 : 1, false, false);
       return;
     }
-    if ((e.key === "Enter" || e.key === "F2") && selFocus) {
+    if (e.key === "Enter" || e.key === "F2") {
       e.preventDefault();
-      startEdit(selFocus.row, selFocus.col);
+      const focus = ensureSeedFocus();
+      if (focus) startEdit(focus.row, focus.col);
       return;
     }
-    if (!mod && !e.altKey && e.key.length === 1 && selFocus) {
+    if (!mod && !e.altKey && e.key.length === 1) {
       e.preventDefault();
-      startEdit(selFocus.row, selFocus.col, e.key);
+      const focus = ensureSeedFocus();
+      if (focus) startEdit(focus.row, focus.col, e.key);
     }
   };
 
