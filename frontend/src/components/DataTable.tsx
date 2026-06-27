@@ -1416,6 +1416,31 @@ function DataTableBody({ session }: { session: Session }) {
                                 void commitEdit(true);
                                 moveSelectionFocus(0, e.shiftKey ? -1 : 1, false, false);
                               }
+                              // Arrow keys commit the edit and move the selection
+                              // so navigation keeps flowing after a value change
+                              // (Excel-style). Left/Right only navigate when the
+                              // text cursor is at the boundary, so in-value cursor
+                              // movement still works.
+                              if (e.key === "ArrowUp") {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(-1, 0, false, false);
+                              }
+                              if (e.key === "ArrowDown") {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(1, 0, false, false);
+                              }
+                              if (e.key === "ArrowLeft" && e.currentTarget.selectionStart === 0) {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(0, -1, false, false);
+                              }
+                              if (e.key === "ArrowRight" && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+                                e.preventDefault();
+                                void commitEdit(true);
+                                moveSelectionFocus(0, 1, false, false);
+                              }
                               if (e.key === "Escape") {
                                 setEditCell(null);
                                 requestAnimationFrame(() => gridRef.current?.focus({ preventScroll: true }));
