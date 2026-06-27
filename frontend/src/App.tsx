@@ -1,6 +1,6 @@
 import "./index.css";
 import { Component, useState, useRef, useEffect, useMemo, type ReactNode } from "react";
-import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Save, Search, Layers, Scale, HelpCircle } from "lucide-react";
+import { BarChart2, Table2, FlaskConical, GitMerge, Brain, X, TrendingUp, ClipboardList, Calculator, Grid3x3, Grid2x2, Shapes, FolderOpen, Target, Filter, Info, Save, Search, Layers, Scale, HelpCircle, Command } from "lucide-react";
 import { clearCases, saveSession as saveSessionApi } from "./api";
 import AboutModal from "./components/AboutModal";
 import HelpModal from "./components/HelpModal";
@@ -91,6 +91,7 @@ import MissingDataPanel from "./components/MissingDataPanel";
 import FactorPCAPanel from "./components/FactorPCAPanel";
 import BayesianPanel from "./components/BayesianPanel";
 import CloudSyncBar from "./components/CloudSyncBar";
+import CommandPalette from "./components/CommandPalette";
 import { cloudSync } from "./lib/cloudSync";
 import { purgeExpiredTrash, notifySessionsChanged, TRASH_PURGE_INTERVAL_MS } from "./lib/sessionDb";
 
@@ -558,6 +559,20 @@ export default function App() {
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // ⌘K / Ctrl+K command palette. Toggles a rule-based NL command box that
+  // resolves a phrase like "roc group age" to the ROC tab with the outcome
+  // and score columns pre-filled. Pure client-side — no LLM, no network.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   // Header auto-save status indicator.
   const [autoSaveStatus, setAutoSaveStatus] = useState<{
     state: "idle" | "saving" | "saved" | "error";
@@ -678,6 +693,7 @@ export default function App() {
     <div className="flex flex-col h-screen overflow-hidden bg-page">
       {showAbout && <AboutModal onClose={() => setShowAbout(false)} />}
       {showHelp && <HelpModal onClose={() => setShowHelp(false)} />}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
       {showSaveModal && (
         <SaveBeforeOpenModal
           session={session}
@@ -785,6 +801,18 @@ export default function App() {
               </div>
             )}
           </div>
+
+          {/* ⌘K command palette trigger. Opens a rule-based NL command box:
+              "roc group age" → ROC tab, form pre-filled. Keyboard equivalent:
+              Cmd/Ctrl+K (handled by the window listener above). */}
+          <button
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-indigo-600 hover:border-indigo-300 transition-colors flex-shrink-0"
+            title="Command palette — run analyses by name (Cmd/Ctrl+K)"
+          >
+            <Command size={13} />
+            <kbd className="text-[10px] font-mono">⌘K</kbd>
+          </button>
 
           <div className="ml-auto flex items-center gap-1.5">
             <PlotThemeBar />
