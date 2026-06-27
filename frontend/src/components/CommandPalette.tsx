@@ -1,21 +1,25 @@
 /**
  * CommandPalette — the ⌘K / Ctrl+K command box.
  *
- * A modal overlay with a single text input. As the user types, the rule-based
- * parser (commandParser.ts) resolves the query into an intent + column slots
- * and shows a live preview ("ROC curve · outcome=group, score=age"). On Enter
- * the resolved fields are written into the target panel's panelCache and the
- * app switches to that tab — the form comes up pre-filled.
+ * Structured "click-to-build" interface (mirrors the Compute panel's pattern):
+ * a left column of tappable variables, a row of test-keyword buttons, and a
+ * central command area that accumulates the chosen tokens. The user doesn't
+ * have to type a long sentence — they tap "roc", then tap "group", then "age".
  *
- * When the parser can't recognise an intent, the palette falls back to the
- * existing TEST_CATALOG search (plain tab navigation) so it never feels dead.
+ * The single source of truth is the command string (`query`). Every token
+ * insertion, manual keystroke, and ⌫/Clear operates on that string, so the
+ * existing rule-based parser (commandParser.ts) keeps working unchanged — the
+ * builder is just a friendlier way to produce the same input.
+ *
+ * On Enter the resolved fields are written into the target panel's panelCache
+ * and the app switches to that tab — the form comes up pre-filled.
  *
  * Privacy: nothing leaves the browser. Parsing is a pure client-side function.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Search, CornerDownLeft, ArrowRight } from "lucide-react";
-import { useStore, analysisCols } from "../store";
+import { Search, CornerDownLeft, X } from "lucide-react";
+import { useStore, analysisCols, type ColMeta } from "../store";
 import { parseCommand, applyResult, INTENT_SCHEMAS, type ParseResult } from "../lib/commandParser";
 
 interface CommandPaletteProps {
@@ -23,21 +27,40 @@ interface CommandPaletteProps {
   onClose: () => void;
 }
 
-/** Flat list of example commands shown when the input is empty, drawn from the
- *  supported intents. Helps the user discover the available vocabulary. */
-const EXAMPLES: { intent: string; example: string }[] = [
-  { intent: "roc", example: "roc group age" },
-  { intent: "ttest_2sample", example: "ttest age group" },
-  { intent: "ttest_1sample", example: "onesample bmi" },
-  { intent: "anova", example: "anova sbp group" },
-  { intent: "mannwhitney", example: "mannwhitney bmi sex" },
-  { intent: "kruskal", example: "kruskal age group" },
-  { intent: "correlation", example: "correlation bmi sbp" },
+/** Test-keyword buttons shown above the command area. Each inserts its token
+ *  into the command string at the cursor. Labels are short so they read like
+ *  natural prefixes: "roc", "ttest", "anova"… */
+const TEST_TOKENS: { token: string; label: string; title: string }[] = [
+  { token: "roc", label: "ROC", title: "ROC curve — binary outcome + numeric score" },
+  { token: "ttest", label: "t-test", title: "Independent t-test — numeric + 2-level group" },
+  { token: "onesample", label: "1-sample t", title: "One-sample t-test — numeric variable" },
+  { token: "anova", label: "ANOVA", title: "One-way ANOVA — numeric + ≥3-level group" },
+  { token: "mannwhitney", label: "Mann-Whitney", title: "Mann-Whitney U — numeric + 2-level group" },
+  { token: "kruskal", label: "Kruskal-Wallis", title: "Kruskal-Wallis — numeric + ≥3-level group" },
+  { token: "correlation", label: "Correlation", title: "Correlation — two numeric variables" },
 ];
+
+/** Separator / operator tokens (Compute-style button row). */
+const SEP_TOKENS: string[] = ["vs", "by", "and", ","];
+
+/** Short kind badge colour per column measurement level. */
+function kindBadge(kind: ColMeta["kind"]): { cls: string; ch: string } {
+  switch (kind) {
+    case "numeric": return { cls: "bg-blue-50 text-blue-600", ch: "n" };
+    case "categorical": return { cls: "bg-amber-50 text-amber-600", ch: "c" };
+    case "ordinal": return { cls: "bg-teal-50 text-teal-600", ch: "o" };
+    case "date": return { cls: "bg-purple-50 text-purple-600", ch: "d" };
+    default: return { cls: "bg-gray-100 text-gray-500", ch: "t" };
+  }
+}
 
 export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Cursor position tracked from the textarea so token insertions land where
+  // the user expects (mirrors the Compute FormulaTab's insert() helper).
+  const selRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 });
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const [varFilter, setVarFilter] = useState("");
 
   const session = useStore((s) => s.session);
   const setActiveTab = useStore((s) => s.setActiveTab);
@@ -46,30 +69,33 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
   // values (the store helper reads panelCache internally).
   const panelCache = useStore((s) => s.panelCache);
 
-  // Columns available for matching — analysis-eligible only, so excluded / id
-  // columns aren't suggested.
   const columns = useMemo(
     () => (session ? analysisCols(session.columns) : []),
     [session],
   );
+
+  const filteredColumns = useMemo(() => {
+    const f = varFilter.trim().toLowerCase();
+    if (!f) return columns;
+    return columns.filter((c) => c.name.toLowerCase().includes(f));
+  }, [columns, varFilter]);
 
   const result: ParseResult = useMemo(
     () => parseCommand(query, columns),
     [query, columns],
   );
 
-  // Focus the input whenever the palette opens, and clear on close so a
-  // previous half-typed command doesn't linger.
+  // Focus + clear whenever the palette opens.
   useEffect(() => {
     if (open) {
       setQuery("");
-      // Defer to the next frame so the input is mounted before we focus it.
+      setVarFilter("");
+      selRef.current = { start: 0, end: 0 };
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [open]);
 
-  // Escape closes; click on the backdrop closes. The ⌘K toggle is handled by
-  // the parent (App.tsx) so it works whether the palette is open or not.
+  // Escape closes.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -84,9 +110,51 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
 
   if (!open) return null;
 
+  /** Insert a token at the current cursor position, padding with a leading
+   *  space when needed so tokens stay word-separated (Compute pattern). */
+  const insertAtCursor = (token: string) => {
+    const el = inputRef.current;
+    const { start, end } = selRef.current;
+    const before = query.slice(0, start);
+    const after = query.slice(end);
+    // Prepend a space if we're not at the very start and the preceding char
+    // isn't already whitespace — keeps "roc"+"group" from becoming "rocgroup".
+    const needSpace = before.length > 0 && !/\s$/.test(before);
+    const insert = (needSpace ? " " : "") + token;
+    const next = before + insert + after;
+    setQuery(next);
+    const pos = start + insert.length;
+    selRef.current = { start: pos, end: pos };
+    // Restore focus + caret after React re-renders.
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
+  /** Delete the token (word) immediately left of the cursor, or the selection. */
+  const backspaceToken = () => {
+    const el = inputRef.current;
+    const { start, end } = selRef.current;
+    if (start !== end) {
+      const next = query.slice(0, start) + query.slice(end);
+      setQuery(next);
+      selRef.current = { start, end: start };
+      requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(start, start); });
+      return;
+    }
+    if (start === 0) return;
+    // Walk back over trailing spaces, then over the preceding word.
+    let i = start;
+    while (i > 0 && /\s/.test(query[i - 1])) i--;
+    while (i > 0 && !/\s/.test(query[i - 1])) i--;
+    const next = query.slice(0, i) + query.slice(start);
+    setQuery(next);
+    selRef.current = { start: i, end: i };
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(i, i); });
+  };
+
   const submit = () => {
-    // Prefer the parsed command when an intent was recognised. Otherwise, if
-    // the user picked nothing, just close.
     if (result.intent) {
       applyResult(result, { setActiveTab, setPanelCache });
       onClose();
@@ -94,125 +162,212 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     void panelCache; // keep the subscription live so applyResult sees fresh cache
   };
 
-  // Build a friendly preview of resolved / missing slots.
-  const slotPreview = result.fields.length > 0 && (
-    <div className="flex flex-wrap gap-1.5 mt-2">
-      {result.fields.map((f) => {
-        const filled = f.value != null;
-        return (
-          <span
-            key={f.key}
-            className={`text-[11px] px-2 py-0.5 rounded-md border ${
-              filled
-                ? "bg-indigo-50 border-indigo-200 text-indigo-700"
-                : "bg-gray-50 border-gray-200 text-gray-400"
-            }`}
-          >
-            {f.label}: <span className={filled ? "font-semibold" : "italic"}>{f.value ?? "—"}</span>
-          </span>
-        );
-      })}
-    </div>
-  );
-
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4 bg-black/30 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[8vh] px-4 bg-black/30 backdrop-blur-[1px]"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden"
+        className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col max-h-[78vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Input row */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100">
-          <Search size={16} className="text-gray-400 flex-shrink-0" />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder="Type a command, e.g. roc group age  ·  ttest bmi sex  ·  correlation age sbp"
-            className="flex-1 text-sm bg-transparent focus:outline-none placeholder-gray-400"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <kbd className="text-[10px] text-gray-400 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
-            esc
-          </kbd>
+        {/* Header: search icon + esc hint */}
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5 border-b border-gray-100">
+          <div className="flex items-center gap-2">
+            <Search size={16} className="text-gray-400" />
+            <span className="text-sm font-semibold text-gray-700">Command</span>
+            <span className="text-[11px] text-gray-400">— build a test command by tapping tokens</span>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded hover:bg-gray-100">
+            <X size={15} />
+          </button>
         </div>
 
-        {/* Body: preview or examples */}
-        <div className="max-h-80 overflow-y-auto">
-          {query.trim() === "" ? (
-            <div className="p-3">
-              <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-2 px-1">
-                Supported commands
-              </p>
-              <div className="space-y-0.5">
-                {EXAMPLES.map((ex) => {
-                  const schema = INTENT_SCHEMAS.find((s) => s.intent === ex.intent);
+        <div className="flex flex-1 min-h-0">
+          {/* Left: variable list (Compute-style) */}
+          <div className="w-48 flex-shrink-0 border-r border-gray-100 flex flex-col">
+            <div className="p-2 border-b border-gray-100">
+              <input
+                value={varFilter}
+                onChange={(e) => setVarFilter(e.target.value)}
+                placeholder="Filter variables…"
+                className="w-full text-xs px-2 py-1 border border-gray-200 rounded-md focus:outline-none focus:border-indigo-400"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+              {filteredColumns.length === 0 ? (
+                <p className="text-[11px] text-gray-400 px-1 py-2 text-center">No variables</p>
+              ) : (
+                filteredColumns.map((c) => {
+                  const badge = kindBadge(c.kind);
                   return (
                     <button
-                      key={ex.intent}
-                      onClick={() => setQuery(ex.example)}
-                      className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg hover:bg-indigo-50 transition-colors text-left group"
+                      key={c.name}
+                      onClick={() => insertAtCursor(c.name)}
+                      className="w-full flex items-center gap-1.5 text-left text-xs font-mono px-1.5 py-1 rounded hover:bg-indigo-50 hover:text-indigo-700 text-gray-700 group"
+                      title={`${c.name} (${c.kind})`}
                     >
-                      <span className="flex flex-col">
-                        <span className="text-sm text-gray-700 font-mono">{ex.example}</span>
-                        <span className="text-[10px] text-gray-400">{schema?.title}</span>
-                      </span>
-                      <ArrowRight size={14} className="text-gray-300 group-hover:text-indigo-500 flex-shrink-0" />
+                      <span className="truncate flex-1">{c.name}</span>
+                      <span className={`text-[9px] font-sans font-semibold rounded px-1 ${badge.cls}`}>{badge.ch}</span>
                     </button>
                   );
-                })}
-              </div>
-              <p className="text-[10px] text-gray-400 mt-3 px-1 leading-relaxed">
-                Column names are matched loosely (typos, Turkish characters, partial names).
-                No data leaves your browser.
-              </p>
+                })
+              )}
             </div>
-          ) : result.intent ? (
-            <div className="p-4">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-0.5">
-                  {result.title}
-                </span>
-                <span className="text-[10px] text-gray-400">→ {result.tab} tab</span>
+            <p className="text-[10px] text-gray-400 px-2 py-1.5 border-t border-gray-100">
+              Tap to insert at cursor
+            </p>
+          </div>
+
+          {/* Right: builder + preview */}
+          <div className="flex-1 flex flex-col min-w-0">
+            {/* Test-keyword buttons */}
+            <div className="px-3 py-2 border-b border-gray-100">
+              <p className="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-1.5">Tests</p>
+              <div className="flex flex-wrap gap-1">
+                {TEST_TOKENS.map((t) => (
+                  <button
+                    key={t.token}
+                    onClick={() => insertAtCursor(t.token)}
+                    title={t.title}
+                    className="px-2 py-1 text-xs rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors"
+                  >
+                    {t.label}
+                  </button>
+                ))}
               </div>
-              {slotPreview}
-              {result.fields.length > 0 && !result.complete && (
-                <p className="text-[11px] text-amber-600 mt-2">
-                  Missing:{" "}
-                  {result.fields
-                    .filter((f) => f.value == null)
-                    .map((f) => f.label)
-                    .join(", ")}
+            </div>
+
+            {/* Command textarea */}
+            <div className="px-3 py-2">
+              <textarea
+                ref={inputRef}
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  selRef.current = { start: e.target.selectionStart ?? e.target.value.length, end: e.target.selectionEnd ?? e.target.value.length };
+                }}
+                onKeyUp={(e) => {
+                  const t = e.target as HTMLTextAreaElement;
+                  selRef.current = { start: t.selectionStart ?? query.length, end: t.selectionEnd ?? query.length };
+                }}
+                onClick={(e) => {
+                  const t = e.target as HTMLTextAreaElement;
+                  selRef.current = { start: t.selectionStart ?? query.length, end: t.selectionEnd ?? query.length };
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submit();
+                  }
+                }}
+                placeholder="e.g.  roc group age   ·   ttest bmi sex   ·   correlation age sbp"
+                rows={2}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:border-indigo-500 focus:outline-none resize-none"
+                autoComplete="off"
+                spellCheck={false}
+              />
+
+              {/* Separator / operator buttons */}
+              <div className="flex flex-wrap gap-1 mt-2">
+                {SEP_TOKENS.map((op) => (
+                  <button
+                    key={op}
+                    onClick={() => insertAtCursor(op)}
+                    className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100 bg-white text-gray-600"
+                  >
+                    {op}
+                  </button>
+                ))}
+                <button
+                  onClick={backspaceToken}
+                  className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100 bg-white text-gray-500"
+                  title="Delete last token"
+                >⌫</button>
+                <button
+                  onClick={() => { setQuery(""); selRef.current = { start: 0, end: 0 }; requestAnimationFrame(() => inputRef.current?.focus()); }}
+                  className="px-2 py-0.5 text-xs rounded border border-gray-300 hover:bg-gray-100 bg-white text-gray-400"
+                >Clear</button>
+              </div>
+            </div>
+
+            {/* Live preview / examples */}
+            <div className="flex-1 overflow-y-auto px-3 pb-3">
+              {query.trim() === "" ? (
+                <div className="text-[11px] text-gray-400 leading-relaxed">
+                  <p className="mb-1.5">Tap a test, then tap your variables. Examples:</p>
+                  <div className="flex flex-col gap-1">
+                    {INTENT_SCHEMAS.map((s) => (
+                      <span key={s.intent} className="font-mono text-gray-500">· {s.intent}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : result.intent ? (
+                <PreviewBlock result={result} />
+              ) : (
+                <p className="text-[11px] text-gray-500">
+                  Start with a test token: <code className="text-indigo-600">roc</code>,{" "}
+                  <code className="text-indigo-600">ttest</code>,{" "}
+                  <code className="text-indigo-600">anova</code>,{" "}
+                  <code className="text-indigo-600">correlation</code>…
                 </p>
               )}
-              <p className="text-[11px] text-gray-400 mt-3 flex items-center gap-1">
-                <CornerDownLeft size={12} /> Press Enter to open the form pre-filled. You'll still
-                press Run yourself.
-              </p>
             </div>
-          ) : (
-            <div className="p-4">
-              <p className="text-xs text-gray-500">
-                No command recognised. Try a supported verb like{" "}
-                <code className="text-indigo-600">roc</code>,{" "}
-                <code className="text-indigo-600">ttest</code>,{" "}
-                <code className="text-indigo-600">anova</code>, or{" "}
-                <code className="text-indigo-600">correlation</code> followed by your column names.
-              </p>
+
+            {/* Footer: submit hint */}
+            <div className="px-3 py-2 border-t border-gray-100 flex items-center justify-between">
+              <span className="text-[11px] text-gray-400">
+                {result.intent
+                  ? result.complete
+                    ? "Ready — opens the form pre-filled"
+                    : "Fill the missing slots or press Enter anyway"
+                  : "Pick a test to build a command"}
+              </span>
+              <button
+                onClick={submit}
+                disabled={!result.intent}
+                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Open
+                <CornerDownLeft size={12} />
+              </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Live preview of the parsed command: title chip + resolved/missing slot chips. */
+function PreviewBlock({ result }: { result: ParseResult }) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-200 rounded-md px-2 py-0.5">
+          {result.title}
+        </span>
+        <span className="text-[10px] text-gray-400">→ {result.tab} tab</span>
+      </div>
+      {result.fields.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {result.fields.map((f) => {
+            const filled = f.value != null;
+            return (
+              <span
+                key={f.key}
+                className={`text-[11px] px-2 py-0.5 rounded-md border ${
+                  filled
+                    ? "bg-indigo-50 border-indigo-200 text-indigo-700"
+                    : "bg-gray-50 border-gray-200 text-gray-400"
+                }`}
+              >
+                {f.label}: <span className={filled ? "font-semibold" : "italic"}>{f.value ?? "—"}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
