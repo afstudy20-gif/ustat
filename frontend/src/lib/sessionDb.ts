@@ -374,6 +374,7 @@ export async function upsertRecentSessionRaw(input: {
 const CHANNEL = "wiz3-sessions";
 
 let _bc: BroadcastChannel | null = null;
+const _listeners = new Set<() => void>();
 
 function getChannel(): BroadcastChannel | null {
   if (typeof window === "undefined") return null;
@@ -384,16 +385,27 @@ function getChannel(): BroadcastChannel | null {
 }
 
 export function notifySessionsChanged(): void {
+  _listeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      /* listener failures must not block sync/save notifications */
+    }
+  });
   const bc = getChannel();
   if (bc) bc.postMessage({ type: "changed", at: Date.now() });
 }
 
 export function subscribeSessions(onChange: () => void): () => void {
+  _listeners.add(onChange);
   const bc = getChannel();
-  if (!bc) return () => {};
+  if (!bc) return () => { _listeners.delete(onChange); };
   const handler = () => onChange();
   bc.addEventListener("message", handler);
-  return () => bc.removeEventListener("message", handler);
+  return () => {
+    _listeners.delete(onChange);
+    bc.removeEventListener("message", handler);
+  };
 }
 
 // ── Storage estimate (for diagnostics / UI) ───────────────────────────
