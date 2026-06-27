@@ -207,6 +207,13 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
     session_id = str(uuid.uuid4())
     store.save(session_id, df)
+    # Persist the uploaded filename so subsequent save_session snapshots
+    # embed it (and resume restores it). Without this, get_filename returns
+    # None and save_session falls back to "session_{id}.json", which diverges
+    # from the original dataset name and spawns duplicate Recent Sessions
+    # cards (same data, different display name) that the name-based dedupe
+    # in sessionDb.ts cannot collapse.
+    store.set_filename(session_id, file.filename)
 
     columns = []
     for col in df.columns:

@@ -131,14 +131,19 @@ function newLocalId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Collapse ACTIVE records that share a display name down to the newest
- *  one. Trashed records are excluded — a name can legitimately appear once
- *  in the active list and once in the Trash.
+/** Collapse ACTIVE records that look like the same logical dataset down to
+ *  the newest one. Trashed records are excluded — a name can legitimately
+ *  appear once in the active list and once in the Trash.
  *
- *  The server session_id changes on every upload / reload / restore, so
- *  the same logical file accumulates a row per browser session. Identity
- *  that survives reloads is the *name*, so we keep the freshest snapshot
- *  per name and drop the stale ones. */
+ *  The server session_id changes on every upload / reload / restore, so the
+ *  same logical file accumulates a row per browser session. Two identity
+ *  passes collapse them:
+ *    1. by name — covers renames and re-uploads where the filename is stable
+ *    2. by content fingerprint (rows × cols × byte size) — catches the
+ *       "session_XXX.json" duplicate that save_session used to mint when the
+ *       backend hadn't persisted the uploaded filename (now fixed in
+ *       upload.py). Two snapshots of the exact same data land side by side
+ *       under different names; we keep the newest and drop the stale alias. */
 async function dedupeByName(): Promise<void> {
   const db = getDb();
   const rows = await db.sessions
@@ -146,14 +151,23 @@ async function dedupeByName(): Promise<void> {
     .reverse()
     .filter((r) => !r.deletedAt)
     .toArray();
-  const seen = new Set<string>();
+  const seenNames = new Set<string>();
+  const seenFp = new Set<string>();
   const stale: string[] = [];
   for (const r of rows) {
-    const key = r.name || r.id;
-    if (seen.has(key)) {
+    const nameKey = r.name || r.id;
+    const fpKey = `${r.nRows ?? "?"}x${r.nCols ?? "?"}:${r.sizeBytes}`;
+    // Name is the primary identity. A real fingerprint collision (two
+    // genuinely different files that happen to share rows×cols×bytes) is
+    // vanishingly rare, and even then we'd just keep the newest snapshot —
+    // acceptable for a local recents list.
+    const dupeByName = seenNames.has(nameKey);
+    const dupeByFp = r.nRows != null && r.nCols != null && seenFp.has(fpKey);
+    if (dupeByName || dupeByFp) {
       stale.push(r.id);   // older (rows already sorted newest-first)
     } else {
-      seen.add(key);
+      seenNames.add(nameKey);
+      if (r.nRows != null && r.nCols != null) seenFp.add(fpKey);
     }
   }
   if (stale.length) {
