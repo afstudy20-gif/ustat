@@ -295,9 +295,9 @@ export default function ModelsPanel() {
           ] as const).map(([v, l, desc]) => (
             <label key={v} className="flex items-start gap-2 cursor-pointer group">
               <input type="radio" name="model" value={v} checked={model === v} onChange={() => { setModel(v); setResult(null); setSelectedCoefIdx(null); }} className="accent-indigo-500 mt-0.5" />
-              <span className="text-sm text-gray-700 leading-tight">
-                {l}
-                <Tip text={desc} wide />
+              <span className="leading-tight">
+                <span className="text-sm text-gray-700">{l}</span>
+                <span className="block text-[11px] text-gray-400 leading-snug mt-0.5">{desc}</span>
               </span>
             </label>
           ))}
