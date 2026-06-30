@@ -1256,7 +1256,14 @@ function DataTableBody({ session }: { session: Session }) {
                               onBlur={commitRename}
                             />
                           ) : (
-                            <span className={`text-left text-xs font-medium truncate cursor-text ${col.analysis_excluded ? "text-gray-400 line-through" : "text-gray-700"}`}
+                            <span
+                              className={`text-left text-xs font-medium truncate cursor-text ${
+                                col.analysis_excluded
+                                  ? "text-gray-400 line-through"
+                                  : /^Column_\d+$/.test(col.name)
+                                  ? "text-gray-400 italic"
+                                  : "text-gray-700"
+                              }`}
                               onDoubleClick={() => startRename(col.name)}
                               title={col.analysis_excluded ? "Excluded from analysis · double-click to rename" : "Double-click to rename"}>
                               {col.name}

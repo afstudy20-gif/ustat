@@ -17,20 +17,32 @@ from services import store
 router = APIRouter()
 
 
+PLACEHOLDER_COLS = 5
+PLACEHOLDER_ROWS = 10
+
+
 @router.post("/blank")
 async def create_blank_session():
-    """Create an empty server-backed workspace for manual data entry."""
+    """Create a workspace seeded with placeholder columns/rows for manual entry."""
     session_id = str(uuid.uuid4())
     filename = "Untitled workspace"
-    df = pd.DataFrame()
+    col_names = [f"Column_{i + 1}" for i in range(PLACEHOLDER_COLS)]
+    df = pd.DataFrame(
+        {name: [None] * PLACEHOLDER_ROWS for name in col_names}
+    )
     store.save(session_id, df, track_undo=False)
     store.set_filename(session_id, filename)
+    columns = [
+        {"name": name, "dtype": str(df[name].dtype), "kind": "text"}
+        for name in df.columns
+    ]
+    preview = [{name: None for name in col_names} for _ in range(PLACEHOLDER_ROWS)]
     return {
         "session_id": session_id,
         "filename": filename,
-        "rows": 0,
-        "columns": [],
-        "preview": [],
+        "rows": len(df),
+        "columns": columns,
+        "preview": preview,
     }
 
 
