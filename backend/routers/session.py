@@ -17,6 +17,23 @@ from services import store
 router = APIRouter()
 
 
+@router.post("/blank")
+async def create_blank_session():
+    """Create an empty server-backed workspace for manual data entry."""
+    session_id = str(uuid.uuid4())
+    filename = "Untitled workspace"
+    df = pd.DataFrame()
+    store.save(session_id, df, track_undo=False)
+    store.set_filename(session_id, filename)
+    return {
+        "session_id": session_id,
+        "filename": filename,
+        "rows": 0,
+        "columns": [],
+        "preview": [],
+    }
+
+
 # ── Cell editing ───────────────────────────────────────────────────────────────
 
 class CellUpdate(BaseModel):

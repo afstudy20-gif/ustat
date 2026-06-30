@@ -19,3 +19,8 @@ pdfplumber==0.11.9
 python-docx==1.1.2
 loguru==0.7.3
 simpleeval==1.0.7
+# Server-side static chart rendering for POST /api/charts/render. Heavy (bundle
+# a headless Chromium); the endpoint imports them lazily and returns 503 if a
+# slim deployment omits them.
+plotly==6.8.0
+kaleido==1.3.0

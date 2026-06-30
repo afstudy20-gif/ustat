@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Upload, Info, Zap, BarChart2, ShieldAlert, ListChecks, Sparkles, NotebookPen, FileText, HeartPulse, Workflow, Layers, HelpCircle, Newspaper, Cloud, CloudDownload, LogOut, RefreshCw } from "lucide-react";
-import { uploadFile } from "../api";
+import { createBlankSession, uploadFile } from "../api";
 import api from "../api";
 import { useStore } from "../store";
 import AboutModal from "./AboutModal";
@@ -116,6 +116,27 @@ export default function UploadZone() {
     }
   }, [setSession]);
 
+  const startBlankWorkspace = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await createBlankSession();
+      setSession(res.data);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string }; status?: number }; message?: string };
+      const detail = err.response?.data?.detail;
+      const status = err.response?.status;
+      const msg = detail
+        ? `${detail}`
+        : err.message?.includes("Network")
+        ? "Cannot connect to backend (localhost:8000). Is it running?"
+        : `Could not start blank workspace (${status ?? err.message ?? "unknown error"})`;
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [setSession]);
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -207,7 +228,7 @@ export default function UploadZone() {
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
-          onClick={() => document.getElementById("file-input")?.click()}
+          onClick={startBlankWorkspace}
           className={`flex flex-col items-center justify-center gap-2 px-5 py-6 rounded-card border-[1.5px] border-dashed cursor-pointer transition-all min-h-[170px]
             ${dragging
               ? "border-ink-500 bg-ink-150"
@@ -219,8 +240,18 @@ export default function UploadZone() {
           </div>
           <div className="flex flex-col items-center gap-1">
             <Upload size={22} className="text-ink-500" />
-            <p className="text-sm font-semibold text-ink-600">Drop your data file here</p>
-            <p className="text-xs text-ink-500/80">or click to browse</p>
+            <p className="text-sm font-semibold text-ink-600">Start blank workspace</p>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                document.getElementById("file-input")?.click();
+              }}
+              className="text-xs font-semibold text-ink-600 border border-ink-200 bg-white rounded-full px-3.5 py-1 hover:border-ink-400 hover:bg-ink-50 transition-colors"
+            >
+              Browse file
+            </button>
+            <p className="text-xs text-ink-500/80">or drop your data file here</p>
             <p className="text-[11px] text-ink-300 mt-1.5 text-center px-2 tracking-wide">CSV · Excel · SPSS · SAS · Stata · Session JSON</p>
           </div>
           <input

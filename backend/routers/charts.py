@@ -2,10 +2,10 @@ import json as _json
 import numpy as np
 import pandas as pd
 from scipy import stats as scipy_stats
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
-from typing import List, Optional
-from services import store
+from typing import Any, Dict, List, Optional
+from services import store, plot_render
 from services.dirty_value_guard import coerce_numeric, mask_sentinels, plausibility_max_for_column
 from services.stat_utils import sorted_groups
 
@@ -502,3 +502,33 @@ def subgroup_bar(req: SubgroupBarRequest):
             f"proportions). Error bars show {_err_label}."
         )
     }
+
+
+# ── Server-side static rendering (headless / API / reports) ──────────────────
+# The other chart endpoints return Plotly trace data for the browser to draw.
+# This one renders a full figure spec to a static image on the server (kaleido),
+# so non-browser callers can obtain a PNG/SVG/PDF directly. Styling stays in the
+# caller's figure — the server never builds traces, so there is no drift from
+# what the frontend shows. plotly/kaleido are optional; absent → 503.
+
+class RenderRequest(BaseModel):
+    figure: Dict[str, Any]            # Plotly figure: {"data": [...], "layout": {...}}
+    format: str = "png"              # png | svg | jpeg | pdf | webp
+    width: Optional[int] = None      # px; None → figure's own layout size
+    height: Optional[int] = None
+    scale: float = 2.0               # device-pixel multiplier (print/retina)
+
+
+@router.post("/render")
+def render_chart(req: RenderRequest):
+    """Render a Plotly figure spec to a static image and return the raw bytes."""
+    try:
+        image = plot_render.render_figure(
+            req.figure, fmt=req.format, width=req.width, height=req.height, scale=req.scale
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except plot_render.RenderUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    media_type = plot_render.MIME_TYPES.get(req.format.lower(), "application/octet-stream")
+    return Response(content=image, media_type=media_type)
