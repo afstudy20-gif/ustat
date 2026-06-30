@@ -228,29 +228,33 @@ export default function UploadZone() {
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
-          onClick={startBlankWorkspace}
-          className={`flex flex-col items-center justify-center gap-2 px-5 py-6 rounded-card border-[1.5px] border-dashed cursor-pointer transition-all min-h-[170px]
+          className={`flex flex-col items-center justify-center gap-2 px-5 py-6 rounded-card border-[1.5px] border-dashed transition-all min-h-[170px]
             ${dragging
               ? "border-ink-500 bg-ink-150"
-              : "border-ink-200 bg-ink-50 hover:border-ink-500 hover:bg-ink-150 hover:-translate-y-0.5"}`}
+              : "border-ink-200 bg-ink-50 hover:border-ink-500 hover:bg-ink-150"}`}
         >
           <div className="flex items-center gap-2 text-ink-600">
             <BarChart2 size={22} />
             <span className="text-[17px] font-semibold text-slate-800">Statistical Analysis</span>
           </div>
-          <div className="flex flex-col items-center gap-1">
+          <div className="flex flex-col items-center gap-1.5">
             <Upload size={22} className="text-ink-500" />
-            <p className="text-sm font-semibold text-ink-600">Start blank workspace</p>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                document.getElementById("file-input")?.click();
-              }}
-              className="text-xs font-semibold text-ink-600 border border-ink-200 bg-white rounded-full px-3.5 py-1 hover:border-ink-400 hover:bg-ink-50 transition-colors"
-            >
-              Browse file
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={startBlankWorkspace}
+                className="text-xs font-semibold text-ink-600 border border-ink-200 bg-white rounded-full px-3.5 py-1 hover:border-ink-400 hover:bg-ink-50 transition-colors"
+              >
+                New file
+              </button>
+              <button
+                type="button"
+                onClick={() => document.getElementById("file-input")?.click()}
+                className="text-xs font-semibold text-ink-600 border border-ink-200 bg-white rounded-full px-3.5 py-1 hover:border-ink-400 hover:bg-ink-50 transition-colors"
+              >
+                Browse file
+              </button>
+            </div>
             <p className="text-xs text-ink-500/80">or drop your data file here</p>
             <p className="text-[11px] text-ink-300 mt-1.5 text-center px-2 tracking-wide">CSV · Excel · SPSS · SAS · Stata · Session JSON</p>
           </div>
