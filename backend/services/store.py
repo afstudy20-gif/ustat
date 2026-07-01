@@ -61,6 +61,19 @@ AUTOSAVE_INTERVAL_SECONDS = int(os.environ.get("AUTOSAVE_INTERVAL_SECONDS", "20"
 _dirty: set = set()  # session_ids changed since the last disk flush
 
 
+def _mark_dirty(session_id: str) -> None:
+    """Flag a session as changed so the next disk-flush writes its snapshot.
+
+    Meta-only mutations (filename, kinds, decimals, metadata, filter) used to
+    skip this, so a backend restart reverted them to the last DataFrame-mutating
+    save — e.g. a header rename was lost and the welcome screen kept listing the
+    session under the old (upload) filename. Any function that touches a
+    persisted meta map must mark dirty. Lock-guarded so it can't race the
+    flush worker's read-and-clear under `_lock`."""
+    with _lock:
+        _dirty.add(session_id)
+
+
 def _cache_paths(session_id: str) -> tuple:
     base = os.path.join(SESSION_CACHE_DIR, session_id)
     return base + ".pkl", base + ".meta.json"
@@ -448,6 +461,7 @@ def save_metadata(session_id: str, meta: dict) -> None:
         else:
             cur[col] = m
     _metadata[session_id] = cur
+    _mark_dirty(session_id)
 
 
 def get_metadata(session_id: str) -> dict:
@@ -466,11 +480,13 @@ def save_kind_overrides(session_id: str, overrides: Dict[str, str]) -> None:
     current = _kinds.get(session_id, {})
     current.update({k: v for k, v in overrides.items() if v})
     _kinds[session_id] = current
+    _mark_dirty(session_id)
 
 
 def set_kind_overrides(session_id: str, overrides: Dict[str, str]) -> None:
     """Replace the override map wholesale (used on load_session restore)."""
     _kinds[session_id] = dict(overrides or {})
+    _mark_dirty(session_id)
 
 
 def get_kind_overrides(session_id: str) -> Dict[str, str]:
@@ -491,6 +507,7 @@ def clear_kind_override(session_id: str, column: str) -> None:
 def save_decimals(session_id: str, decimals: Dict[str, int]) -> None:
     """Replace the decimal-places map wholesale."""
     _decimals[session_id] = {k: int(v) for k, v in (decimals or {}).items()}
+    _mark_dirty(session_id)
 
 
 def get_decimals(session_id: str) -> Dict[str, int]:
@@ -502,17 +519,20 @@ def set_decimal(session_id: str, column: str, decimals: int) -> None:
     cur = _decimals.get(session_id, {})
     cur[column] = int(decimals)
     _decimals[session_id] = cur
+    _mark_dirty(session_id)
 
 
 def clear_decimal(session_id: str, column: str) -> None:
     if session_id in _decimals:
         _decimals[session_id].pop(column, None)
+        _mark_dirty(session_id)
 
 
 def rename_decimal_key(session_id: str, old: str, new: str) -> None:
     """Move the decimal entry to a new column name (called on rename)."""
     if session_id in _decimals and old in _decimals[session_id]:
         _decimals[session_id][new] = _decimals[session_id].pop(old)
+        _mark_dirty(session_id)
 
 
 def rename_column_key(session_id: str, old: str, new: str) -> None:
@@ -529,6 +549,7 @@ def rename_column_key(session_id: str, old: str, new: str) -> None:
         kinds[new] = kinds.pop(old)
     if session_id in _decimals and old in _decimals[session_id]:
         _decimals[session_id][new] = _decimals[session_id].pop(old)
+    _mark_dirty(session_id)
 
 
 # ── Session display name (user-facing rename) ────────────────────────────────
@@ -543,6 +564,7 @@ def set_filename(session_id: str, name: str) -> None:
     """
     if name:
         _filenames[session_id] = str(name)
+        _mark_dirty(session_id)
 
 
 def get_filename(session_id: str) -> Optional[str]:
