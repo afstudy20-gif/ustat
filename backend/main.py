@@ -24,6 +24,13 @@ from services import store
 app = FastAPI(title="Wizard Stats API", version="1.0.0")
 
 
+@app.on_event("startup")
+async def _restore_sessions() -> None:
+    """Rehydrate any session snapshots the autosave thread wrote before the
+    last restart — otherwise a redeploy silently discards in-progress edits."""
+    store.load_persisted_sessions()
+
+
 # ── Global handler: convert FastAPI's "Out of range float values are not JSON
 # compliant" crash into a usable 400. This happens when a statistic comes out
 # as NaN/Inf (e.g. ANCOVA on a tiny subgroup, Mantel-Haenszel on a degenerate

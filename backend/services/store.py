@@ -1,5 +1,16 @@
-"""In-memory dataframe store keyed by session id with automatic cleanup."""
+"""In-memory dataframe store keyed by session id with automatic cleanup.
+
+Also periodically snapshots dirty sessions to disk (SESSION_CACHE_DIR) so a
+container restart/redeploy doesn't silently wipe a user's in-progress edits —
+without that, every backend restart lost all unsaved work. Snapshots are
+overwritten in place (one file pair per session, not versioned) so the cache
+never grows unbounded; the same TTL/MAX_SESSIONS eviction that prunes memory
+also deletes the matching disk files.
+"""
+import json
 import os
+import tempfile
+import threading
 import pandas as pd
 from typing import Dict, List, Optional
 import time
@@ -33,6 +44,135 @@ def _purge_locked(session_id: str) -> None:
     """Remove a session from EVERY per-session map. Caller must hold _lock."""
     for m in _SESSION_MAPS:
         m.pop(session_id, None)
+    _dirty.discard(session_id)
+    _delete_disk_snapshot(session_id)
+
+
+# ── Disk autosave (survives backend restarts / redeploys) ──────────────────
+# Best-effort: a container without a mounted volume at SESSION_CACHE_DIR
+# simply loses the cache on restart, same as before — this only helps when
+# the directory is backed by persistent storage (see docker-compose.yml).
+SESSION_CACHE_DIR = os.environ.get(
+    "SESSION_CACHE_DIR",
+    "/app/backend/session_cache" if os.path.isdir("/app/backend") else
+    os.path.join(tempfile.gettempdir(), "ustat_session_cache"),
+)
+AUTOSAVE_INTERVAL_SECONDS = int(os.environ.get("AUTOSAVE_INTERVAL_SECONDS", "20"))
+_dirty: set = set()  # session_ids changed since the last disk flush
+
+
+def _cache_paths(session_id: str) -> tuple:
+    base = os.path.join(SESSION_CACHE_DIR, session_id)
+    return base + ".pkl", base + ".meta.json"
+
+
+def _delete_disk_snapshot(session_id: str) -> None:
+    df_path, meta_path = _cache_paths(session_id)
+    for p in (df_path, meta_path):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _atomic_write_pickle(df: pd.DataFrame, path: str) -> None:
+    tmp = path + ".tmp"
+    df.to_pickle(tmp)
+    os.replace(tmp, path)
+
+
+def _flush_dirty_to_disk() -> None:
+    """Snapshot every session touched since the last flush. Called from the
+    autosave thread — overwrites each session's single file pair in place so
+    the cache directory never accumulates history."""
+    with _lock:
+        pending = list(_dirty)
+        _dirty.clear()
+        snapshot = {}
+        for sid in pending:
+            entry = _store.get(sid)
+            if entry is not None:
+                snapshot[sid] = (entry["df"], entry["timestamp"])
+
+    if not snapshot:
+        return
+    try:
+        os.makedirs(SESSION_CACHE_DIR, exist_ok=True)
+    except OSError:
+        return  # No writable/mounted cache dir — degrade to memory-only silently.
+
+    for sid, (df, ts) in snapshot.items():
+        df_path, meta_path = _cache_paths(sid)
+        try:
+            _atomic_write_pickle(df, df_path)
+            meta = {
+                "timestamp": ts,
+                "kinds": _kinds.get(sid, {}),
+                "decimals": _decimals.get(sid, {}),
+                "filename": _filenames.get(sid),
+                "metadata": _metadata.get(sid, {}),
+            }
+            with open(meta_path + ".tmp", "w") as f:
+                json.dump(meta, f)
+            os.replace(meta_path + ".tmp", meta_path)
+        except OSError:
+            continue  # Best-effort — a write failure just skips this session's snapshot.
+
+
+def _autosave_worker() -> None:
+    while True:
+        time.sleep(AUTOSAVE_INTERVAL_SECONDS)
+        try:
+            _flush_dirty_to_disk()
+        except Exception:
+            pass  # Autosave must never crash the request-handling thread.
+
+
+_autosave_thread = threading.Thread(target=_autosave_worker, daemon=True)
+_autosave_thread.start()
+
+
+def load_persisted_sessions() -> None:
+    """Rehydrate the in-memory store from disk snapshots on backend startup.
+    Skips (and deletes) anything past the normal session TTL. Called once
+    from main.py's startup hook."""
+    if not os.path.isdir(SESSION_CACHE_DIR):
+        return
+    now = time.time()
+    try:
+        names = [f[:-4] for f in os.listdir(SESSION_CACHE_DIR) if f.endswith(".pkl")]
+    except OSError:
+        return
+
+    for sid in names:
+        df_path, meta_path = _cache_paths(sid)
+        try:
+            mtime = os.path.getmtime(df_path)
+        except OSError:
+            continue
+        if now - mtime > SESSION_TTL_SECONDS:
+            _delete_disk_snapshot(sid)
+            continue
+        try:
+            df = pd.read_pickle(df_path)
+            meta = {}
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+        except Exception:
+            _delete_disk_snapshot(sid)
+            continue
+
+        with _lock:
+            _store[sid] = {"df": df, "timestamp": meta.get("timestamp", mtime)}
+            if meta.get("kinds"):
+                _kinds[sid] = meta["kinds"]
+            if meta.get("decimals"):
+                _decimals[sid] = meta["decimals"]
+            if meta.get("filename"):
+                _filenames[sid] = meta["filename"]
+            if meta.get("metadata"):
+                _metadata[sid] = meta["metadata"]
 
 
 def purge_session(session_id: str) -> None:
@@ -93,6 +233,7 @@ def save(session_id: str, df: pd.DataFrame, track_undo: bool = True) -> None:
             # Clear redo stack on new action
             _redo.pop(session_id, None)
         _store[session_id] = {"df": df, "timestamp": time.time()}
+        _dirty.add(session_id)
     log_action(session_id, "data_updated")
 
 

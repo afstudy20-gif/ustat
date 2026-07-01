@@ -50,9 +50,15 @@ services:
     #       cpus: '2'
     #       memory: 1G
 
-    # Only add volumes if you need persistent code runner logs
-    # volumes:
-    #   - ustat-logs:/app/backend/logs
+    # Session cache: lets in-progress workspace edits survive a redeploy
+    # instead of being wiped when the backend process restarts. Purely a
+    # crash/restart safety net — sessions still expire after their normal
+    # 30-minute TTL and the cache never grows since each session's snapshot
+    # is overwritten in place, not versioned.
+    volumes:
+      - ustat-sessions:/app/backend/session_cache
+      # - ustat-logs:/app/backend/logs
 
-# volumes:
-#   ustat-logs:
+volumes:
+  ustat-sessions:
+# ustat-logs:

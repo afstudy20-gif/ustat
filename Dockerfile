@@ -25,11 +25,11 @@ COPY --from=frontend-builder /app/frontend/dist ../frontend/dist
 ENV PYTHONDONTWRITEBYTECODE=1
 RUN groupadd -r app --gid 10001 \
  && useradd -r -g app --uid 10001 --no-create-home --shell /sbin/nologin app \
- && mkdir -p /tmp/sandbox /app/backend/logs \
+ && mkdir -p /tmp/sandbox /app/backend/logs /app/backend/session_cache \
  && chown -R root:root /app \
  && chmod -R go-w /app \
- && chown -R app:app /app/backend/logs /tmp/sandbox \
- && chmod 0770 /app/backend/logs /tmp/sandbox
+ && chown -R app:app /app/backend/logs /app/backend/session_cache /tmp/sandbox \
+ && chmod 0770 /app/backend/logs /app/backend/session_cache /tmp/sandbox
 USER app
 
 EXPOSE 8000
