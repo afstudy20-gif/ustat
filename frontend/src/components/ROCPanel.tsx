@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, type ReactNode } from "react";
 import TitledPlot from "./TitledPlot";
 import ResultExporter from "./ResultExporter";
 import { useStore, PALETTES, isNumericKind, type Session } from "../store";
@@ -854,14 +854,14 @@ function ROCPanelBody({ session }: { session: Session }) {
                         </div>
                       </div>
 
-                      {[
-                        ["Z statistic", cmpResult.z.toFixed(3)],
-                        ["DeLong p-value", fmtP(cmpResult.p)],
-                        ["n (paired)", cmpResult.n],
-                      ].map(([k, v]) => (
-                        <div key={String(k)} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
-                          <span className="text-gray-400">{k}</span>
-                          <span className={`font-mono ml-2 shrink-0 ${k === "DeLong p-value" && cmpResult.significant ? "text-green-700 font-semibold" : "text-gray-700"}`}>{v}</span>
+                      {([
+                        ["Z statistic", cmpResult.z.toFixed(3), false],
+                        ["DeLong p-value", fmtP(cmpResult.p), true],
+                        ["n (paired)", cmpResult.n, false],
+                      ] as const).map(([k, v, isP]) => (
+                        <div key={k} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+                          <span className="text-gray-400">{isP ? <>DeLong <i>p</i>-value</> : k}</span>
+                          <span className={`font-mono ml-2 shrink-0 ${isP && cmpResult.significant ? "text-green-700 font-semibold" : "text-gray-700"}`}>{v}</span>
                         </div>
                       ))}
 
@@ -1133,7 +1133,7 @@ function ROCPanelBody({ session }: { session: Session }) {
               ? `AUC = ${result.auc.toFixed(2)} (95% CI ${result.ci_lower.toFixed(2)}–${result.ci_upper.toFixed(2)})`
               : `AUC = ${result.auc.toFixed(2)}`;
             const aucP = result.auc_p != null
-              ? `p = ${fmtP(result.auc_p)}`
+              ? `<i>p</i> = ${fmtP(result.auc_p)}`
               : null;
             const aucBoxText = aucP ? `${aucCI}<br>${aucP}` : aucCI;
 
@@ -1277,7 +1277,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                     text: [
                       `<b>ΔAUC = ${cmpResult.difference > 0 ? "+" : ""}${cmpResult.difference.toFixed(3)}</b>`,
                       `95% CI: ${cmpResult.ci_diff_low.toFixed(3)} to ${cmpResult.ci_diff_high.toFixed(3)}`,
-                      `DeLong p = ${fmtP(cmpResult.p)}`,
+                      `DeLong <i>p</i> = ${fmtP(cmpResult.p)}`,
                     ].join("<br>"),
                     showarrow: false,
                     font: { color: cmpResult.significant ? "#15803d" : "#6b7280", size: 11 },
@@ -1386,7 +1386,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                     Z = {result.auc_z}{" "}
                     <span className="text-gray-400">|</span>{" "}
                     <span className={`font-mono ${result.auc_p < 0.05 ? "text-emerald-700 font-semibold" : "text-gray-500"}`}>
-                      p = {fmtP(result.auc_p)}
+                      <i>p</i> = {fmtP(result.auc_p)}
                     </span>
                   </span>
                 )}
@@ -1407,8 +1407,8 @@ function ROCPanelBody({ session }: { session: Session }) {
                   {result.imputation && result.imputation !== "listwise" ? ` (${result.imputation} imputation applied)` : " (listwise deletion)"}.
                 </InfoBanner>
               )}
-              {[["n", result.n], ["Positives", result.n_positive], ["Negatives", result.n_negative]].map(([k, v]) => (
-                <div key={String(k)} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
+              {([[<i>n</i>, result.n], ["Positives", result.n_positive], ["Negatives", result.n_negative]] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                <div key={i} className="flex justify-between border-b border-gray-100 py-0.5 text-xs">
                   <span className="text-gray-400">{k}</span>
                   <span className="text-gray-700 font-mono">{v}</span>
                 </div>
@@ -1520,7 +1520,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                       <th className="text-left px-1.5 py-1 font-medium">B</th>
                       <th className="text-right px-1.5 py-1 font-medium">ΔAUC</th>
                       <th className="text-right px-1.5 py-1 font-medium">95% CI</th>
-                      <th className="text-right px-1.5 py-1 font-medium">p</th>
+                      <th className="text-right px-1.5 py-1 font-medium"><i>p</i></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1548,7 +1548,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                 </table>
               </div>
               <p className="text-[9px] text-gray-400 leading-snug">
-                n = {multiDelong.n} · K = {multiDelong.scores?.length ?? 0} curves · {multiDelong.n_pairs} pairs · p-adjust: {multiDelong.p_adjust}
+                <i>n</i> = {multiDelong.n} · K = {multiDelong.scores?.length ?? 0} curves · {multiDelong.n_pairs} pairs · p-adjust: {multiDelong.p_adjust}
               </p>
             </div>
           )}

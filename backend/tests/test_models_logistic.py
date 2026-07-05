@@ -217,7 +217,7 @@ def test_logistic_table_all(client, sid):
     body = r.json()
     assert body["model"] == "Logistic OR Table"
     assert body["use_firth"] is False
-    assert body["n_total"] == 3
+    assert body["n_total"] == 300
     assert isinstance(body["table"], list) and len(body["table"]) >= 3
     for row in body["table"]:
         assert "variable" in row

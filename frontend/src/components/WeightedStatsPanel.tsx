@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useStore, isNumericKind, isCategoricalKind } from "../store";
 import { runWeightedDescriptive } from "../api";
 import { Tip } from "./Tip";
@@ -146,7 +146,7 @@ export default function WeightedStatsPanel() {
             <div className="panel space-y-2">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-800">
-                  Weighted statistics <span className="text-gray-400 font-normal">· weight = {result.weight_col} · n = {result.n}</span>
+                  Weighted statistics <span className="text-gray-400 font-normal">· weight = {result.weight_col} · <i>n</i> = {result.n}</span>
                 </h4>
                 {result.export_rows && (
                   <ResultExporter title={`Weighted_${result.weight_col}`} headers={result.export_rows[0]} rows={result.export_rows.slice(1)} />
@@ -156,8 +156,8 @@ export default function WeightedStatsPanel() {
                 <table className="w-full text-xs border-collapse">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
-                      {["Variable", "n", "ESS", "W. mean", "W. SD", "95% CI", "Median", "[Q1, Q3]", "W. prop"].map((h) => (
-                        <th key={h} className="text-left px-2 py-1.5 font-medium">{h}</th>
+                      {(["Variable", <i key="n">n</i>, "ESS", "W. mean", "W. SD", "95% CI", "Median", "[Q1, Q3]", "W. prop"] as ReactNode[]).map((h, i) => (
+                        <th key={i} className="text-left px-2 py-1.5 font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -194,13 +194,13 @@ export default function WeightedStatsPanel() {
                   Weighted comparison — {result.comparison.variable}
                 </h4>
                 <div className="grid grid-cols-4 gap-2">
-                  {[
+                  {([
                     [`${result.comparison.group_a}`, result.comparison.w_mean_a],
                     [`${result.comparison.group_b}`, result.comparison.w_mean_b],
                     ["Δ (95% CI)", `${result.comparison.diff} (${result.comparison.ci_low}–${result.comparison.ci_high})`],
-                    ["t-test p", fmtP(result.comparison.p)],
-                  ].map(([k, v]) => (
-                    <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
+                    [<>t-test <i>p</i></>, fmtP(result.comparison.p)],
+                  ] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                    <div key={i} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                       <p className="text-[9px] text-gray-400">{k}</p>
                       <p className="font-semibold text-gray-800 text-xs font-mono">{v}</p>
                     </div>

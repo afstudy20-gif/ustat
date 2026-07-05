@@ -105,7 +105,7 @@ function ReliabilityPanelBody({ session }: { session: Session }) {
                 )}
                 <div>
                   <p className="text-sm font-medium text-gray-700">{result.interpretation}</p>
-                  <p className="text-xs text-gray-400">{result.k} items, n = {result.n}</p>
+                  <p className="text-xs text-gray-400">{result.k} items, <i>n</i> = {result.n}</p>
                 </div>
               </div>
 

@@ -91,7 +91,7 @@ export function CoefTable({
               <th className={hd}>Variable</th>
               <th className={hd} title="Log Incidence Rate Ratio">Log-IRR</th>
               <th className={hd}>SE</th><th className={hd}>z</th>
-              <th className={hd}>p-value</th>
+              <th className={hd}><i>p</i>-value</th>
               <th className={hd} title="Incidence Rate Ratio = e^β">IRR</th>
               <th className={hd}>CI 95% (IRR)</th>
               <th className={hd}>Visualization</th>
@@ -141,7 +141,7 @@ export function CoefTable({
               <th className={hd}>Variable</th>
               <th className={hd} title="Log-Odds (β)">Log-Odds</th>
               <th className={hd}>SE</th><th className={hd}>z</th>
-              <th className={hd}>p-value</th>
+              <th className={hd}><i>p</i>-value</th>
               <th className={hd} title="Odds Ratio = e^β">OR</th>
               <th className={hd}>CI 95% (OR)</th>
               <th className={hd}>Visualization</th>
@@ -190,7 +190,7 @@ export function CoefTable({
             {hrMode ? <th className={hd}>HR</th> : <th className={hd}>Estimate</th>}
             <th className={hd}>SE</th>
             {hrMode ? <th className={hd}>Z</th> : <th className={hd}>t / z</th>}
-            <th className={hd}>p-value</th>
+            <th className={hd}><i>p</i>-value</th>
             <th className={hd}>CI (95%)</th>
             <th className={hd}>Visualization</th>
             <th className={hd}>Significance</th>
@@ -305,10 +305,10 @@ export function ORTable({ rows, outcome, selectionMethod, nMulti, nTotal }: {
             </tr>
             <tr>
               <th className="text-indigo-600">OR (95% CI)</th>
-              <th className="text-indigo-600">p-value</th>
+              <th className="text-indigo-600"><i>p</i>-value</th>
               <th className="text-indigo-600"></th>
               <th className="text-emerald-600">OR (95% CI)</th>
-              <th className="text-emerald-600">p-value</th>
+              <th className="text-emerald-600"><i>p</i>-value</th>
               <th className="text-emerald-600"></th>
             </tr>
           </thead>

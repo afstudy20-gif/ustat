@@ -825,7 +825,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                       <th className="text-right px-3 py-2 font-medium">SMD Before</th>
                       <th className="text-right px-3 py-2 font-medium">SMD After</th>
                       <th className="text-right px-3 py-2 font-medium" title="Rubin's variance ratio. Target 0.5–2.0.">Var Ratio</th>
-                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value.">KS p (after)</th>
+                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value.">KS <i>p</i> (after)</th>
                       <th className="text-right px-3 py-2 font-medium">Reduction</th>
                       <th className="text-center px-3 py-2 font-medium">Balanced</th>
                     </tr>

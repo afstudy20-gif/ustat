@@ -74,7 +74,7 @@ export default function IntervalCensoredPanel({ session }: { session: Session })
       hovertemplate: `${name}<br>t=%{x}<br>S(t)=%{y:.3f}<extra></extra>`,
     });
     if (result.groups && result.groups.length) {
-      return result.groups.map((g, i) => mk(g.curve, `${groupCol}=${g.level} (n=${g.n})`, PALETTE[i % PALETTE.length]));
+      return result.groups.map((g, i) => mk(g.curve, `${groupCol}=${g.level} (<i>n</i>=${g.n})`, PALETTE[i % PALETTE.length]));
     }
     return result.npmle_curve.length ? [mk(result.npmle_curve, "Overall", PALETTE[0])] : [];
   }, [result, groupCol]);
@@ -190,7 +190,7 @@ export default function IntervalCensoredPanel({ session }: { session: Session })
                     <th className="text-left py-1.5 font-medium">Predictor</th>
                     <th className="text-right py-1.5 font-medium">Time ratio (95% CI)</th>
                     <th className="text-right py-1.5 font-medium">Hazard ratio (95% CI)</th>
-                    <th className="text-right py-1.5 font-medium">p</th>
+                    <th className="text-right py-1.5 font-medium"><i>p</i></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -201,7 +201,7 @@ export default function IntervalCensoredPanel({ session }: { session: Session })
                         <td className="py-1.5 font-mono text-gray-700">{r.variable}</td>
                         <td className="py-1.5 text-right tabular-nums">{r.time_ratio.toFixed(2)} ({r.tr_ci_low.toFixed(2)}–{r.tr_ci_high.toFixed(2)})</td>
                         <td className={`py-1.5 text-right tabular-nums ${sig ? "font-semibold text-indigo-700" : ""}`}>{r.hazard_ratio.toFixed(2)} ({r.hr_ci_low.toFixed(2)}–{r.hr_ci_high.toFixed(2)})</td>
-                        <td className={`py-1.5 text-right tabular-nums ${sig ? "font-semibold text-indigo-700" : "text-gray-600"}`}>{fmtPubP(r.p)}</td>
+                        <td className={`py-1.5 text-right tabular-nums ${sig ? "font-semibold text-indigo-700" : "text-gray-600"}`}>{r.p == null ? "—" : <><i>p</i>{fmtPubP(r.p).slice(1)}</>}</td>
                       </tr>
                     );
                   })}

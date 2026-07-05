@@ -305,8 +305,8 @@ export default function PowerPanel() {
       type: "scatter", mode: "markers",
       x: [pt.n], y: [pt.power],
       marker: { color: _pal()[0], size: 10, line: { color: "#fff", width: 2 } },
-      name: `n = ${pt.n}`,
-      hovertemplate: `n = ${pt.n}<br>Power = ${pt.power.toFixed(3)}<extra></extra>`,
+      name: `<i>n</i> = ${pt.n}`,
+      hovertemplate: `<i>n</i> = ${pt.n}<br>Power = ${pt.power.toFixed(3)}<extra></extra>`,
     });
   }
 
@@ -409,7 +409,7 @@ export default function PowerPanel() {
                             <span className="text-xs text-gray-700 font-mono">{f.statistic}</span>
                           )}
                           {f.p != null && (
-                            <span className={`text-[10px] ${f.p < 0.05 ? "text-indigo-600" : "text-gray-400"}`}>p = {f.p < 0.001 ? "<0.001" : f.p}</span>
+                            <span className={`text-[10px] ${f.p < 0.05 ? "text-indigo-600" : "text-gray-400"}`}><i>p</i> = {f.p < 0.001 ? "<0.001" : f.p}</span>
                           )}
                         </div>
                         <span className="text-[10px] text-gray-300 group-hover:text-indigo-500">Use →</span>
@@ -699,7 +699,7 @@ export default function PowerPanel() {
               <div className="mt-3 pt-3 border-t border-white/40 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
                 <span className="text-gray-500">α = <span className="text-gray-700 font-medium">{alpha}</span></span>
                 {solveFor !== "power"       && <span className="text-gray-500">Power = <span className="text-gray-700 font-medium">{(parseFloat(power)*100).toFixed(0)}%</span></span>}
-                {solveFor !== "n"           && <span className="text-gray-500">n = <span className="text-gray-700 font-medium">{n}</span></span>}
+                {solveFor !== "n"           && <span className="text-gray-500"><i>n</i> = <span className="text-gray-700 font-medium">{n}</span></span>}
                 {!testInfo.isProportions && solveFor !== "effect_size" &&
                   <span className="text-gray-500">ES = <span className="text-gray-700 font-medium">{effectSize}</span></span>}
                 {testInfo.isProportions     && <><span className="text-gray-500">p₁ = {p1}</span><span className="text-gray-500">p₂ = {p2}</span></>}

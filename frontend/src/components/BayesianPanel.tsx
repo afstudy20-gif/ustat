@@ -341,7 +341,7 @@ function BayesianPanelBody({ session }: { session: Session }) {
               <div className="space-y-3 flex-1">
                 <div className="flex items-baseline gap-2">
                   <h4 className="font-bold text-gray-900 text-base">{result.analysis}</h4>
-                  <span className="text-xs text-gray-400 font-mono">n = {result.n}</span>
+                  <span className="text-xs text-gray-400 font-mono"><i>n</i> = {result.n}</span>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 max-w-sm">

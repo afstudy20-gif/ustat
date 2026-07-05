@@ -24,6 +24,16 @@ except ImportError:
         return lambda f: f
     class HealthCheck:
         function_scoped_fixture = 1
+    class _Strategies:
+        @staticmethod
+        def integers(*a, **kw):
+            return None
+
+        @staticmethod
+        def floats(*a, **kw):
+            return None
+
+    st = _Strategies()
 
 from tests.conftest import make_session
 from services.simulation_generators import (
@@ -348,4 +358,3 @@ def test_decision_curve_net_benefit_boundaries(prevalence, threshold):
     assert none_nb == 0.0, "Treat None Net Benefit must be exactly 0.0"
     assert all_nb <= obs_prevalence + 1e-4, "Treat All Net Benefit exceeds prevalence"
     assert model_nb <= obs_prevalence + 1e-4, "Model Net Benefit exceeds prevalence"
-

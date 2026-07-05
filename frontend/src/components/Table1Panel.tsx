@@ -692,7 +692,7 @@ function Table1PanelBody({ session }: { session: Session }) {
                     </th>
                     <th className="text-center px-4 py-3 text-gray-700 font-semibold border-r border-gray-200">
                       Overall
-                      <br /><span className="text-xs font-normal text-gray-400">n = {result.total_n}</span>
+                      <br /><span className="text-xs font-normal text-gray-400"><i>n</i> = {result.total_n}</span>
                     </th>
                     {result.group_labels.map((g, gi) => (
                       <th key={g} className="text-center px-4 py-3 text-indigo-600 font-semibold border-r border-gray-200">
@@ -715,12 +715,12 @@ function Table1PanelBody({ session }: { session: Session }) {
                             {g}
                           </span>
                         )}
-                        <br /><span className="text-xs font-normal text-gray-400">n = {result.group_ns[g] ?? ""}</span>
+                        <br /><span className="text-xs font-normal text-gray-400"><i>n</i> = {result.group_ns[g] ?? ""}</span>
                       </th>
                     ))}
                     {hasGroups && (
                       <>
-                        <th className="text-center px-3 py-3 text-gray-700 font-semibold w-24">p-value</th>
+                        <th className="text-center px-3 py-3 text-gray-700 font-semibold w-24"><i>p</i>-value</th>
                         <th className="text-center px-3 py-3 text-gray-400 font-normal text-xs w-28">Test</th>
                       </>
                     )}
@@ -850,7 +850,7 @@ function Table1PanelBody({ session }: { session: Session }) {
                                   {row.normal ? "Normal" : "Non-normal"}
                                   <br />
                                   <span className="text-gray-400 font-normal">
-                                    {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} p={fmtP(row.normality_p)}
+                                    {row.normality_test === "Shapiro-Wilk" ? "S-W" : "K-S"} <i>p</i>={fmtP(row.normality_p)}
                                   </span>
                                 </div>
                               )
@@ -890,8 +890,8 @@ function Table1PanelBody({ session }: { session: Session }) {
                               </span>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-center text-xs text-gray-400 border-r border-gray-200">n (%)</td>
-                          <td className="px-4 py-2 text-center text-xs text-gray-400 border-r border-gray-200">n = {row.overall_n}</td>
+                          <td className="px-3 py-2 text-center text-xs text-gray-400 border-r border-gray-200"><i>n</i> (%)</td>
+                          <td className="px-4 py-2 text-center text-xs text-gray-400 border-r border-gray-200"><i>n</i> = {row.overall_n}</td>
                           {result.group_labels.map((g) => {
                             const gn = (row.sub_rows ?? []).reduce((s, sr) => {
                               const m = sr.group_stats[g]?.match(/^(\d+)/);
@@ -899,7 +899,7 @@ function Table1PanelBody({ session }: { session: Session }) {
                             }, 0);
                             return (
                               <td key={g} className="px-4 py-2 text-center text-xs text-gray-400 border-r border-gray-200">
-                                n = {gn}
+                                <i>n</i> = {gn}
                               </td>
                             );
                           })}
@@ -960,7 +960,7 @@ function Table1PanelBody({ session }: { session: Session }) {
               </p>
               <p>Normal → <span className="font-medium">Mean ± SD</span> with t-test/ANOVA · Non-normal → <span className="font-medium">Median [IQR]</span> with Mann-Whitney/Kruskal-Wallis.</p>
               <p>Categorical: Chi-square · Fisher's exact when any expected cell &lt; 5.</p>
-              <p className="text-indigo-600">*** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · ns = not significant</p>
+              <p className="text-indigo-600">*** <i>p</i>&lt;0.001 · ** <i>p</i>&lt;0.01 · * <i>p</i>&lt;0.05 · ns = not significant</p>
             </div>
 
             {/* ── Format for Journal ── */}

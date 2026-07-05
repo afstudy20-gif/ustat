@@ -393,7 +393,7 @@ export default function MissingDataPanel() {
                 <div className="space-y-2">
                   {mcar && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-[11px] text-blue-800">
-                      <span className="font-semibold">Little's MCAR test:</span> χ²={Number(mcar.statistic).toFixed(2)}, df={mcar.df}, p={fmtP(Number(mcar.p))}.{" "}
+                      <span className="font-semibold">Little's MCAR test:</span> χ²={Number(mcar.statistic).toFixed(2)}, df={mcar.df}, <i>p</i>={fmtP(Number(mcar.p))}.{" "}
                       {mcar.significant
                         ? "p < 0.05 → MCAR rejected; data are likely MAR (or MNAR). MICE is appropriate."
                         : "p ≥ 0.05 → consistent with MCAR; listwise deletion is unbiased (MICE still fine)."}

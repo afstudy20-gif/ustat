@@ -171,7 +171,7 @@ function CoxRCSResultPanel({ result }: { result: CoxRCSResult }) {
       <div className="flex flex-wrap items-baseline gap-3 border-b border-gray-100 pb-2">
         <h4 className="font-semibold text-gray-900">Cox proportional hazards (RCS)</h4>
         <span className="text-xs text-gray-500">
-          n = {result.n}, events = {result.n_events}, C-index = {result.concordance?.toFixed(3) ?? "—"}
+          <i>n</i> = {result.n}, events = {result.n_events}, C-index = {result.concordance?.toFixed(3) ?? "—"}
           {result.aic != null && <>, AIC = {result.aic.toFixed(1)}</>}
         </span>
       </div>
@@ -182,7 +182,7 @@ function CoxRCSResultPanel({ result }: { result: CoxRCSResult }) {
           <div className="flex flex-wrap gap-2">
             {Object.entries(nonlinearity).map(([col, nl]) => (
               <span key={col} className={`text-xs px-2 py-1 rounded border ${nl.p != null && nl.p < 0.05 ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-gray-50 text-gray-600 border-gray-200"}`}>
-                <b>{col}</b>: χ²({nl.df}) = {nl.wald?.toFixed(2) ?? "—"}, p = {fmtP(nl.p)}
+                <b>{col}</b>: χ²({nl.df}) = {nl.wald?.toFixed(2) ?? "—"}, <i>p</i> = {fmtP(nl.p)}
               </span>
             ))}
           </div>
@@ -195,7 +195,7 @@ function CoxRCSResultPanel({ result }: { result: CoxRCSResult }) {
           {interaction.error ? (
             <span className="text-red-600">{interaction.error}</span>
           ) : (
-            <>χ²({interaction.df}) = {interaction.lr_stat?.toFixed(2)}, p = {fmtP(interaction.p)}</>
+            <>χ²({interaction.df}) = {interaction.lr_stat?.toFixed(2)}, <i>p</i> = {fmtP(interaction.p)}</>
           )}
         </div>
       )}
@@ -238,7 +238,7 @@ function CoxRCSResultPanel({ result }: { result: CoxRCSResult }) {
               <th className="text-right px-2 py-1">95% CI</th>
               <th className="text-right px-2 py-1">SE</th>
               <th className="text-right px-2 py-1">z</th>
-              <th className="text-right px-2 py-1">p</th>
+              <th className="text-right px-2 py-1"><i>p</i></th>
             </tr>
           </thead>
           <tbody>
@@ -743,7 +743,7 @@ export default function RCSPanel() {
                 </h4>
                 <div className="flex items-center gap-3">
                   <div className="flex items-center gap-3 text-xs text-gray-500">
-                    <span>n = {result.n}{result.n_events != null ? `, events = ${result.n_events}` : ""}</span>
+                    <span><i>n</i> = {result.n}{result.n_events != null ? `, events = ${result.n_events}` : ""}</span>
                     {result.aic != null && <span>AIC = {result.aic?.toFixed(1)}</span>}
                   </div>
                   <ResultExporter
@@ -769,12 +769,12 @@ export default function RCSPanel() {
                 {result.nonlinearity_p != null && (
                   <span className={`ml-2 rounded px-1.5 py-0.5 border ${result.nonlinearity_p < 0.05 ? "bg-indigo-50 text-indigo-700 border-indigo-200" : "bg-gray-50 text-gray-600 border-gray-200"}`}
                     title={`Joint Wald test on the ${(result.nonlinearity_df ?? "k-2")} non-linear basis columns`}>
-                    non-linearity {result.crude ? "adjusted " : ""}p = {fmtP(result.nonlinearity_p)}
+                    non-linearity {result.crude ? "adjusted " : ""}<i>p</i> = {fmtP(result.nonlinearity_p)}
                   </span>
                 )}
                 {result.crude?.nonlinearity_p != null && (
                   <span className="ml-1 rounded px-1.5 py-0.5 border bg-gray-50 text-gray-500 border-gray-200" title="Non-linearity test from the unadjusted model">
-                    crude p = {fmtP(result.crude.nonlinearity_p)}
+                    crude <i>p</i> = {fmtP(result.crude.nonlinearity_p)}
                   </span>
                 )}
               </div>
@@ -808,7 +808,7 @@ export default function RCSPanel() {
                   <span className="font-semibold uppercase tracking-wider text-[10px] block mb-0.5">
                     Spline × {Array.isArray(result.interaction.covariates) ? result.interaction.covariates.join(" + ") : "covariate"} interaction (LR test)
                   </span>
-                  χ²({result.interaction.df}) = {result.interaction.lr_stat?.toFixed(2)}, p = {fmtP(result.interaction.p)}
+                  χ²({result.interaction.df}) = {result.interaction.lr_stat?.toFixed(2)}, <i>p</i> = {fmtP(result.interaction.p)}
                   <span className="block text-[10px] text-gray-500 mt-0.5">
                     {result.interaction.p != null && result.interaction.p < 0.05
                       ? "The dose-response shape differs across levels — consider reporting stratified curves."

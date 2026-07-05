@@ -640,7 +640,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                   <p className="text-xs text-gray-600 mt-1">
                     IPTW · {(result.estimand ?? "ate").toUpperCase()} weights
                     {result.stabilize ? " (stabilised)" : ""}
-                    {" · "}n = {result.n_total} ({result.n_treated} treated, {result.n_control} control)
+                    {" · "}<i>n</i> = {result.n_total} ({result.n_treated} treated, {result.n_control} control)
                     {result.n_trimmed_common_support > 0 && <> · {result.n_trimmed_common_support} trimmed (common support)</>}
                     {result.weight_truncation?.n_trimmed > 0 && <> · {result.weight_truncation.n_trimmed} weights truncated</>}
                   </p>
@@ -870,7 +870,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       <th className="text-right px-3 py-2 font-medium">SMD Before</th>
                       <th className="text-right px-3 py-2 font-medium">SMD After</th>
                       <th className="text-right px-3 py-2 font-medium" title="Rubin's variance ratio. Target 0.5–2.0.">Var Ratio</th>
-                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value after weighting.">KS p (after)</th>
+                      <th className="text-right px-3 py-2 font-medium" title="Two-sample KS test p-value after weighting.">KS <i>p</i> (after)</th>
                       <th className="text-right px-3 py-2 font-medium">Reduction</th>
                       <th className="text-center px-3 py-2 font-medium">Balanced</th>
                     </tr>

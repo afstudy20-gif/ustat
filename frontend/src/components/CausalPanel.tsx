@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useStore } from "../store";
 import { runIV2SLS, runMediation, runTargetTrial, runDiD, runRDD, runDAGAdjustment, runSEM } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -131,7 +131,7 @@ function IVTab() {
   };
   const canRun = sid && outcome && endogenous && instruments.length > 0 && !loading;
 
-  const Tile = ({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) => (
+  const Tile = ({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) => (
     <div className="rounded-xl border border-gray-200 bg-white p-3">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className={`text-xl font-semibold mt-1 ${tone ?? "text-gray-900"}`}>{value}</div>
@@ -185,22 +185,22 @@ function IVTab() {
           <>
             <div className={`panel border ${result.first_stage.weak_instruments ? "border-amber-300 bg-amber-50" : "border-emerald-300 bg-emerald-50"}`}>
               <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p>
-              <div className="text-[11px] text-gray-500 mt-2">n = {result.n}</div>
+              <div className="text-[11px] text-gray-500 mt-2"><i>n</i> = {result.n}</div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Tile label="IV effect (2SLS)" value={result.iv_estimate.estimate.toFixed(4)}
-                sub={`95% CI ${result.iv_estimate.ci_low.toFixed(3)}–${result.iv_estimate.ci_high.toFixed(3)} · p=${fmtP(result.iv_estimate.p)}`}
+                sub={<>95% CI {result.iv_estimate.ci_low.toFixed(3)}–{result.iv_estimate.ci_high.toFixed(3)} · <i>p</i>={fmtP(result.iv_estimate.p)}</>}
                 tone="text-emerald-600" />
-              <Tile label="Naive OLS" value={result.ols_estimate.estimate.toFixed(4)} sub={`p=${fmtP(result.ols_estimate.p)}`} />
+              <Tile label="Naive OLS" value={result.ols_estimate.estimate.toFixed(4)} sub={<><i>p</i>={fmtP(result.ols_estimate.p)}</>} />
               <Tile label="First-stage F" value={result.first_stage.f_stat.toFixed(1)}
                 sub={result.first_stage.weak_instruments ? "WEAK (<10)" : "adequate (≥10)"}
                 tone={result.first_stage.weak_instruments ? "text-amber-600" : "text-emerald-600"} />
-              <Tile label="Wu-Hausman" value={`p=${fmtP(result.wu_hausman.p)}`}
+              <Tile label="Wu-Hausman" value={<><i>p</i>={fmtP(result.wu_hausman.p)}</>}
                 sub={result.wu_hausman.endogenous ? "endogenous → use IV" : "no strong endogeneity"} />
             </div>
             {result.sargan && (
               <div className="text-xs text-gray-600">
-                Sargan over-identification: χ²={result.sargan.stat} (df={result.sargan.df}), p={fmtP(result.sargan.p)} —
+                Sargan over-identification: χ²={result.sargan.stat} (df={result.sargan.df}), <i>p</i>={fmtP(result.sargan.p)} —
                 {result.sargan.valid ? " instruments jointly valid." : " instrument validity in doubt."}
               </div>
             )}
@@ -239,7 +239,7 @@ function MediationTab() {
   const distinct = new Set([outcome, treatment, mediator].filter(Boolean)).size === 3;
   const canRun = sid && distinct && !loading;
 
-  const Tile = ({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) => (
+  const Tile = ({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) => (
     <div className="rounded-xl border border-gray-200 bg-white p-3">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className={`text-xl font-semibold mt-1 ${tone ?? "text-gray-900"}`}>{value}</div>
@@ -306,7 +306,7 @@ function MediationTab() {
           <>
             <div className={`panel border ${result.acme_significant ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`}>
               <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p>
-              <div className="text-[11px] text-gray-500 mt-2">n = {result.n}</div>
+              <div className="text-[11px] text-gray-500 mt-2"><i>n</i> = {result.n}</div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <Tile label="Indirect (ACME)" value={result.effects.acme.toFixed(4)}
@@ -317,7 +317,7 @@ function MediationTab() {
               <Tile label="Total effect" value={result.effects.total.toFixed(4)} />
               <Tile label="Proportion mediated"
                 value={result.effects.proportion_mediated != null ? (result.effects.proportion_mediated * 100).toFixed(1) + "%" : "—"}
-                sub={`Sobel p=${fmtP(result.sobel.p)}`} />
+                sub={<>Sobel <i>p</i>={fmtP(result.sobel.p)}</>} />
             </div>
             <div className="text-xs text-gray-500">
               Paths: a (X→M) = {result.paths.a}, b (M→Y) = {result.paths.b}, c′ (direct) = {result.paths.c_prime}.
@@ -521,7 +521,7 @@ function DiDTab() {
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">DiD estimate</div>
                 <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.did_estimate > 0 ? "+" : ""}{result.did_estimate}</div>
-                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={fmtP(result.p)}</div></div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · <i>p</i>={fmtP(result.p)}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Treated change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.treated_change > 0 ? "+" : ""}{result.treated_change}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Control change</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.control_change > 0 ? "+" : ""}{result.control_change}</div></div>
             </div>
@@ -587,7 +587,7 @@ function RDDTab() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">LATE at cutoff</div>
                 <div className={`text-xl font-semibold mt-1 ${result.significant ? "text-emerald-600" : "text-gray-900"}`}>{result.late > 0 ? "+" : ""}{result.late}</div>
-                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · p={fmtP(result.p)}</div></div>
+                <div className="text-[11px] text-gray-500 mt-0.5">95% CI {result.ci_low} to {result.ci_high} · <i>p</i>={fmtP(result.p)}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">Bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">±{result.bandwidth}</div></div>
               <div className="rounded-xl border border-gray-200 bg-white p-3"><div className="text-[10px] uppercase tracking-wider text-gray-500">N in bandwidth</div><div className="text-xl font-semibold mt-1 text-gray-900">{result.n_in_bandwidth}</div><div className="text-[11px] text-gray-500 mt-0.5">{result.n_left} below / {result.n_right} above</div></div>
             </div>
@@ -783,14 +783,14 @@ function SEMTab() {
           <>
             <div className="panel border border-indigo-200 bg-indigo-50">
               <p className="text-sm text-gray-800 leading-relaxed">{result.result_text}</p>
-              <div className="text-[11px] text-gray-500 mt-2">n = {result.n}</div>
+              <div className="text-[11px] text-gray-500 mt-2"><i>n</i> = {result.n}</div>
             </div>
 
             <div className="panel">
               <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Model fit</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 <div>χ²({result.fit.df ?? "—"}) = {fmtN(result.fit.chi2)}</div>
-                <div>p = {fmtP(result.fit.p ?? null)}</div>
+                <div><i>p</i> = {fmtP(result.fit.p ?? null)}</div>
                 <div>CFI = {fmtN(result.fit.cfi, 3)}</div>
                 <div>TLI = {fmtN(result.fit.tli, 3)}</div>
                 <div>RMSEA = {fmtN(result.fit.rmsea, 3)}</div>
@@ -827,7 +827,7 @@ function SEMTab() {
                 <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">Direct effects (X → Y, holding M)</h3>
                 <table className="w-full text-xs">
                   <thead className="text-gray-500">
-                    <tr><th className="text-left py-1">Treatment</th><th className="text-left">Outcome</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right">p</th><th className="text-right">95% CI</th></tr>
+                    <tr><th className="text-left py-1">Treatment</th><th className="text-left">Outcome</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right"><i>p</i></th><th className="text-right">95% CI</th></tr>
                   </thead>
                   <tbody>
                     {result.direct_effects.map((de, i) => (
@@ -868,7 +868,7 @@ function SEMTab() {
               <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2">All path coefficients</h3>
               <table className="w-full text-xs">
                 <thead className="text-gray-500">
-                  <tr><th className="text-left py-1">From</th><th className="text-left">To</th><th className="text-left">Label</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right">z</th><th className="text-right">p</th></tr>
+                  <tr><th className="text-left py-1">From</th><th className="text-left">To</th><th className="text-left">Label</th><th className="text-right">Est.</th><th className="text-right">SE</th><th className="text-right">z</th><th className="text-right"><i>p</i></th></tr>
                 </thead>
                 <tbody>
                   {result.paths.map((p, i) => (

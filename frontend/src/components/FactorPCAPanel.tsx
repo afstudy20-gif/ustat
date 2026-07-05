@@ -462,7 +462,7 @@ function FactorPCAPanelBody({ session }: { session: Session }) {
                         </p>
                       </div>
                       <div className="bg-gray-50 p-2 rounded-lg border">
-                        <p className="text-[10px] text-gray-400 font-medium">p-value</p>
+                        <p className="text-[10px] text-gray-400 font-medium"><i>p</i>-value</p>
                         <p className={`font-mono font-semibold text-sm mt-0.5 ${result.suitability.bartlett_p < 0.05 ? "text-indigo-600" : "text-gray-500"}`}>
                           {fmtP(result.suitability.bartlett_p)}
                         </p>

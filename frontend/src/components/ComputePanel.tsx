@@ -396,7 +396,7 @@ function TransformTab({
       square: "Sq_", exp: "Exp_", abs: "Abs_", zscore: "Z_",
     };
     setNewCol((prefixMap[transform] ?? "") + srcCol);
-  }, [srcCol, transform]);
+  }, [srcCol, transform, setNewCol]);
 
   const run = async () => {
     if (!srcCol || !newCol.trim()) return;
@@ -588,7 +588,7 @@ function RecodeTab({
       }
       return changed ? next : prev;
     });
-  }, [rules, elseVal]);
+  }, [rules, elseVal, setValueLabels]);
 
   const run = async () => {
     setLoading(true); setError(null); setSuccess(null);

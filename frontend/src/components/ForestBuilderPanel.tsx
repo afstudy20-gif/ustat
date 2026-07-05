@@ -1001,7 +1001,7 @@ export default function ForestBuilderPanel() {
               <th className="text-right px-1 py-1 w-16">Est</th>
               <th className="text-right px-1 py-1 w-16">CI low</th>
               <th className="text-right px-1 py-1 w-16">CI high</th>
-              <th className="text-right px-1 py-1 w-16">p</th>
+              <th className="text-right px-1 py-1 w-16"><i>p</i></th>
               <th className="text-left px-1 py-1 w-32">Extra</th>
               <th className="px-1 py-1 w-16"></th>
             </tr>

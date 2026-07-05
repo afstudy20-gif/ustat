@@ -179,8 +179,8 @@ export default function GatekeepingPanel() {
                       <thead>
                         <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
                           <th className="text-left px-2 py-1 font-medium">Hypothesis</th>
-                          <th className="text-right px-2 py-1 font-medium">Raw p</th>
-                          <th className="text-right px-2 py-1 font-medium">Adjusted p</th>
+                          <th className="text-right px-2 py-1 font-medium">Raw <i>p</i></th>
+                          <th className="text-right px-2 py-1 font-medium">Adjusted <i>p</i></th>
                           <th className="text-center px-2 py-1 font-medium">Decision</th>
                         </tr>
                       </thead>

@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { ColMeta } from "../../store";
 import { StyledTableExporter } from "../StyledTableExporter";
 import type { StyledTableData } from "../../lib/styledTable";
@@ -42,6 +43,14 @@ const fmtCell = (s: HRStat | null): string => {
       : "";
   const hasP = s.p != null && isFinite(s.p);
   return `${s.hr.toFixed(2)}${ci}${hasP ? `, ${fmtPubP(s.p)}` : ""}`;
+};
+
+/** On-screen-only rendering of `fmtCell`'s output with the "p" italicised.
+ *  `fmtCell` itself stays a plain string so the .docx/.html export keeps
+ *  working — this just re-splits the trailing ", p=..." for display. */
+const renderCell = (txt: string): ReactNode => {
+  const m = txt.match(/^(.*, )p(=.+)$/);
+  return m ? <>{m[1]}<i>p</i>{m[2]}</> : txt;
 };
 
 /** Build a publication row label from column metadata + value labels.
@@ -105,7 +114,7 @@ export default function CoxHRTable({
               <th className="px-2 py-2 font-semibold align-bottom">Variable</th>
               {COLS.map((c) => (
                 <th key={c.key} className="px-2 py-2 font-semibold align-bottom">
-                  {c.head}
+                  {c.head.endsWith(", p") ? <>{c.head.slice(0, -1)}<i>p</i></> : c.head}
                 </th>
               ))}
             </tr>
@@ -121,7 +130,7 @@ export default function CoxHRTable({
                       key={c.key}
                       className={`px-2 py-2 tabular-nums ${txt === "—" ? "text-gray-300" : "text-gray-700"}`}
                     >
-                      {txt}
+                      {renderCell(txt)}
                     </td>
                   );
                 })}
@@ -132,8 +141,8 @@ export default function CoxHRTable({
       </div>
       <p className="text-[11px] text-gray-400 mt-3 leading-snug">
         Cox proportional-hazards regression for <em>{eventCol}</em> over <em>{durationCol}</em>.
-        Fully adjusted model: n={n}, {nEvents} events
-        {nPars > 0 && <> · Parsimonious model: n={nPars}, {nEventsPars} events</>}.
+        Fully adjusted model: <i>n</i>={n}, {nEvents} events
+        {nPars > 0 && <> · Parsimonious model: <i>n</i>={nPars}, {nEventsPars} events</>}.
         Univariable = each predictor fitted alone. Parsimonious = the selected subset fitted
         together. Fully adjusted = all predictors fitted together. Reference categories shown
         in each label. HR = hazard ratio; CI = confidence interval. A blank (—) cell means the

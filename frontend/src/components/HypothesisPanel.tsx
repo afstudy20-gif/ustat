@@ -235,7 +235,7 @@ function ResultCard({ result }: { result: TestResult }) {
                 <tr className="bg-gray-50">
                   <th className="px-2 py-1 text-left">Comparison</th>
                   <th className="px-2 py-1 text-right">Statistic</th>
-                  <th className="px-2 py-1 text-right">p (adj)</th>
+                  <th className="px-2 py-1 text-right"><i>p</i> (adj)</th>
                   <th className="px-2 py-1 text-right">Effect size</th>
                   <th className="px-2 py-1 text-center">Sig</th>
                 </tr>

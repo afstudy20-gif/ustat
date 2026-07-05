@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useStore, isNumericKind } from "../store";
 import { runNonInferiority, getUniqueValues } from "../api";
 import { Tip } from "./Tip";
@@ -222,15 +222,15 @@ export default function NonInferiorityPanel() {
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                {[
+                {([
                   [result.effect, result.estimate],
                   [`${result.ci_level}% CI`, `${result.ci_low} – ${result.ci_high}`],
                   ["Margin", result.margin],
                   ["Bound tested", result.bound],
                   ["1-sided α", result.alpha_one_sided],
-                  ["p (NI)", result.p_noninferiority < 0.001 ? "<0.001" : result.p_noninferiority],
-                ].map(([k, v]) => (
-                  <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
+                  [<><i>p</i> (NI)</>, result.p_noninferiority < 0.001 ? "<0.001" : result.p_noninferiority],
+                ] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                  <div key={i} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                     <p className="text-[9px] text-gray-400">{k}</p>
                     <p className="font-semibold text-gray-800 text-xs font-mono">{v}</p>
                   </div>
@@ -240,7 +240,7 @@ export default function NonInferiorityPanel() {
                 <p className="text-[11px] text-gray-500">
                   {result.outcome_type === "binary"
                     ? `Test: ${result.events_test}/${result.n_test} (${(result.p_test * 100).toFixed(1)}%) · Ref: ${result.events_ref}/${result.n_ref} (${(result.p_ref * 100).toFixed(1)}%)`
-                    : `Test: mean ${result.mean_test} (n=${result.n_test}) · Ref: mean ${result.mean_ref} (n=${result.n_ref})`}
+                    : <>Test: mean {result.mean_test} (<i>n</i>={result.n_test}) · Ref: mean {result.mean_ref} (<i>n</i>={result.n_ref})</>}
                 </p>
               )}
             </div>

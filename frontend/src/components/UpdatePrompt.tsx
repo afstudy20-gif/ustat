@@ -20,6 +20,11 @@ declare const __BUILD_TIME__: string;
 const POLL_INTERVAL_MS = 60_000; // 1 minute
 const FALLBACK_POLL_MS = 5 * 60_000; // 5 minutes
 
+interface TauriUpdate {
+  version?: string;
+  downloadAndInstall: () => Promise<void>;
+}
+
 export default function UpdatePrompt() {
   const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -65,7 +70,7 @@ export default function UpdatePrompt() {
   }, [isTauri]);
 
   // ── Tauri Auto-Updater Path (Desktop only) ──────────────────────────
-  const [tauriUpdate, setTauriUpdate] = useState<any>(null);
+  const [tauriUpdate, setTauriUpdate] = useState<TauriUpdate | null>(null);
   const [tauriUpdating, setTauriUpdating] = useState(false);
   const [tauriStatus, setTauriStatus] = useState("");
 

@@ -898,7 +898,7 @@ export default function ModelsPanel() {
                             <th className="text-left py-1 font-medium">Predictor</th>
                             <th className="text-right py-1 font-medium">χ²</th>
                             <th className="text-right py-1 font-medium">df</th>
-                            <th className="text-right py-1 font-medium">p</th>
+                            <th className="text-right py-1 font-medium"><i>p</i></th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1032,7 +1032,7 @@ export default function ModelsPanel() {
                   Forest Plot
                   <Tip text="Each row shows one predictor. The square is the point estimate (OR or HR); the horizontal line is the 95% Confidence Interval. If the CI crosses 1 (the vertical dashed line), the effect is not statistically significant. Larger squares = more precise estimate." wide />
                   <span className="ml-2 text-xs font-normal text-gray-400">
-                    {model === "cox" ? "HR" : "OR"} with 95% CI — colored = p&lt;0.05, square size = precision
+                    {model === "cox" ? "HR" : "OR"} with 95% CI — colored = <i>p</i>&lt;0.05, square size = precision
                   </span>
                 </h4>
                 <ForestPlot result={result} modelType={model} outcome={result.outcome} />
@@ -1045,7 +1045,7 @@ export default function ModelsPanel() {
                 <h4 className="font-semibold text-gray-900 mb-2">
                   Forest Plot
                   <span className="ml-2 text-xs font-normal text-gray-400">
-                    ● Univariate &nbsp;◆ Multivariate — colored = p&lt;0.05, square size = precision
+                    ● Univariate &nbsp;◆ Multivariate — colored = <i>p</i>&lt;0.05, square size = precision
                   </span>
                 </h4>
                 <ForestPlot result={result} modelType={model} outcome={result.outcome} />
@@ -1066,18 +1066,49 @@ export default function ModelsPanel() {
 // ── Inline Multi-outcome regression tab component (per task requirements) ────
 // Defined in same file; uses checkbox pattern copied from Linear predictors picker.
 // Renders APA consolidated table + result_text + model fit + ResultExporter.
+type MultiOutcomeCell = {
+  B?: number | null;
+  SE?: number | null;
+  beta?: number | null;
+  ci?: unknown;
+  p?: number | null;
+};
+
+type MultiOutcomeRow = {
+  predictor: string;
+  by_outcome: Record<string, MultiOutcomeCell>;
+};
+
+type MultiOutcomeFit = {
+  n?: number;
+  k?: number;
+  r2?: number | null;
+  adj_r2?: number | null;
+  f?: number | null;
+  f_p?: number | null;
+};
+
+type MultiOutcomeResultData = {
+  outcomes?: unknown;
+  predictors_order?: unknown;
+  rows?: unknown;
+  model_fit?: Record<string, MultiOutcomeFit>;
+  n_by_outcome?: Record<string, number>;
+  result_text?: string;
+};
+
 function MultiOutcomeResult({
   result,
   standardize,
 }: {
-  result: any;
+  result: MultiOutcomeResultData | null;
   standardize: boolean;
 }) {
   if (!result) return null;
   const outcomes: string[] = Array.isArray(result.outcomes) ? result.outcomes : [];
   const predictorsOrder: string[] = Array.isArray(result.predictors_order) ? result.predictors_order : [];
-  const rows: Array<{ predictor: string; by_outcome: Record<string, any> }> = Array.isArray(result.rows) ? result.rows : [];
-  const modelFit: Record<string, any> = result.model_fit || {};
+  const rows: MultiOutcomeRow[] = Array.isArray(result.rows) ? result.rows as MultiOutcomeRow[] : [];
+  const modelFit: Record<string, MultiOutcomeFit> = result.model_fit || {};
 
   const showBeta = !!standardize;
 
@@ -1102,7 +1133,7 @@ function MultiOutcomeResult({
     return row;
   });
 
-  const fmt = (v: any, digits = 3) => (v == null || !isFinite(Number(v)) ? "—" : Number(v).toFixed(digits));
+  const fmt = (v: unknown, digits = 3) => (v == null || !isFinite(Number(v)) ? "—" : Number(v).toFixed(digits));
 
   return (
     <div className="panel space-y-3">
@@ -1141,7 +1172,7 @@ function MultiOutcomeResult({
                 >
                   {oc}
                   {result.n_by_outcome && result.n_by_outcome[oc] != null && (
-                    <span className="ml-1 text-[10px] font-normal text-gray-400">n={result.n_by_outcome[oc]}</span>
+                    <span className="ml-1 text-[10px] font-normal text-gray-400"><i>n</i>={result.n_by_outcome[oc]}</span>
                   )}
                 </th>
               ))}
@@ -1153,7 +1184,7 @@ function MultiOutcomeResult({
                 parts.push("95% CI", "p");
                 return parts.map((h, j) => (
                   <th key={`${oi}-${j}`} className="border-b border-r border-gray-200 px-1 py-0.5 text-center font-medium tabular-nums">
-                    {h}
+                    {h === "p" ? <i>p</i> : h}
                   </th>
                 ));
               })}
@@ -1164,7 +1195,7 @@ function MultiOutcomeResult({
               <tr><td colSpan={1 + outcomes.length * (showBeta ? 5 : 4)} className="px-3 py-2 text-gray-400">No rows.</td></tr>
             ) : (
               predictorsOrder.map((pred, i) => {
-                const r = rows.find((x) => x.predictor === pred) || { by_outcome: {} as any };
+	                const r = rows.find((x) => x.predictor === pred) || { predictor: pred, by_outcome: {} };
                 const isInt = pred === "(Intercept)" || /intercept/i.test(pred);
                 return (
                   <tr key={i} className="hover:bg-gray-50/60">
@@ -1208,9 +1239,9 @@ function MultiOutcomeResult({
               if (!f) return null;
               return (
                 <div key={oc} className="bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
-                  <div className="font-medium">{oc} <span className="text-gray-400">· n={f.n} k={f.k}</span></div>
+                  <div className="font-medium">{oc} <span className="text-gray-400">· <i>n</i>={f.n} k={f.k}</span></div>
                   <div className="tabular-nums text-gray-700">
-                    R²={fmt(f.r2, 3)} · adj-R²={fmt(f.adj_r2, 3)} · F={fmt(f.f, 2)} (p={fmtP(f.f_p)})
+                    R²={fmt(f.r2, 3)} · adj-R²={fmt(f.adj_r2, 3)} · F={fmt(f.f, 2)} (<i>p</i>={fmtP(f.f_p)})
                   </div>
                 </div>
               );

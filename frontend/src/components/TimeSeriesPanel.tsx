@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runArima, runDecompose, runStationarity } from "../api";
@@ -315,10 +315,10 @@ export default function TimeSeriesPanel() {
                   <div className="panel space-y-2">
                     <h4 className="text-sm font-semibold text-gray-800">Fit</h4>
                     <div className="grid grid-cols-2 gap-1.5">
-                      {[["Order", JSON.stringify(result.order)], ["Seasonal", JSON.stringify(result.seasonal_order)],
+                      {([["Order", JSON.stringify(result.order)], ["Seasonal", JSON.stringify(result.seasonal_order)],
                         ["AIC", result.aic], ["BIC", result.bic],
-                        ["Ljung-Box p", result.ljung_box_p ?? "—"], ["n", result.n]].map(([k, v]) => (
-                        <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
+                        ["Ljung-Box p", result.ljung_box_p ?? "—"], [<i>n</i>, result.n]] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                        <div key={i} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
                           <p className="text-[9px] text-gray-400">{k}</p>
                           <p className="font-semibold text-gray-800 text-xs font-mono">{v}</p>
                         </div>
@@ -334,7 +334,7 @@ export default function TimeSeriesPanel() {
                     <div className="overflow-auto rounded-lg border border-gray-200 max-h-60">
                       <table className="w-full text-[11px] border-collapse">
                         <thead className="sticky top-0 bg-gray-50 border-b border-gray-200 text-gray-500">
-                          <tr><th className="text-left px-1.5 py-1">Term</th><th className="text-right px-1.5 py-1">Est</th><th className="text-right px-1.5 py-1">SE</th><th className="text-right px-1.5 py-1">p</th></tr>
+                          <tr><th className="text-left px-1.5 py-1">Term</th><th className="text-right px-1.5 py-1">Est</th><th className="text-right px-1.5 py-1">SE</th><th className="text-right px-1.5 py-1"><i>p</i></th></tr>
                         </thead>
                         <tbody>
                           {(result.coefficients as Coefficient[]).map((c) => (
@@ -374,7 +374,7 @@ export default function TimeSeriesPanel() {
                   <div className="space-y-1 text-xs">
                     <div className={`flex justify-between px-2 py-1 rounded ${result.adf_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>ADF (H₀: unit root)</span>
-                      <span className="font-mono">p = {fmtP(result.adf_p)}</span>
+                      <span className="font-mono"><i>p</i> = {fmtP(result.adf_p)}</span>
                     </div>
                     <div className={`flex justify-between px-2 py-1 rounded ${result.kpss_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>KPSS (H₀: stationary)</span>

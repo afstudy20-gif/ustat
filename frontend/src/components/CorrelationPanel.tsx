@@ -233,7 +233,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
                     </span>
                   ) : (
                     <span className={nm.normal ? "text-green-600 font-semibold" : "text-red-500 font-semibold"}>
-                      {nm.p != null ? `p=${fmtP(nm.p)}` : ""} {nm.normal ? "✓" : "✗"}
+                      {nm.p != null ? <><i>p</i>={fmtP(nm.p)}</> : ""} {nm.normal ? "✓" : "✗"}
                     </span>
                   )}
                 </div>
@@ -306,7 +306,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
               y: 0.98,
               xanchor: "right" as const,
               yanchor: "top" as const,
-              text: `${active.label} = ${active.r.toFixed(3)}${starsFor(active.p)}, p = ${fmtP(active.p)}`,
+              text: `${active.label} = ${active.r.toFixed(3)}${starsFor(active.p)}, <i>p</i> = ${fmtP(active.p)}`,
               showarrow: false,
               font: { color: "#374151", size: 12 },
               bgcolor: "rgba(249,250,251,0.9)",
@@ -346,7 +346,7 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
                 <th className="px-2 py-1.5 font-medium">Variable 2</th>
                 <th className="px-2 py-1.5 font-medium">r / ρ</th>
                 <th className="px-2 py-1.5 font-medium">95% CI</th>
-                <th className="px-2 py-1.5 font-medium">p</th>
+                <th className="px-2 py-1.5 font-medium"><i>p</i></th>
               </tr>
             </thead>
             <tbody>
@@ -394,8 +394,8 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
           <span>
             <strong>Switched to Spearman:</strong>{" "}
             {active.normality_test?.includes("Lilliefors")
-              ? `Lilliefors-corrected KS p < 0.05 (n = ${active.n}). Distribution is non-normal.`
-              : `Skewed data detected (${active.normality_test ?? "Shapiro-Wilk"} p < 0.05). Spearman ρ used for robust estimation.`}
+              ? <>Lilliefors-corrected KS <i>p</i> &lt; 0.05 (<i>n</i> = {active.n}). Distribution is non-normal.</>
+              : <>Skewed data detected ({active.normality_test ?? "Shapiro-Wilk"} <i>p</i> &lt; 0.05). Spearman ρ used for robust estimation.</>}
           </span>
         </div>
       )}
@@ -427,14 +427,14 @@ function PairwiseTab({ sessionId, columns }: { sessionId: string; columns: strin
               95% CI: <span className="text-gray-700 font-mono font-semibold">[{active.ci_low.toFixed(3)}, {active.ci_high.toFixed(3)}]</span>
             </span>
             <span className="text-gray-500">
-              p = <span className={sig(active.p)}>{fmtP(active.p)}</span>
+              <i>p</i> = <span className={sig(active.p)}>{fmtP(active.p)}</span>
             </span>
-            <span className="text-gray-400 font-mono">n = {active.n}</span>
+            <span className="text-gray-400 font-mono"><i>n</i> = {active.n}</span>
           </div>
           <InfoBanner>
             {active.p < 0.05
-              ? `Significant ${active.r > 0 ? "positive" : "negative"} correlation between ${active.var1} and ${active.var2} (${active.label} = ${active.r.toFixed(3)}, p ${fmtP(active.p)}).`
-              : `No statistically significant correlation found between ${active.var1} and ${active.var2} (p = ${fmtP(active.p)}).`}
+              ? <>Significant {active.r > 0 ? "positive" : "negative"} correlation between {active.var1} and {active.var2} ({active.label} = {active.r.toFixed(3)}, <i>p</i> {fmtP(active.p)}).</>
+              : <>No statistically significant correlation found between {active.var1} and {active.var2} (<i>p</i> = {fmtP(active.p)}).</>}
           </InfoBanner>
           {active.result_text && (
             <div className="bg-gray-50 border border-gray-200 rounded-xl px-3 py-2.5 mt-2">
@@ -561,7 +561,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
           <p className="text-xs font-semibold text-gray-700 truncate">{v}</p>
           <button onClick={() => setSelectedVar(null)} className="text-gray-300 hover:text-gray-600 text-xs">✕</button>
         </div>
-        <p className="text-[10px] text-gray-400 font-mono">n = {vals.length}</p>
+        <p className="text-[10px] text-gray-400 font-mono"><i>n</i> = {vals.length}</p>
         <Plot
           data={[{ type: "bar" as const, x: xs, y: counts,
             marker: { color: _pal()[0], opacity: 0.8 },
@@ -999,14 +999,14 @@ function ICCTab({ sessionId, columns }: { sessionId: string; columns: string[] }
           <span className="font-semibold font-mono text-gray-700">F({data.n - 1}, {data.n - 1}) = {data.f_stat.toFixed(2)}</span>
         </p>
         <p className="text-gray-500 flex justify-between">
-          <span>Significance (p-value):</span>
+          <span>Significance (<i>p</i>-value):</span>
           <span className="font-semibold font-mono text-gray-700">{fmtP(data.f_p)}</span>
         </p>
         <p className="text-gray-500 flex justify-between border-t border-gray-200/60 pt-1 mt-1">
           <span>Agreement Level:</span>
           <span className={interpColor(data.interpretation)}>{data.interpretation}</span>
         </p>
-        <p className="text-gray-400 text-[10px] font-mono text-right mt-1">n = {data.n} subjects</p>
+        <p className="text-gray-400 text-[10px] font-mono text-right mt-1"><i>n</i> = {data.n} subjects</p>
       </div>
       <InfoBanner>
         ICC = {data.icc.toFixed(3)} — {data.interpretation} agreement.{" "}
@@ -1182,7 +1182,7 @@ function KappaTab({ sessionId, columns }: { sessionId: string; columns: string[]
           <span>Agreement Strength:</span>
           <span className={interpColor(data.interpretation)}>{data.interpretation}</span>
         </p>
-        <p className="text-gray-400 text-[10px] font-mono text-right mt-1">n = {data.n} subjects</p>
+        <p className="text-gray-400 text-[10px] font-mono text-right mt-1"><i>n</i> = {data.n} subjects</p>
       </div>
       <InfoBanner>
         κ = {data.kappa.toFixed(3)} ({data.interpretation}).{" "}

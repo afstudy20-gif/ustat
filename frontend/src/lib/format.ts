@@ -57,3 +57,14 @@ export function pCellTitle(p: number | null | undefined): string {
   if (p == null) return "p = —";
   return `p = ${fmtPFull(p)}`;
 }
+
+/**
+ * Plotly-only variant of `fmtPubP` with the leading "p" wrapped in an
+ * `<i>` tag — Plotly's `text` / `hovertemplate` render a small HTML
+ * subset (unlike JSX, which needs an actual <i> element). Journal
+ * convention italicises the p in "p < 0.05" / "p = 0.035".
+ */
+export function fmtPubPHtml(p: number | null | undefined): string {
+  const s = fmtPubP(p);
+  return s === "—" ? s : s.replace(/^p/, "<i>p</i>");
+}

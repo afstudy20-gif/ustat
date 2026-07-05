@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useStore, isNumericKind } from "../store";
 import { usePlotLayout, usePalette } from "../plotStyle";
 import { runRandomForest, runGradientBoosting } from "../api";
@@ -401,15 +401,15 @@ export default function MLPanel() {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-1.5">
-                    {[
+                    {([
                       ["R²", result.r2?.toFixed(3)],
                       ["RMSE", result.rmse?.toFixed(3)],
                       ["MAE", result.mae?.toFixed(3)],
                       ["CV folds", result.cv_folds],
-                      ["n", result.n],
+                      [<i>n</i>, result.n],
                       ["features", result.n_features],
-                    ].map(([k, v]) => (
-                      <div key={String(k)} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
+                    ] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                      <div key={i} className="bg-gray-50 border border-gray-200 rounded p-1.5 text-center">
                         <p className="text-[9px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-xs font-mono">{v}</p>
                       </div>
@@ -465,7 +465,7 @@ export default function MLPanel() {
                   </h4>
                   <table className="w-full text-[11px]">
                     <thead className="text-gray-400">
-                      <tr><th className="text-left px-1 py-0.5">Pred</th><th className="text-left px-1 py-0.5">Obs</th><th className="text-right px-1 py-0.5">n</th></tr>
+                      <tr><th className="text-left px-1 py-0.5">Pred</th><th className="text-left px-1 py-0.5">Obs</th><th className="text-right px-1 py-0.5"><i>n</i></th></tr>
                     </thead>
                     <tbody>
                       {result.calibration.map((c, i: number) => (

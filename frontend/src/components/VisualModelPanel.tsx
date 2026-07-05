@@ -6,7 +6,7 @@
  *   size-matched export (PNG / TIFF / JPEG / SVG + DPI) via TitledPlot
  * + All charts respect the global plot theme (usePlotLayout / usePalette)
  */
-import { useState, useRef } from "react";
+import { useState, useRef, type ReactNode } from "react";
 import { useStore, isNumericKind, type Session } from "../store";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
 import {
@@ -124,7 +124,7 @@ function CoefTable({ coefs, expMode = false }: { coefs: Coefficient[]; expMode?:
             {!expMode && <th className={hd}>exp(β)</th>}
             <th className={hd}>SE</th>
             <th className={hd}>z/t</th>
-            <th className={hd}>p-value</th>
+            <th className={hd}><i>p</i>-value</th>
             <th className={hd}></th>
           </tr>
         </thead>
@@ -138,11 +138,11 @@ function CoefTable({ coefs, expMode = false }: { coefs: Coefficient[]; expMode?:
 
 // ── StatCards ─────────────────────────────────────────────────────────────────
 type StatValue = string | number | null | undefined;
-function StatCards({ pairs }: { pairs: [string, StatValue, string?][] }) {
+function StatCards({ pairs }: { pairs: [ReactNode, StatValue, string?][] }) {
   return (
     <div className="grid grid-cols-4 gap-3">
-      {pairs.filter(([, v]) => v != null).map(([k, v, tip]) => (
-        <div key={k} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      {pairs.filter(([, v]) => v != null).map(([k, v, tip], i) => (
+        <div key={i} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
           <p className="text-xs text-gray-400 flex items-center gap-1">
             {k} {tip && <Tip text={tip} />}
           </p>
@@ -258,7 +258,7 @@ function PolynomialSection({ sessionId, numCols }: { sessionId: string; numCols:
             <div className="panel space-y-3 xl:col-start-2">
               <h4 className="font-semibold text-gray-900">{result.model}</h4>
               <StatCards pairs={[
-                ["n", result.n, "Observations used"],
+                [<i>n</i>, result.n, "Observations used"],
                 ["R²", result.r_squared, "Proportion of variance explained"],
                 ["Adj R²", result.adj_r_squared],
                 ["AIC", result.aic, "Lower = better fit"],
@@ -579,7 +579,7 @@ function LMMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
             )}
 
             <StatCards pairs={[
-              ["n", result.n],
+              [<i>n</i>, result.n],
               ["Groups", result.n_groups, "Number of level-2 clusters (random intercepts)"],
               ...(result.icc != null ? [["ICC", result.icc.toFixed(4), "Intraclass Correlation — proportion of variance explained by grouping"] as [string, StatValue, string]] : []),
               ["AIC", result.aic?.toFixed(2)],
@@ -701,7 +701,7 @@ function GLMSection({ sessionId, allCols, numCols }: { sessionId: string; allCol
           <div className="panel space-y-3">
             <h4 className="font-semibold text-gray-900">{result.model}</h4>
             <StatCards pairs={[
-              ["n", result.n],
+              [<i>n</i>, result.n],
               ["AIC", result.aic?.toFixed(2), "Lower = better"],
               ["BIC", result.bic?.toFixed(2)],
               ["Deviance", result.deviance?.toFixed(2), "Smaller = better fit"],
@@ -800,7 +800,7 @@ function DiagnosticsSection({ sessionId, allCols, numCols }: { sessionId: string
           {diag && (
             <div className="space-y-1.5 pt-2 border-t border-gray-100">
               <p className="text-[10px] text-gray-400">Model summary</p>
-              <p className="text-xs text-gray-600">n = {diag.n} &nbsp;|&nbsp; R² = {diag.r_squared.toFixed(3)}</p>
+              <p className="text-xs text-gray-600"><i>n</i> = {diag.n} &nbsp;|&nbsp; R² = {diag.r_squared.toFixed(3)}</p>
               <p className="text-xs text-gray-600">Residual SE = {diag.residual_se.toFixed(4)}</p>
             </div>
           )}

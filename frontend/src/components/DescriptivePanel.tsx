@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { useStore, PALETTES, isNumericKind } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePalette } from "../plotStyle";
@@ -749,14 +749,14 @@ function ScatterView({
         <>
           <div className="flex gap-3 flex-wrap flex-shrink-0">
             {[
-              { label: "n",         value: String(data.points.length) },
-              { label: "r",         value: fmt(data.regression.r) },
-              { label: "r²",        value: fmt(data.regression.r2) },
-              { label: "p",         value: data.regression.p == null ? "—" : data.regression.p < 0.001 ? "<0.001" : fmt(data.regression.p) },
-              { label: "slope",     value: fmt(data.regression.slope) },
-              { label: "intercept", value: fmt(data.regression.intercept) },
-            ].map(({ label, value }) => (
-              <div key={label} className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 min-w-[60px]">
+              { key: "n",         label: <i>n</i>,                       value: String(data.points.length) },
+              { key: "r",         label: "r" as ReactNode,         value: fmt(data.regression.r) },
+              { key: "r2",        label: "r²" as ReactNode,        value: fmt(data.regression.r2) },
+              { key: "p",         label: <i>p</i>,                       value: data.regression.p == null ? "—" : data.regression.p < 0.001 ? "<0.001" : fmt(data.regression.p) },
+              { key: "slope",     label: "slope" as ReactNode,     value: fmt(data.regression.slope) },
+              { key: "intercept", label: "intercept" as ReactNode, value: fmt(data.regression.intercept) },
+            ].map(({ key, label, value }) => (
+              <div key={key} className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 min-w-[60px]">
                 <span className="text-[10px] text-gray-400 mb-0.5">{label}</span>
                 <span className="text-xs font-mono font-semibold text-gray-800">{value}</span>
               </div>
@@ -793,7 +793,7 @@ function ScatterView({
                 annotations: data.regression.r != null ? [{
                   x: 0.03, y: 0.97,
                   xref: "paper" as const, yref: "paper" as const,
-                  text: `r = ${data.regression.r.toFixed(3)}   p = ${fmtP(data.regression.p)}`,
+                  text: `r = ${data.regression.r.toFixed(3)}   <i>p</i> = ${fmtP(data.regression.p)}`,
                   showarrow: false,
                   font: { color: "#374151", size: 11 },
                   bgcolor: "rgba(249,250,251,0.9)",
@@ -814,17 +814,6 @@ function ScatterView({
           </div>
         </>
       )}
-    </div>
-  );
-}
-
-// ── Stats badge ───────────────────────────────────────────────────────────────
-
-function StatBadge({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex flex-col items-center bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 min-w-[72px]">
-      <span className="text-xs text-gray-400 mb-0.5">{label}</span>
-      <span className="text-sm font-mono font-semibold text-gray-800">{value}</span>
     </div>
   );
 }
@@ -1215,14 +1204,14 @@ export default function DescriptivePanel() {
                     <span className="font-semibold text-indigo-600">{selected}</span>
                     <span className="text-gray-400">·</span>
                     <span className="text-gray-600">
-                      {summary.type === "numeric" ? "Continuous" : "Categorical"} · n={summary.n}
+                      {summary.type === "numeric" ? "Continuous" : "Categorical"} · <i>n</i>={summary.n}
                     </span>
                     {summary.missing > 0 && (
                       <span className="text-amber-600 text-xs">· {summary.missing} missing</span>
                     )}
                     {summary.type === "numeric" && summary.normality_p != null && (
                       <span className={`text-xs ${summary.normal ? "text-emerald-600" : "text-amber-600"}`}>
-                        · {summary.normal ? "Normal" : "Non-normal"} (p={fmtP(summary.normality_p)})
+                        · {summary.normal ? "Normal" : "Non-normal"} (<i>p</i>={fmtP(summary.normality_p)})
                       </span>
                     )}
                   </div>
@@ -1271,7 +1260,7 @@ export default function DescriptivePanel() {
                         : "bg-red-50 border-red-300 text-red-600"}`}>
                       {summary.normality_label}
                       <span className="font-normal text-gray-400 ml-1">
-                        ({summary.normality_test ?? "Shapiro-Wilk"} p = {fmt(summary.normality_p ?? summary.shapiro_p, 3)})
+                        ({summary.normality_test ?? "Shapiro-Wilk"} <i>p</i> = {fmt(summary.normality_p ?? summary.shapiro_p, 3)})
                       </span>
                       <div className="text-[10px] font-normal text-gray-400 mt-0.5">
                         {summary.n < 50 ? "n < 50 → Shapiro-Wilk" : "n ≥ 50 → Kolmogorov-Smirnov"}
@@ -1321,8 +1310,8 @@ export default function DescriptivePanel() {
                           typeof v === "number" ? v.toFixed(d) : "\u2014";
                         const pNorm = fmtP(summary.normality_p);
                         return summary.normal
-                          ? `Normal distribution (${summary.normality_test}, p=${pNorm}) \u2014 report Mean \u00B1 SD (${f(summary.mean)} \u00B1 ${f(summary.std)}).`
-                          : `Non-normal (${summary.normality_test}, p=${pNorm}) \u2014 report Median [IQR] (${f(summary.median)} [${f(summary.q1)}\u2013${f(summary.q3)}]).`;
+                          ? <>Normal distribution ({summary.normality_test}, <i>p</i>={pNorm}) \u2014 report Mean \u00B1 SD ({f(summary.mean)} \u00B1 {f(summary.std)}).</>
+                          : <>Non-normal ({summary.normality_test}, <i>p</i>={pNorm}) \u2014 report Median [IQR] ({f(summary.median)} [{f(summary.q1)}\u2013{f(summary.q3)}]).</>;
                       })()}
                       {Math.abs(summary.skewness) > 2 ? " Highly skewed \u2014 consider log-transformation." :
                        Math.abs(summary.skewness) > 1 ? " Moderately skewed." : ""}
@@ -1332,7 +1321,7 @@ export default function DescriptivePanel() {
                 {summary.type === "categorical" && (
                   <div className="px-4 py-1.5 border-b border-gray-100 bg-amber-50 flex-shrink-0">
                     <p className="text-[10px] text-amber-800 leading-relaxed">
-                      {summary.categories?.length} categories, n = {summary.n}. Report as n (%). Most frequent: {summary.categories?.[0]?.value} ({summary.categories?.[0]?.pct}%).
+                      {summary.categories?.length} categories, <i>n</i> = {summary.n}. Report as <i>n</i> (%). Most frequent: {summary.categories?.[0]?.value} ({summary.categories?.[0]?.pct}%).
                       {summary.missing > 0 ? ` Missing: ${summary.missing} (${(summary.missing / (summary.n + summary.missing) * 100).toFixed(1)}%).` : ""}
                     </p>
                   </div>

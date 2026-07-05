@@ -93,7 +93,7 @@ function ResultCard({ result }: { result: CategoricalResult }) {
           <p className="text-xs font-semibold text-gray-600 mb-1">Post-hoc: {result.posthoc_method ?? "Pairwise"}</p>
           <div className="overflow-auto rounded border border-gray-200">
             <table className="w-full text-xs"><thead><tr className="bg-gray-50">
-              <th className="px-2 py-1 text-left">Comparison</th><th className="px-2 py-1 text-right">p (adj)</th><th className="px-2 py-1 text-center">Sig</th>
+              <th className="px-2 py-1 text-left">Comparison</th><th className="px-2 py-1 text-right"><i>p</i> (adj)</th><th className="px-2 py-1 text-center">Sig</th>
             </tr></thead><tbody>
               {result.posthoc.map((ph: PostHocRow, i: number) => (
                 <tr key={i} className={`border-t border-gray-100 ${ph.significant?"":"text-gray-400"}`}>

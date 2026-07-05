@@ -186,7 +186,7 @@ function ResultCard({ result }: { result: RMResult }) {
                 <th className="px-2 py-1 text-left">Term</th>
                 <th className="px-2 py-1 text-right">F</th>
                 <th className="px-2 py-1 text-right">df</th>
-                <th className="px-2 py-1 text-right">p</th>
+                <th className="px-2 py-1 text-right"><i>p</i></th>
                 <th className="px-2 py-1 text-right">Partial \u03B7\u00B2</th>
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
@@ -216,7 +216,7 @@ function ResultCard({ result }: { result: RMResult }) {
               <thead><tr className="bg-gray-50">
                 <th className="px-2 py-1 text-left">Comparison</th>
                 <th className="px-2 py-1 text-right">Statistic</th>
-                <th className="px-2 py-1 text-right">p (adj)</th>
+                <th className="px-2 py-1 text-right"><i>p</i> (adj)</th>
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
               <tbody>

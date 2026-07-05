@@ -380,7 +380,7 @@ export function ModelSummaryTable({ s }: { s: ModelSummary }) {
               <td className="px-3 py-1.5 text-right font-mono text-gray-800">{om.chi2?.toFixed(3)} <span className="text-gray-400">(df={om.df})</span></td>
               <td className="px-3 py-1.5" colSpan={2}>
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${om.p < 0.05 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  p = {fmtP(om.p)}
+                  <i>p</i> = {fmtP(om.p)}
                 </span>
                 <span className="text-gray-400 ml-1.5 text-[10px]">{om.p < 0.05 ? "Model significant" : "Not significant"}</span>
               </td>
@@ -421,7 +421,7 @@ export function ModelSummaryTable({ s }: { s: ModelSummary }) {
               <td className="px-3 py-1.5 text-right font-mono text-gray-800">{hl.chi2?.toFixed(3)} <span className="text-gray-400">(df={hl.df})</span></td>
               <td className="px-3 py-1.5" colSpan={2}>
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${hl.p >= 0.05 ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                  p = {fmtP(hl.p)}
+                  <i>p</i> = {fmtP(hl.p)}
                 </span>
                 <span className="text-gray-400 ml-1.5 text-[10px]">{hl.p >= 0.05 ? "✓ Good calibration" : "⚠ Poor calibration"}</span>
               </td>

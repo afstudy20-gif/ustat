@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useStore } from "../store";
 import { runModelValidation, runExternalValidationLogistic } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -39,7 +39,7 @@ export default function InternalValidationPanel() {
   );
 }
 
-const Tile = ({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) => (
+const Tile = ({ label, value, sub, tone }: { label: string; value: string; sub?: ReactNode; tone?: string }) => (
   <div className="rounded-xl border border-gray-200 bg-white p-3">
     <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
     <div className={`text-xl font-semibold mt-1 ${tone ?? "text-gray-900"}`}>{value}</div>
@@ -237,7 +237,7 @@ function InternalTab() {
                 {result.interpretation}
               </p>
               <div className="text-[11px] text-gray-500 mt-2">
-                n = {result.n} · {result.n_predictors} predictor term(s) · {result.n_boot} usable bootstraps
+                <i>n</i> = {result.n} · {result.n_predictors} predictor term(s) · {result.n_boot} usable bootstraps
               </div>
             </div>
 
@@ -400,7 +400,7 @@ function ExternalTab() {
               <p className={`text-sm leading-relaxed ${ok ? "text-emerald-900" : "text-amber-900"}`}>
                 {result.result_text}
               </p>
-              <div className="text-[11px] text-gray-500 mt-2">n = {result.n}</div>
+              <div className="text-[11px] text-gray-500 mt-2"><i>n</i> = {result.n}</div>
             </div>
 
             <div>
@@ -427,7 +427,7 @@ function ExternalTab() {
                 <Tile label="Brier" value={fmt(result.calibration?.brier)} />
                 {hl && <Tile label="Hosmer-Lemeshow"
                   value={`χ²=${fmt(hl.chi2, 1)}`}
-                  sub={`p = ${fmtP(hl.p)}`}
+                  sub={<><i>p</i> = {fmtP(hl.p)}</>}
                   tone={hl.p < 0.05 ? "text-amber-600" : "text-emerald-600"} />}
               </div>
             </div>

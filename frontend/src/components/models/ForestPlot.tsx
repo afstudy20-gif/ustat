@@ -295,7 +295,7 @@ export function ForestPlot({ result, modelType, outcome }: {
             { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.055,
               text: "<b>OR (95% CI)</b>", font: HDR },
             { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.055,
-              text: "<b>p</b>", font: HDR },
+              text: "<b><i>p</i></b>", font: HDR },
             { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.012,
               text: opts.colorBy === "significance"
                 ? "● Uni   ◆ Multi (red = CI excl. 1)"
@@ -360,7 +360,7 @@ export function ForestPlot({ result, modelType, outcome }: {
         line: { color: "#d1d5db", width: 1 },
       },
       hovertemplate: uniValid.map((r) =>
-        `<b>${r.variable}</b> (Unadjusted)<br>OR: ${r.uni_or?.toFixed(3)}<br>95% CI: ${r.uni_ci_low?.toFixed(3)} – ${r.uni_ci_high?.toFixed(3)}<br>p = ${fmtP(r.uni_p)}<extra></extra>`
+        `<b>${r.variable}</b> (Unadjusted)<br>OR: ${r.uni_or?.toFixed(3)}<br>95% CI: ${r.uni_ci_low?.toFixed(3)} – ${r.uni_ci_high?.toFixed(3)}<br><i>p</i> = ${fmtP(r.uni_p)}<extra></extra>`
       ),
       ...(splitLayout ? { xaxis: "x", yaxis: "y" } : {}),
     };
@@ -383,7 +383,7 @@ export function ForestPlot({ result, modelType, outcome }: {
         line: { color: "#d1d5db", width: 1 },
       },
       hovertemplate: multiValid.map((r) =>
-        `<b>${r.variable}</b> (Adjusted)<br>OR: ${r.multi_or?.toFixed(3)}<br>95% CI: ${r.multi_ci_low?.toFixed(3)} – ${r.multi_ci_high?.toFixed(3)}<br>p = ${fmtP(r.multi_p)}<extra></extra>`
+        `<b>${r.variable}</b> (Adjusted)<br>OR: ${r.multi_or?.toFixed(3)}<br>95% CI: ${r.multi_ci_low?.toFixed(3)} – ${r.multi_ci_high?.toFixed(3)}<br><i>p</i> = ${fmtP(r.multi_p)}<extra></extra>`
       ),
       ...(splitLayout ? { xaxis: "x2", yaxis: "y" } : {}),
     };
@@ -510,7 +510,7 @@ export function ForestPlot({ result, modelType, outcome }: {
           { ...AB, xref: "paper", yref: "paper", x: TX1, y: 1.06,
             text: `<b>${metric} (95% CI)</b>`, font: HDR },
           { ...AB, xref: "paper", yref: "paper", x: TX2, y: 1.06,
-            text: "<b>p</b>", font: HDR },
+            text: "<b><i>p</i></b>", font: HDR },
         ]
       : []),
     ...(opts.showArrows ? dirAnnotations(forestRight) : []),
@@ -559,7 +559,7 @@ export function ForestPlot({ result, modelType, outcome }: {
           line: { color: "#d1d5db", width: 1 },
         },
         hovertemplate: coefs.map((_: Coefficient, i: number) =>
-          `<b>${labels[i]}</b><br>${metric}: ${estimates[i]?.toFixed(3)}<br>95% CI: ${ciLow[i]?.toFixed(3)} – ${ciHigh[i]?.toFixed(3)}<br>p = ${fmtP(pVals[i])}<extra></extra>`
+          `<b>${labels[i]}</b><br>${metric}: ${estimates[i]?.toFixed(3)}<br>95% CI: ${ciLow[i]?.toFixed(3)} – ${ciHigh[i]?.toFixed(3)}<br><i>p</i> = ${fmtP(pVals[i])}<extra></extra>`
         ),
         name: isCox ? "Hazard Ratio" : "Odds Ratio",
         showlegend: opts.showLegend,

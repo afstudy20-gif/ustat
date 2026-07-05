@@ -101,6 +101,7 @@ const INTENT_KEYWORDS: IntentKeyword[] = [
 // Connectors that separate column references: "a vs b", "a by b",
 // "a göre b", "a ile b", comma, "and", "ve".
 const CONNECTOR_RE = /\s+(?:vs\.?|versus|by|x|against|over|across|on|ile|göre|karşı|karsi|ve|and|then|then)\s+|,\s*|\s*;\s*/i;
+const QUOTE_SENTINEL = "\u0001";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -224,9 +225,9 @@ function stripToken(query: string, token: string): string {
 function extractColumnTokens(remainder: string): string[] {
   const cleaned = remainder
     // Treat quoted strings as single units before splitting on connectors.
-    .replace(/["'`]([^"'`]+)["'`]/g, " \u0001$1\u0001 ")
+    .replace(/["'`]([^"'`]+)["'`]/g, ` ${QUOTE_SENTINEL}$1${QUOTE_SENTINEL} `)
     .split(CONNECTOR_RE)
-    .map((s) => s.replace(/\u0001/g, "").trim())
+    .map((s) => s.split(QUOTE_SENTINEL).join("").trim())
     .filter((s) => s.length >= 2);
   // Deduplicate while preserving order.
   const seen = new Set<string>();

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
 import Plot from "../PlotComponent";
 import { useStore, analysisCols, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
@@ -356,7 +356,7 @@ function CoxUniMultiForest({
       <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex items-center justify-between">
         <p className="text-xs font-semibold text-gray-600">
           Unadjusted vs Adjusted hazard ratios — paired forest
-          <span className="ml-2 font-normal text-gray-400">n = {result.n}, {result.n_events} events</span>
+          <span className="ml-2 font-normal text-gray-400"><i>n</i> = {result.n}, {result.n_events} events</span>
           <Tip wide text="Grey circle = univariable (unadjusted) HR; blue square = multivariable (adjusted) HR, both with 95% CI. Labels use the column's value labels. Drag Width/Height to size the figure. Export (↓ top-right) for the manuscript; the figure title is intentionally omitted so you can supply it as the figure legend." />
         </p>
         <button onClick={onClose} className="text-[10px] text-gray-400 hover:text-red-500">✕ Close</button>
@@ -1281,14 +1281,14 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   </div>
                   <p className="text-[10px] text-gray-500">{fgResult.regression_result.model}</p>
                   <div className="grid grid-cols-3 gap-1">
-                    {[
-                      ["n",                  fgResult.regression_result.n],
+                    {([
+                      [<i>n</i>,                  fgResult.regression_result.n],
                       ["Events",             fgResult.regression_result.n_events_of_interest],
                       ["Competing",          fgResult.regression_result.n_competing],
                       ["Censored",           fgResult.regression_result.n_censored],
                       ["C-index",            fgResult.regression_result.concordance?.toFixed(3)],
-                    ].map(([k, v]) => (
-                      <div key={String(k)} className="bg-white border border-gray-200 rounded p-1.5 text-center">
+                    ] as [ReactNode, ReactNode][]).map(([k, v], i) => (
+                      <div key={i} className="bg-white border border-gray-200 rounded p-1.5 text-center">
                         <p className="text-[9px] text-gray-400">{k}</p>
                         <p className="font-semibold text-gray-800 text-xs">{v}</p>
                       </div>
@@ -1388,8 +1388,8 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   <table className="w-full text-[11px]">
                     <thead>
                       <tr className="bg-gray-50 border-b border-gray-200 text-gray-500">
-                        {["Group", "n", "RMST", "95% CI"].map((h) => (
-                          <th key={h} className="px-1.5 py-1.5 text-left font-medium">{h}</th>
+                        {(["Group", <i key="n">n</i>, "RMST", "95% CI"] as ReactNode[]).map((h, i) => (
+                          <th key={i} className="px-1.5 py-1.5 text-left font-medium">{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1660,7 +1660,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                         <th className="px-1.5 py-1.5 text-left text-gray-500">Variable</th>
                         <th className="px-1.5 py-1.5 text-left text-gray-500">HR</th>
                         <th className="px-1.5 py-1.5 text-left text-gray-500">95% CI</th>
-                        <th className="px-1.5 py-1.5 text-left text-gray-500">p</th>
+                        <th className="px-1.5 py-1.5 text-left text-gray-500"><i>p</i></th>
                         {lmResult.cox_results[0]?.fmi != null && <th className="px-1.5 py-1.5 text-right text-gray-500" title="Fraction of missing information">FMI</th>}
                       </tr>
                     </thead>
@@ -1828,7 +1828,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
           // Build legend label per group
           const legendLabel = (g: KMGroup) => {
             const resolved = resolveGroupName(String(g.group));
-            const nSuffix = kmShowNInLegend ? ` (n=${g.n})` : "";
+            const nSuffix = kmShowNInLegend ? ` (<i>n</i>=${g.n})` : "";
             if (!kmGroup) return `${resolved}${nSuffix}`;
             if (kmHidePrefix) return `${resolved}${nSuffix}`;
             return `${kmCustomGroupTitle || kmGroup} = ${resolved}${nSuffix}`;
@@ -2091,7 +2091,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                     {kmCustomGroupTitle || kmGroup || "Group"}
                     <span className="ml-1 font-normal text-gray-400 normal-case tracking-normal">(right-click to rename)</span>
                   </th>
-                  <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider">N</th>
+                  <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider"><i>n</i></th>
                   <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider">Events</th>
                   <th className="px-3 py-1.5 text-right text-[9px] font-bold text-gray-500 uppercase tracking-wider cursor-context-menu"
                     onContextMenu={(e) => {
@@ -2140,7 +2140,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
                   <span>Log-rank test (overall)</span>
                   <span>
-                    p = {fmtP(kmResult.logrank.p)}
+                    <i>p</i> = {fmtP(kmResult.logrank.p)}
                     {kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
                   </span>
                 </div>
@@ -2218,7 +2218,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                         <th className="px-3 py-1 text-left font-medium">Comparison</th>
                         <th className="px-3 py-1 text-right font-medium">p (raw)</th>
                         {kmResult.pairwise.comparisons.some((c) => c.p_adj != null) && (
-                          <th className="px-3 py-1 text-right font-medium">p (adj)</th>
+                          <th className="px-3 py-1 text-right font-medium"><i>p</i> (adj)</th>
                         )}
                       </tr>
                     </thead>
@@ -2396,7 +2396,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   const pAnnot = stratum.logrank?.p != null ? [{
                     xref: "paper", yref: "paper", x: 0.02, y: 0.98,
                     xanchor: "left", yanchor: "top",
-                    text: `p = ${fmtP(stratum.logrank.p)}`,
+                    text: `<i>p</i> = ${fmtP(stratum.logrank.p)}`,
                     showarrow: false,
                     font: { size: 11, color: stratum.logrank.p != null && stratum.logrank.p < 0.05 ? "#6366f1" : "#6b7280" },
                     bgcolor: "rgba(249,250,251,0.85)", borderpad: 3, bordercolor: "#e5e7eb", borderwidth: 1,
@@ -2405,7 +2405,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                     <div key={stratum.label} className="border border-gray-200 rounded-lg overflow-hidden">
                       <div className="px-3 py-1.5 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
                         <span className="text-xs font-semibold text-gray-700">{kmStratify} = {stratLabel}</span>
-                        <span className="text-[10px] text-gray-400">n={stratum.n}</span>
+                        <span className="text-[10px] text-gray-400"><i>n</i>={stratum.n}</span>
                       </div>
                       <Plot
                         data={buildTraces(stratum.groups)}
@@ -2712,7 +2712,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                 <th className="px-3 py-1.5 text-left text-gray-500">N (events)</th>
                 <th className="px-3 py-1.5 text-left text-gray-500">HR</th>
                 <th className="px-3 py-1.5 text-left text-gray-500">95% CI</th>
-                <th className="px-3 py-1.5 text-left text-gray-500">p</th>
+                <th className="px-3 py-1.5 text-left text-gray-500"><i>p</i></th>
               </tr></thead>
               <tbody>
                 {coxScanResult.map((r, i) => (
@@ -2762,7 +2762,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                   <th className="px-3 py-1.5 text-left text-gray-500">SE</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">HR</th>
                   <th className="px-3 py-1.5 text-left text-gray-500">95% CI</th>
-                  <th className="px-3 py-1.5 text-left text-gray-500">p</th>
+                  <th className="px-3 py-1.5 text-left text-gray-500"><i>p</i></th>
                 </tr>
               </thead>
               <tbody>
@@ -2907,7 +2907,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                     <th className="text-right px-3 py-2 font-medium">n events</th>
                     <th className="text-right px-3 py-2 font-medium">HR</th>
                     <th className="text-right px-3 py-2 font-medium">95% CI</th>
-                    <th className="text-right px-3 py-2 font-medium">p</th>
+                    <th className="text-right px-3 py-2 font-medium"><i>p</i></th>
                   </tr>
                 </thead>
                 <tbody>
