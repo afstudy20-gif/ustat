@@ -451,6 +451,8 @@ def run_bayesian(req: BayesianRequest):
     elif req.analysis_type == "ttest_paired":
         return run_bayesian_ttest_paired(df_sub, req)
     elif req.analysis_type == "ttest_ind":
+        if not req.predictor:
+            raise HTTPException(400, "Grouping predictor variable required.")
         # Grouping variable shouldn't be coerced to numeric for grouping!
         df_sub[req.predictor] = df[req.predictor]
         return run_bayesian_ttest_ind(df_sub, req)

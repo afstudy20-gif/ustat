@@ -624,6 +624,35 @@ def run_power(req: PowerRequest):
     alt = "two-sided" if req.tails == 2 else "larger"
     a   = req.alpha
 
+    # ── Upfront field validation for the statsmodels-backed power classes ──
+    # solve_power() raises a bare ValueError ("need exactly one keyword that
+    # is None") when the caller omits a required field. Left unhandled, that
+    # crashes with a 500 instead of a usable client error. Validate the
+    # solve_for-appropriate required fields before dispatching.
+    if req.test in ("t_two", "t_one", "anova", "chi2", "proportion"):
+        missing = []
+        if req.solve_for == "n":
+            if req.power is None:
+                missing.append("power")
+            if req.test != "proportion" and req.effect_size is None:
+                missing.append("effect_size")
+        elif req.solve_for == "power":
+            if req.n is None:
+                missing.append("n")
+            if req.test != "proportion" and req.effect_size is None:
+                missing.append("effect_size")
+        elif req.solve_for == "effect_size":
+            if req.n is None:
+                missing.append("n")
+            if req.power is None:
+                missing.append("power")
+        if missing:
+            raise HTTPException(
+                400,
+                f"Power analysis for test='{req.test}', solve_for='{req.solve_for}' "
+                f"requires: {', '.join(missing)}.",
+            )
+
     def _ceil(x): return int(np.ceil(float(x)))
 
     def _curve(pw_fn, n_end, n_start=4, steps=80):

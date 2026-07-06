@@ -224,10 +224,12 @@ function stripToken(query: string, token: string): string {
  *  Splits on connectors and quotes; filters out short noise tokens. */
 function extractColumnTokens(remainder: string): string[] {
   const cleaned = remainder
-    // Treat quoted strings as single units before splitting on connectors.
-    .replace(/["'`]([^"'`]+)["'`]/g, ` ${QUOTE_SENTINEL}$1${QUOTE_SENTINEL} `)
+    // Treat quoted strings as single units before splitting on connectors:
+    // replace internal whitespace with the sentinel so CONNECTOR_RE (which
+    // matches on \s+word\s+) can't split a quoted phrase like "time vs event".
+    .replace(/["'`]([^"'`]+)["'`]/g, (_m, inner: string) => ` ${inner.split(/\s+/).join(QUOTE_SENTINEL)} `)
     .split(CONNECTOR_RE)
-    .map((s) => s.split(QUOTE_SENTINEL).join("").trim())
+    .map((s) => s.split(QUOTE_SENTINEL).join(" ").trim())
     .filter((s) => s.length >= 2);
   // Deduplicate while preserving order.
   const seen = new Set<string>();

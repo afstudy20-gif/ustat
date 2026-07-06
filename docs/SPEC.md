@@ -93,12 +93,16 @@ summary by area:
   (`fmtP`, `fmtPubP`, `fmtPFull`, `pCellTitle`, `fmtPubPHtml`) — new code
   should use these rather than ad hoc formatting.
 
-## Known coverage gaps (input to the test-writing plan)
+## Test status (as of this assessment)
 
-1. Frontend now has Vitest + React Testing Library + MSW wiring and focused
-   formatter tests for the shared p-value display contract. Panel-level tests
-   are still mostly absent; all 36 panels need smoke tests for render, request,
-   loading/error, and result-table paths.
-2. Backend: Bayesian, time series (ARIMA/GEE), meta-analysis, TOST, power
-   analysis have shallow test depth. Article parser has none. Nomogram is
-   thin.
+- **Backend**: 730 passed, 0 failed, 2 skipped (`kaleido` optional dep for
+  static image export). pytest + Vitest run clean via
+  `backend/.venv/bin/python -m pytest -q` and `cd frontend && npx vitest run`.
+- **Frontend**: Vitest + React Testing Library + MSW stood up
+  (`frontend/vitest.config.ts`, `frontend/src/test/`). 294 tests: unit tests
+  for `lib/format.ts`, `lib/commandParser.ts`, `lib/commandSchema.ts`,
+  `lib/exportDataset.ts`, `lib/styledTable.ts`, plus a render/request/
+  loading/error smoke test for all 36 Panel components.
+- `npx tsc --noEmit` and `npx eslint . --quiet` both clean.
+- See the improvement-opportunities report (delivered alongside this spec)
+  for real bugs found during this pass and follow-up suggestions.
