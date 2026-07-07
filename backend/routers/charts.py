@@ -504,6 +504,327 @@ def subgroup_bar(req: SubgroupBarRequest):
     }
 
 
+class ScoreFigureSpec(BaseModel):
+    score_col: str
+    label: Optional[str] = None
+    components: List[str]
+    component_labels: Optional[Dict[str, str]] = None
+
+
+class ScoreCompositeRequest(BaseModel):
+    session_id: str
+    group_col: str
+    scores: List[ScoreFigureSpec]
+    group_order: Optional[List[str]] = None
+    bins: int = 8
+    title: Optional[str] = None
+    positive_values: List[str] = ["1", "true", "yes", "y", "present", "positive"]
+
+
+def _format_p_value(p: Optional[float]) -> str:
+    if p is None or not np.isfinite(p):
+        return "p = NA"
+    if p < 0.001:
+        return "p < 0.001"
+    return f"p = {p:.3f}"
+
+
+def _score_group_pvalue(score: pd.Series, groups: pd.Series, group_levels: list[str]) -> Optional[float]:
+    samples = [
+        pd.to_numeric(score[groups == g], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+        for g in group_levels
+    ]
+    samples = [s for s in samples if len(s) > 0]
+    if len(samples) < 2:
+        return None
+    try:
+        if len(samples) == 2:
+            return float(scipy_stats.mannwhitneyu(samples[0], samples[1], alternative="two-sided").pvalue)
+        return float(scipy_stats.kruskal(*samples).pvalue)
+    except Exception:
+        return None
+
+
+def _component_positive(series: pd.Series, positive_values: list[str]) -> pd.Series:
+    non_missing = series.notna()
+    numeric = pd.to_numeric(series, errors="coerce")
+    numeric_positive = numeric.notna() & (numeric > 0)
+    normalized = series.astype(str).str.strip().str.lower()
+    string_positive = normalized.isin({str(v).strip().lower() for v in positive_values})
+    return non_missing & (numeric_positive | string_positive)
+
+
+def _component_pvalue(values: pd.Series, groups: pd.Series, group_levels: list[str], positive_values: list[str]) -> Optional[float]:
+    valid = values.notna() & groups.notna()
+    if not valid.any():
+        return None
+    pos = _component_positive(values[valid], positive_values)
+    valid_groups = groups[valid]
+    table = []
+    for g in group_levels:
+        mask = valid_groups == g
+        positives = int(pos[mask].sum())
+        total = int(mask.sum())
+        table.append([positives, max(total - positives, 0)])
+    if len(table) < 2 or any(sum(row) == 0 for row in table):
+        return None
+    try:
+        if len(table) == 2:
+            return float(scipy_stats.fisher_exact(table).pvalue)
+        return float(scipy_stats.chi2_contingency(table).pvalue)
+    except Exception:
+        return None
+
+
+def _score_xbins(values: pd.Series, bins: int) -> dict:
+    clean = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    if clean.empty:
+        return {"nbinsx": max(2, int(bins))}
+    arr = clean.to_numpy(dtype=float)
+    is_integer = np.all(np.isclose(arr, np.round(arr)))
+    if is_integer and len(np.unique(arr)) <= 50:
+        return {
+            "xbins": {
+                "start": float(np.floor(arr.min()) - 0.5),
+                "end": float(np.ceil(arr.max()) + 0.5),
+                "size": 1,
+            }
+        }
+    return {"nbinsx": max(2, int(bins))}
+
+
+@router.post("/score_composite")
+def score_composite(req: ScoreCompositeRequest):
+    """Build a manuscript-style score distribution + component prevalence figure.
+
+    The endpoint is intentionally generic: any two score columns can be compared
+    across a grouping column, with each score paired to its own binary component
+    columns. It returns both computed summaries and a Plotly-ready 5-panel
+    figure matching the common clinical manuscript layout:
+    score histograms, score overlap boxplots, and grouped component prevalence
+    bars.
+    """
+    df = _get_df(req.session_id)
+    if req.group_col not in df.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{req.group_col}' not found")
+    if len(req.scores) != 2:
+        raise HTTPException(status_code=400, detail="Select exactly two score columns for a 5-panel score-composite figure.")
+
+    needed = [req.group_col]
+    for spec in req.scores:
+        if spec.score_col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{spec.score_col}' not found")
+        if not spec.components:
+            raise HTTPException(status_code=400, detail=f"Select at least one component for '{spec.score_col}'.")
+        needed.append(spec.score_col)
+        for comp in spec.components:
+            if comp not in df.columns:
+                raise HTTPException(status_code=400, detail=f"Column '{comp}' not found")
+            needed.append(comp)
+
+    sub = df[list(dict.fromkeys(needed))].copy()
+    sub["_score_group"] = sub[req.group_col].astype(str)
+    if req.group_order:
+        group_levels = [str(g) for g in req.group_order if str(g) in set(sub["_score_group"].dropna())]
+    else:
+        group_levels = [str(g) for g in pd.unique(sub["_score_group"].dropna())]
+    if len(group_levels) < 2:
+        raise HTTPException(status_code=400, detail="Need at least two non-missing groups.")
+
+    colors = ["#4f86c6", "#dd7b6e", "#6fbf73", "#9b6ec8", "#d19a2e"]
+    axis_ids = [
+        ("x", "y"),
+        ("x2", "y2"),
+        ("x3", "y3"),
+        ("x4", "y4"),
+        ("x5", "y5"),
+    ]
+    trace_data: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
+    shapes: list[dict[str, Any]] = []
+    score_summaries: list[dict[str, Any]] = []
+    component_ticks: list[dict[str, list[Any]]] = []
+
+    panel_titles = [
+        f"A  {req.scores[0].label or req.scores[0].score_col} Score Distribution",
+        f"B  {req.scores[1].label or req.scores[1].score_col} Score Distribution",
+        "C  Score Overlap (Box Plots)",
+        f"D  {req.scores[0].label or req.scores[0].score_col} Component Prevalence",
+        f"E  {req.scores[1].label or req.scores[1].score_col} Component Prevalence",
+    ]
+    title_positions = [(0.0, 1.06), (0.37, 1.06), (0.74, 1.06), (0.0, 0.47), (0.74, 0.47)]
+    for text, (xpos, ypos) in zip(panel_titles, title_positions):
+        annotations.append({
+            "xref": "paper", "yref": "paper", "x": xpos, "y": ypos,
+            "text": f"<b>{text}</b>", "showarrow": False, "xanchor": "left",
+            "font": {"size": 14, "color": "#111827"},
+        })
+
+    for score_idx, spec in enumerate(req.scores):
+        label = spec.label or spec.score_col
+        score_values = pd.to_numeric(sub[spec.score_col], errors="coerce").replace([np.inf, -np.inf], np.nan)
+        p_value = _score_group_pvalue(score_values, sub["_score_group"], group_levels)
+        n_by_group = {
+            g: int(score_values[sub["_score_group"] == g].dropna().shape[0])
+            for g in group_levels
+        }
+        score_summaries.append({
+            "score_col": spec.score_col,
+            "label": label,
+            "p_value": p_value,
+            "p_text": _format_p_value(p_value),
+            "n_by_group": n_by_group,
+            "components": [],
+        })
+
+        xref, yref = axis_ids[score_idx]
+        bin_kwargs = _score_xbins(score_values, req.bins)
+        for group_idx, group in enumerate(group_levels):
+            vals = score_values[sub["_score_group"] == group].dropna().astype(float).tolist()
+            trace = {
+                "type": "histogram",
+                "x": vals,
+                "name": f"{group} (n={len(vals)})",
+                "marker": {"color": colors[group_idx % len(colors)], "line": {"color": "white", "width": 0.5}},
+                "opacity": 0.78,
+                "showlegend": score_idx == 0,
+                "legendgroup": group,
+                "xaxis": xref,
+                "yaxis": yref,
+            }
+            trace.update(bin_kwargs)
+            trace_data.append(trace)
+
+            box_x = [f"{group}<br>{label}"] * len(vals)
+            trace_data.append({
+                "type": "box",
+                "x": box_x,
+                "y": vals,
+                "name": group,
+                "marker": {"color": colors[group_idx % len(colors)]},
+                "line": {"color": "#111827", "width": 1},
+                "boxpoints": "outliers" if len(vals) < 500 else False,
+                "showlegend": False,
+                "legendgroup": group,
+                "xaxis": "x3",
+                "yaxis": "y3",
+            })
+
+        annotations.append({
+            "xref": f"{xref} domain", "yref": f"{yref} domain", "x": 0.86, "y": 0.9,
+            "text": _format_p_value(p_value), "showarrow": False,
+            "font": {"size": 12, "color": "#4b5563"},
+        })
+
+    box_max_candidates = [
+        float(pd.to_numeric(sub[spec.score_col], errors="coerce").replace([np.inf, -np.inf], np.nan).max())
+        for spec in req.scores
+    ]
+    box_max_candidates = [v for v in box_max_candidates if np.isfinite(v)]
+    box_y_max = max(box_max_candidates or [1.0])
+    for score_idx, spec in enumerate(req.scores):
+        label = spec.label or spec.score_col
+        x0 = f"{group_levels[0]}<br>{label}"
+        x1 = f"{group_levels[-1]}<br>{label}"
+        y = box_y_max * (0.94 if score_idx == 0 else 0.88)
+        shapes.append({
+            "type": "line", "xref": "x3", "yref": "y3", "x0": x0, "x1": x1, "y0": y, "y1": y,
+            "line": {"color": "#9ca3af", "width": 1},
+        })
+        annotations.append({
+            "xref": "x3", "yref": "y3", "x": x0 if score_idx == 0 else x1, "y": y + max(box_y_max * 0.04, 0.5),
+            "text": score_summaries[score_idx]["p_text"], "showarrow": False,
+            "font": {"size": 12, "color": "#4b5563"},
+        })
+
+    for score_idx, spec in enumerate(req.scores):
+        xref, yref = axis_ids[3 + score_idx]
+        labels = [spec.component_labels.get(c, c) if spec.component_labels else c for c in spec.components]
+        component_ticks.append({"tickvals": list(range(len(labels))), "ticktext": labels})
+        component_rows = []
+        bar_width = 0.8 / max(len(group_levels), 1)
+        for group_idx, group in enumerate(group_levels):
+            y_values = []
+            text_values = []
+            for comp in spec.components:
+                mask = sub["_score_group"] == group
+                raw = sub.loc[mask, comp]
+                valid = raw.notna()
+                n = int(valid.sum())
+                positives = int(_component_positive(raw[valid], req.positive_values).sum()) if n else 0
+                prevalence = (positives / n * 100.0) if n else 0.0
+                y_values.append(prevalence)
+                text_values.append(f"{positives}/{n}")
+            x_positions = [
+                comp_idx - 0.4 + (group_idx + 0.5) * bar_width
+                for comp_idx in range(len(labels))
+            ]
+            trace_data.append({
+                "type": "bar",
+                "x": x_positions,
+                "y": y_values,
+                "width": [bar_width * 0.92] * len(labels),
+                "name": group,
+                "text": text_values,
+                "textposition": "none",
+                "customdata": labels,
+                "hovertemplate": "%{customdata}<br>%{fullData.name}: %{y:.1f}% (%{text})<extra></extra>",
+                "marker": {"color": colors[group_idx % len(colors)]},
+                "showlegend": score_idx == 1,
+                "legendgroup": group,
+                "xaxis": xref,
+                "yaxis": yref,
+            })
+
+        for comp_idx, (comp, label) in enumerate(zip(spec.components, labels)):
+            p_value = _component_pvalue(sub[comp], sub["_score_group"], group_levels, req.positive_values)
+            component_rows.append({"component": comp, "label": label, "p_value": p_value, "p_text": _format_p_value(p_value)})
+            annotations.append({
+                "xref": xref, "yref": yref, "x": comp_idx, "y": 103,
+                "text": "ns" if p_value is not None and p_value >= 0.05 else _format_p_value(p_value),
+                "showarrow": False, "font": {"size": 11, "color": "#9ca3af"},
+            })
+        score_summaries[score_idx]["components"] = component_rows
+
+    layout = {
+        "title": {
+            "text": req.title or "Score Distributions and Component Prevalence by Group",
+            "x": 0.5,
+            "xanchor": "center",
+            "font": {"size": 16, "color": "#111827"},
+        },
+        "height": 760,
+        "barmode": "overlay",
+        "boxmode": "group",
+        "paper_bgcolor": "#ffffff",
+        "plot_bgcolor": "#ffffff",
+        "font": {"family": "Arial, sans-serif", "size": 12, "color": "#111827"},
+        "margin": {"l": 70, "r": 30, "t": 90, "b": 90},
+        "legend": {"orientation": "v", "x": 0.98, "y": 0.98, "xanchor": "right", "yanchor": "top"},
+        "annotations": annotations,
+        "shapes": shapes,
+        "xaxis": {"domain": [0.0, 0.29], "title": {"text": req.scores[0].label or req.scores[0].score_col}, "gridcolor": "#e5e7eb", "zeroline": False},
+        "yaxis": {"domain": [0.57, 1.0], "title": {"text": "Number of Patients"}, "gridcolor": "#e5e7eb", "rangemode": "tozero"},
+        "xaxis2": {"domain": [0.36, 0.65], "title": {"text": req.scores[1].label or req.scores[1].score_col}, "gridcolor": "#e5e7eb", "zeroline": False},
+        "yaxis2": {"domain": [0.57, 1.0], "title": {"text": "Number of Patients"}, "gridcolor": "#e5e7eb", "rangemode": "tozero"},
+        "xaxis3": {"domain": [0.72, 1.0], "tickangle": 0, "gridcolor": "#e5e7eb", "zeroline": False},
+        "yaxis3": {"domain": [0.57, 1.0], "title": {"text": "Score Value"}, "gridcolor": "#e5e7eb", "rangemode": "tozero"},
+        "xaxis4": {"domain": [0.0, 0.68], "tickangle": 0, "gridcolor": "#e5e7eb", "zeroline": False, **component_ticks[0]},
+        "yaxis4": {"domain": [0.0, 0.42], "title": {"text": "Prevalence (%)"}, "range": [0, 108], "gridcolor": "#e5e7eb", "zeroline": False},
+        "xaxis5": {"domain": [0.76, 1.0], "tickangle": 0, "gridcolor": "#e5e7eb", "zeroline": False, **component_ticks[1]},
+        "yaxis5": {"domain": [0.0, 0.42], "title": {"text": "Prevalence (%)"}, "range": [0, 108], "gridcolor": "#e5e7eb", "zeroline": False},
+    }
+
+    return {
+        "type": "score_composite",
+        "group_col": req.group_col,
+        "groups": group_levels,
+        "scores": score_summaries,
+        "figure": {"data": trace_data, "layout": layout},
+        "method_note": "Score comparisons use Mann-Whitney U for two groups or Kruskal-Wallis for more groups. Component prevalence uses Fisher exact for two groups or chi-square for more groups.",
+    }
+
+
 # ── Server-side static rendering (headless / API / reports) ──────────────────
 # The other chart endpoints return Plotly trace data for the browser to draw.
 # This one renders a full figure spec to a static image on the server (kaleido),
