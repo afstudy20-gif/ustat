@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { runScoreComposite } from "../api";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import type { PlotCaptureHandle, PlotData, PlotLayout } from "../lib/plotTypes";
-import { usePlotLayout } from "../plotStyle";
+import { usePlotLayout, usePalette } from "../plotStyle";
 import { useStore, isCategoricalKind, isNumericKind, type ColMeta, type Session } from "../store";
 import TitledPlot from "./TitledPlot";
 
@@ -39,6 +39,7 @@ function selectedValues(select: HTMLSelectElement): string[] {
 
 function ScoreCompositePanelBody({ session }: { session: Session }) {
   const baseLayout = usePlotLayout();
+  const pal = usePalette();
   const plotRef = useRef<PlotCaptureHandle | null>(null);
   const columns = session.columns.filter((col) => !col.analysis_excluded);
   const numericCols = columns.filter((col) => isNumericKind(col.kind)).map((col) => col.name);
@@ -111,6 +112,21 @@ function ScoreCompositePanelBody({ session }: { session: Session }) {
   const mergedLayout = result
     ? ({ ...baseLayout, ...result.figure.layout, height: result.figure.layout.height ?? 760 } as PlotLayout)
     : null;
+  // Backend ships each trace with a fixed marker color (a sane default for
+  // non-browser consumers of the raw API), keyed by group via `legendgroup`.
+  // Re-map those colors to the app's active theme palette here so the
+  // palette picker in the toolbar actually affects this chart.
+  const paletteData = useMemo(() => {
+    if (!result) return null;
+    return result.figure.data.map((trace) => {
+      const legendgroup = (trace as { legendgroup?: string }).legendgroup;
+      if (!legendgroup) return trace;
+      const idx = result.groups.indexOf(legendgroup);
+      const color = pal[(idx < 0 ? 0 : idx) % pal.length];
+      const marker = (trace as { marker?: Record<string, unknown> }).marker;
+      return { ...trace, marker: { ...(marker || {}), color } };
+    });
+  }, [result, pal]);
   const titleText = typeof result?.figure.layout.title === "object"
     ? String((result.figure.layout.title as { text?: unknown }).text ?? "")
     : "Score Distributions and Component Prevalence by Group";
@@ -176,7 +192,7 @@ function ScoreCompositePanelBody({ session }: { session: Session }) {
             <TitledPlot
               plotRefOut={plotRef}
               storageKey={`score-composite:${groupCol}:${scoreA}:${scoreB}`}
-              data={result.figure.data}
+              data={paletteData ?? result.figure.data}
               layout={mergedLayout}
               config={{ responsive: true, displayModeBar: true, displaylogo: false }}
               defaultTitle={titleText}
