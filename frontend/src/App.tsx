@@ -59,6 +59,7 @@ import DescriptivePanel from "./components/DescriptivePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import SubgroupBarPanel from "./components/SubgroupBarPanel";
 import ScoreCompositePanel from "./components/ScoreCompositePanel";
+import KMCompositePanel from "./components/KMCompositePanel";
 import ForestBuilderPanel from "./components/ForestBuilderPanel";
 import HypothesisPanel from "./components/HypothesisPanel";
 import CorrelationPanel from "./components/CorrelationPanel";
@@ -450,7 +451,7 @@ function ModelsCombo() {
 }
 
 function VisualChartsCombo() {
-  const [sub, setSub] = usePersistedPanelState<"models" | "charts" | "subgroup" | "score" | "forest" | "addedvalue">("combo_visual", "sub", "models");
+  const [sub, setSub] = usePersistedPanelState<"models" | "charts" | "subgroup" | "score" | "kmcomposite" | "forest" | "addedvalue">("combo_visual", "sub", "models");
   // Deep-link: another panel can request a specific inner sub-tab (e.g.
   // the Cox time-horizon panel jumps straight to "forest"). Consume once.
   const visualSubTab = useStore((s) => s.visualSubTab);
@@ -471,6 +472,7 @@ function VisualChartsCombo() {
           ["charts", "Charts"],
           ["subgroup", "Subgroup Bar Chart"],
           ["score", "Score Figure"],
+          ["kmcomposite", "KM Composite (endpoints)"],
           ["forest", "Forest plot (sensitivity / multi-endpoint)"],
         ] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSub(id)}
@@ -487,6 +489,7 @@ function VisualChartsCombo() {
           : sub === "charts" ? <ChartsPanel />
           : sub === "subgroup" ? <SubgroupBarPanel />
           : sub === "score" ? <ScoreCompositePanel />
+          : sub === "kmcomposite" ? <KMCompositePanel />
           : <ForestBuilderPanel />}
       </div>
     </div>

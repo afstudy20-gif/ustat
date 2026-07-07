@@ -825,6 +825,333 @@ def score_composite(req: ScoreCompositeRequest):
     }
 
 
+# ── Kaplan-Meier composite (NEJM-style multi-endpoint cumulative incidence) ──
+
+class KMEndpointSpec(BaseModel):
+    duration_col: str
+    event_col: str
+    label: Optional[str] = None
+
+
+class KMCompositeRequest(BaseModel):
+    session_id: str
+    group_col: str                      # treatment arm / comparison column
+    endpoints: List[KMEndpointSpec]     # 1-4 endpoints, one panel each
+    risk_times: Optional[List[float]] = None   # x-axis ticks for No.-at-risk
+    group_order: Optional[List[str]] = None
+    # 1 - S(t) climbing from 0 (event accrual) vs S(t) falling from 1.
+    as_cumulative_incidence: bool = True
+    inset: bool = True                  # magnified zoom sub-panel per endpoint
+    inset_max_pct: Optional[float] = None      # inset y-max in %; None = auto
+    as_percent: bool = True             # y in % (0-100) vs proportion (0-1)
+    imputation: str = "listwise"
+    title: Optional[str] = None
+
+
+_KM_COMPOSITE_COLORS = ["#9ca3af", "#1f6f8b", "#dd7b6e", "#6fbf73", "#9b6ec8"]
+_PANEL_LETTERS = ["A", "B", "C", "D"]
+
+
+def _km_composite_grid(n_panels: int) -> tuple[int, int]:
+    """Column/row count for the panel grid (max 2 columns, NEJM-style)."""
+    ncols = 1 if n_panels == 1 else 2
+    nrows = (n_panels + ncols - 1) // ncols
+    return ncols, nrows
+
+
+@router.post("/km_composite")
+def km_composite(req: KMCompositeRequest):
+    """NEJM-style composite Kaplan-Meier figure.
+
+    Runs one KM analysis per endpoint against a shared grouping (arm) column
+    and lays the panels out in a 2-column grid. Each panel plots cumulative
+    incidence (1 - S(t)) as step curves, optionally with a magnified zoom
+    inset and a per-panel No.-at-risk table, matching the common trial
+    primary-endpoint figure. Curves and log-rank p-values are computed with
+    the same lifelines helpers as the main survival panel.
+    """
+    from routers.models.cox import (
+        _km_fit_groups,
+        _km_logrank,
+        _drop_invalid_survival_rows,
+    )
+    from services.impute import apply_imputation
+
+    df_full = _get_df(req.session_id)
+    if req.group_col not in df_full.columns:
+        raise HTTPException(status_code=400, detail=f"Column '{req.group_col}' not found")
+    if not (1 <= len(req.endpoints) <= 4):
+        raise HTTPException(status_code=400, detail="Select between 1 and 4 endpoints.")
+    for spec in req.endpoints:
+        for col in (spec.duration_col, spec.event_col):
+            if col not in df_full.columns:
+                raise HTTPException(status_code=400, detail=f"Column '{col}' not found")
+
+    scale = 100.0 if req.as_percent else 1.0
+    ncols, nrows = _km_composite_grid(len(req.endpoints))
+
+    # Grid geometry (paper fractions). Rows leave a gap beneath each panel for
+    # the No.-at-risk rows; columns leave a left gutter for the y-axis title.
+    left_pad, right_pad, col_gap = 0.07, 0.02, 0.09
+    top_pad, bottom_pad, row_gap = 0.05, 0.14, 0.18
+    usable_w = 1.0 - left_pad - right_pad - (ncols - 1) * col_gap
+    cell_w = usable_w / ncols
+    usable_h = 1.0 - top_pad - bottom_pad - (nrows - 1) * row_gap
+    cell_h = usable_h / nrows
+
+    colors = _KM_COMPOSITE_COLORS
+    trace_data: list[dict[str, Any]] = []
+    annotations: list[dict[str, Any]] = []
+    layout_axes: dict[str, Any] = {}
+    endpoint_summaries: list[dict[str, Any]] = []
+
+    # Establish a stable arm order once (from the first endpoint's clean data),
+    # so colors/legend/at-risk rows line up across every panel.
+    group_levels: Optional[list[str]] = None
+
+    for idx, spec in enumerate(req.endpoints):
+        label = spec.label or spec.event_col
+        cols = [spec.duration_col, spec.event_col, req.group_col]
+        sub = df_full[cols].copy()
+        sub[spec.duration_col] = pd.to_numeric(sub[spec.duration_col], errors="coerce")
+        sub[spec.event_col] = pd.to_numeric(sub[spec.event_col], errors="coerce")
+        sub = apply_imputation(sub, [spec.duration_col, spec.event_col], req.imputation)
+        sub, _w, _ni = _drop_invalid_survival_rows(sub, spec.duration_col, spec.event_col)
+        sub = sub.dropna(subset=[req.group_col])
+        if sub.empty:
+            raise HTTPException(status_code=400, detail=f"No valid rows for endpoint '{label}' after cleaning duration/event.")
+        ev_vals = sorted(pd.to_numeric(sub[spec.event_col], errors="coerce").dropna().unique())
+        if set(ev_vals) - {0, 1, 0.0, 1.0}:
+            raise HTTPException(status_code=422, detail=f"Event column '{spec.event_col}' must be binary 0/1. Found: {ev_vals[:8]}")
+
+        groups = _km_fit_groups(
+            sub, spec.duration_col, spec.event_col, req.group_col,
+            survival_times=None, risk_times=req.risk_times, include_censors=False,
+        )
+        present = [g["group"] for g in groups]
+        if group_levels is None:
+            if req.group_order:
+                ordered = [str(g) for g in req.group_order if str(g) in set(present)]
+                group_levels = ordered or present
+            else:
+                group_levels = present
+            if len(group_levels) < 2:
+                raise HTTPException(status_code=400, detail="Need at least two non-missing groups in the arm column.")
+        by_group = {g["group"]: g for g in groups}
+
+        logrank = _km_logrank(sub, spec.duration_col, spec.event_col, req.group_col)
+        p_value = logrank.get("p") if logrank else None
+
+        main_ref = idx + 1
+        inset_ref = idx + 5
+        main_x = "x" if main_ref == 1 else f"x{main_ref}"
+        main_y = "y" if main_ref == 1 else f"y{main_ref}"
+        inset_x = f"x{inset_ref}"
+        inset_y = f"y{inset_ref}"
+
+        r, c = divmod(idx, ncols)
+        x0 = left_pad + c * (cell_w + col_gap)
+        x1 = x0 + cell_w
+        y1 = 1.0 - top_pad - r * (cell_h + row_gap)
+        y0 = y1 - cell_h
+
+        # Curve max time (shared x range for at-risk positioning).
+        tmax = 0.0
+        curves: dict[str, dict[str, list[float]]] = {}
+        for grp in group_levels:
+            g = by_group.get(grp)
+            pts = g["curve"] if g else []
+            xs = [p["time"] for p in pts if p["time"] is not None]
+            ys = [(1.0 - p["survival"]) * scale if req.as_cumulative_incidence else p["survival"] * scale
+                  for p in pts if p["survival"] is not None]
+            curves[grp] = {"x": xs, "y": ys}
+            if xs:
+                tmax = max(tmax, max(xs))
+        tmax = tmax or 1.0
+
+        final_by_group: dict[str, float] = {}
+        n_by_group: dict[str, int] = {}
+        inset_peak = 0.0
+        for gi, grp in enumerate(group_levels):
+            xs = curves[grp]["x"]
+            ys = curves[grp]["y"]
+            g = by_group.get(grp)
+            n_by_group[grp] = int(g["n"]) if g else 0
+            final_by_group[grp] = round(ys[-1], 1) if ys else 0.0
+            inset_peak = max(inset_peak, ys[-1] if ys else 0.0)
+            color = colors[gi % len(colors)]
+            trace_data.append({
+                "type": "scatter", "mode": "lines",
+                "x": xs, "y": ys,
+                "line": {"color": color, "width": 2, "shape": "hv"},
+                "name": str(grp),
+                "legendgroup": str(grp),
+                "showlegend": idx == 0,
+                "xaxis": main_x, "yaxis": main_y,
+                "hovertemplate": f"{grp}<br>%{{x}}: %{{y:.1f}}<extra></extra>",
+            })
+            if req.inset:
+                trace_data.append({
+                    "type": "scatter", "mode": "lines",
+                    "x": xs, "y": ys,
+                    "line": {"color": color, "width": 1.6, "shape": "hv"},
+                    "name": str(grp), "legendgroup": str(grp), "showlegend": False,
+                    "xaxis": inset_x, "yaxis": inset_y, "hoverinfo": "skip",
+                })
+
+        # Full-range y for the main panel.
+        y_full = 100.0 if req.as_percent else 1.0
+        # Inset y-max: explicit, else a little above the peak accrual.
+        if req.inset:
+            if req.inset_max_pct is not None:
+                inset_top = req.inset_max_pct / (100.0 / scale)
+            else:
+                inset_top = max(inset_peak * 1.25, scale * 0.02)
+
+        # Main axes.
+        main_x_key = "xaxis" if main_ref == 1 else f"xaxis{main_ref}"
+        main_y_key = "yaxis" if main_ref == 1 else f"yaxis{main_ref}"
+        is_bottom_row = r == nrows - 1
+        risk_times = req.risk_times or []
+        # The built-in axis title would land on the No.-at-risk numbers, so when
+        # a risk table is drawn we suppress it and add our own annotation below
+        # the table instead.
+        show_axis_title = is_bottom_row and not risk_times
+        layout_axes[main_x_key] = {
+            "domain": [x0, x1], "anchor": main_y, "range": [0, tmax],
+            "title": {"text": "Months since Randomization"} if show_axis_title else None,
+            "gridcolor": "#eef1f4", "zeroline": False,
+        }
+        layout_axes[main_y_key] = {
+            "domain": [y0, y1], "anchor": main_x, "range": [0, y_full],
+            "title": {"text": "Percentage of Patients"} if c == 0 else None,
+            "gridcolor": "#eef1f4", "zeroline": False,
+        }
+        if req.inset:
+            ix0 = x0 + 0.34 * cell_w
+            ix1 = x1 - 0.02 * cell_w
+            iy0 = y0 + 0.40 * cell_h
+            iy1 = y1 - 0.02 * cell_h
+            layout_axes[f"xaxis{inset_ref}"] = {
+                "domain": [ix0, ix1], "anchor": inset_y, "range": [0, tmax],
+                "showgrid": False, "zeroline": False,
+                "tickfont": {"size": 8}, "ticklen": 2,
+            }
+            layout_axes[f"yaxis{inset_ref}"] = {
+                "domain": [iy0, iy1], "anchor": inset_x, "range": [0, inset_top],
+                "showgrid": False, "zeroline": False,
+                "tickfont": {"size": 8}, "ticklen": 2,
+            }
+            # Final cumulative-incidence value label at the end of each inset curve.
+            for gi, grp in enumerate(group_levels):
+                if curves[grp]["y"]:
+                    annotations.append({
+                        "xref": inset_x, "yref": inset_y,
+                        "x": tmax, "y": curves[grp]["y"][-1],
+                        "text": f"{final_by_group[grp]:.1f}", "showarrow": False,
+                        "xanchor": "left", "xshift": 2,
+                        "font": {"size": 9, "color": colors[gi % len(colors)]},
+                    })
+
+        # Panel letter + endpoint title.
+        annotations.append({
+            "xref": "paper", "yref": "paper", "x": x0, "y": min(y1 + 0.035, 1.0),
+            "text": f"<b>{_PANEL_LETTERS[idx]}</b>  {label}", "showarrow": False,
+            "xanchor": "left", "font": {"size": 12, "color": "#111827"},
+        })
+        # Log-rank p on the main panel.
+        annotations.append({
+            "xref": main_x, "yref": main_y, "x": tmax * 0.5, "y": y_full * 0.9,
+            "text": _format_p_value(p_value), "showarrow": False,
+            "font": {"size": 11, "color": "#4b5563"},
+        })
+
+        # No.-at-risk rows beneath the panel.
+        if risk_times:
+            annotations.append({
+                "xref": "paper", "yref": "paper", "x": x0, "y": y0 - 0.035,
+                "text": "<b>No. at Risk</b>", "showarrow": False,
+                "xanchor": "left", "font": {"size": 9, "color": "#374151"},
+            })
+            for gi, grp in enumerate(group_levels):
+                g = by_group.get(grp)
+                at_risk = g.get("at_risk") if g else None
+                row_y = y0 - 0.035 - (gi + 1) * 0.028
+                # Arm name in the left gutter so it never collides with the
+                # t=0 count that sits at the panel's left edge.
+                annotations.append({
+                    "xref": "paper", "yref": "paper",
+                    "x": max(x0 - 0.06, 0.002), "y": row_y,
+                    "text": str(grp), "showarrow": False, "xanchor": "left",
+                    "font": {"size": 9, "color": colors[gi % len(colors)]},
+                })
+                if at_risk:
+                    for ti, t in enumerate(risk_times):
+                        px = x0 + (float(t) / tmax) * cell_w if tmax else x0
+                        annotations.append({
+                            "xref": "paper", "yref": "paper",
+                            "x": min(max(px, x0), x1), "y": row_y,
+                            "text": str(at_risk[ti]) if ti < len(at_risk) else "",
+                            "showarrow": False, "xanchor": "center",
+                            "font": {"size": 9, "color": "#374151"},
+                        })
+            if is_bottom_row:
+                # X-axis title below the at-risk table (suppressed on the axis).
+                annotations.append({
+                    "xref": "paper", "yref": "paper",
+                    "x": (x0 + x1) / 2.0,
+                    "y": y0 - 0.035 - (len(group_levels) + 1) * 0.028,
+                    "text": "Months since Randomization", "showarrow": False,
+                    "xanchor": "center", "font": {"size": 12, "color": "#111827"},
+                })
+
+        endpoint_summaries.append({
+            "label": label,
+            "duration_col": spec.duration_col,
+            "event_col": spec.event_col,
+            "p_value": p_value,
+            "p_text": _format_p_value(p_value),
+            "final_by_group": final_by_group,
+            "n_by_group": n_by_group,
+        })
+
+    # Drop None-valued axis titles (Plotly rejects title:{text:None} noisily).
+    for axis in layout_axes.values():
+        if axis.get("title") is None:
+            axis.pop("title", None)
+
+    layout = {
+        "title": {
+            "text": req.title or "Composite Primary End Point and Individual Components",
+            "x": 0.5, "xanchor": "center", "font": {"size": 15, "color": "#111827"},
+        },
+        "height": 760 if nrows > 1 else 440,
+        "paper_bgcolor": "#ffffff",
+        "plot_bgcolor": "#ffffff",
+        "font": {"family": "Arial, sans-serif", "size": 12, "color": "#111827"},
+        "margin": {"l": 60, "r": 30, "t": 70, "b": 40},
+        # Curves are keyed by the arm-name labels in the No.-at-risk rows and
+        # the colored end-of-inset value labels, matching the trial-figure
+        # convention, so no separate legend box is drawn.
+        "showlegend": False,
+        "annotations": annotations,
+        **layout_axes,
+    }
+
+    return {
+        "type": "km_composite",
+        "group_col": req.group_col,
+        "groups": group_levels or [],
+        "endpoints": endpoint_summaries,
+        "as_cumulative_incidence": req.as_cumulative_incidence,
+        "figure": {"data": trace_data, "layout": layout},
+        "method_note": (
+            "Cumulative incidence (1 - Kaplan-Meier survival) by group; "
+            "p-values from the log-rank test. Number at risk shown beneath each panel."
+        ),
+    }
+
+
 # ── Server-side static rendering (headless / API / reports) ──────────────────
 # The other chart endpoints return Plotly trace data for the browser to draw.
 # This one renders a full figure spec to a static image on the server (kaleido),

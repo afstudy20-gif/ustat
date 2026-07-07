@@ -37,6 +37,7 @@ export const getBoxplot = (data: object) => api.post("/api/charts/boxplot", data
 export const getBar = (data: object) => api.post("/api/charts/bar", data);
 export const runSubgroupBar = (data: object) => api.post("/api/charts/subgroup_bar", data);
 export const runScoreComposite = (data: object) => api.post("/api/charts/score_composite", data);
+export const runKMComposite = (data: object) => api.post("/api/charts/km_composite", data);
 
 
 export const runLinear   = (data: object) => api.post("/api/models/linear", data);
