@@ -893,7 +893,10 @@ def km_composite(req: KMCompositeRequest):
     # Grid geometry (paper fractions). Rows leave a gap beneath each panel for
     # the No.-at-risk rows; columns leave a left gutter for the y-axis title.
     left_pad, right_pad, col_gap = 0.07, 0.02, 0.09
-    top_pad, bottom_pad, row_gap = 0.05, 0.14, 0.18
+    top_pad, bottom_pad, row_gap = 0.05, 0.16, 0.19
+    # Vertical offsets for the No.-at-risk block below each panel. `risk_gap`
+    # clears the axis tick labels; `risk_row_h` is the per-arm row pitch.
+    risk_gap, risk_row_h = 0.055, 0.028
     usable_w = 1.0 - left_pad - right_pad - (ncols - 1) * col_gap
     cell_w = usable_w / ncols
     usable_h = 1.0 - top_pad - bottom_pad - (nrows - 1) * row_gap
@@ -1069,14 +1072,14 @@ def km_composite(req: KMCompositeRequest):
         # No.-at-risk rows beneath the panel.
         if risk_times:
             annotations.append({
-                "xref": "paper", "yref": "paper", "x": x0, "y": y0 - 0.035,
+                "xref": "paper", "yref": "paper", "x": x0, "y": y0 - risk_gap,
                 "text": "<b>No. at Risk</b>", "showarrow": False,
                 "xanchor": "left", "font": {"size": 9, "color": "#374151"},
             })
             for gi, grp in enumerate(group_levels):
                 g = by_group.get(grp)
                 at_risk = g.get("at_risk") if g else None
-                row_y = y0 - 0.035 - (gi + 1) * 0.028
+                row_y = y0 - risk_gap - (gi + 1) * risk_row_h
                 # Arm name in the left gutter so it never collides with the
                 # t=0 count that sits at the panel's left edge.
                 annotations.append({
@@ -1100,7 +1103,7 @@ def km_composite(req: KMCompositeRequest):
                 annotations.append({
                     "xref": "paper", "yref": "paper",
                     "x": (x0 + x1) / 2.0,
-                    "y": y0 - 0.035 - (len(group_levels) + 1) * 0.028,
+                    "y": y0 - risk_gap - (len(group_levels) + 1) * risk_row_h,
                     "text": "Months since Randomization", "showarrow": False,
                     "xanchor": "center", "font": {"size": 12, "color": "#111827"},
                 })
