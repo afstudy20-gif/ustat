@@ -299,6 +299,7 @@ def external_reference_impute(
         raise HTTPException(status_code=400, detail="Select at least one predictor column other than the stratify column.")
 
     combined_result: Optional[ExternalImputeResult] = None
+    skipped_strata: list[str] = []
     for stratum in strata:
         current_mask = current_df[current_stratify_col].apply(_stratum_value) == stratum
         reference_mask = reference_df[reference_stratify_col].apply(_stratum_value) == stratum
@@ -306,10 +307,8 @@ def external_reference_impute(
         reference_subset = reference_df.loc[reference_mask].copy()
 
         if reference_subset.empty:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Stratum '{stratum}' has no matching reference rows; cannot impute."
-            )
+            skipped_strata.append(stratum)
+            continue
 
         stratum_result = _external_reference_impute_single(
             current_subset,
@@ -332,7 +331,12 @@ def external_reference_impute(
             combined_result.filled_values.update(stratum_result.filled_values)
             combined_result.result["preview_rows"].extend(stratum_result.result["preview_rows"])
 
-    assert combined_result is not None
+    if combined_result is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No strata from '{current_stratify_col}' had matching reference rows; cannot impute.",
+        )
+
     combined_result.result["preview_rows"] = combined_result.result["preview_rows"][:200]
     combined_result.result["n_missing_target"] = len(combined_result.missing_rows)
     combined_result.result["n_imputed"] = len(combined_result.filled_values)
@@ -342,6 +346,11 @@ def external_reference_impute(
         f"{len(combined_result.filled_values)} missing value(s) in '{combined_result.target}' were imputed "
         f"using {len(combined_result.predictors)} predictor(s), stratified by '{current_stratify_col}'."
     )
+    if skipped_strata:
+        combined_result.result["result_text"] += (
+            f" {len(skipped_strata)} stratum(strata) skipped because no matching reference rows were found: "
+            f"{', '.join(skipped_strata)}."
+        )
     combined_result.result["methods_text"] = (
         f"External reference-assisted imputation used current data plus an uploaded reference dataset, "
         f"stratified by '{current_stratify_col}'. The target variable was {combined_result.target}; "
@@ -359,4 +368,9 @@ def external_reference_impute(
         0,
         f"Imputation was stratified by '{current_stratify_col}'. Donors were drawn only from the same stratum."
     )
+    if skipped_strata:
+        combined_result.result["warnings"].append(
+            f"Skipped stratum(s) with no matching reference rows: {', '.join(skipped_strata)}. "
+            "Their missing target values were not imputed."
+        )
     return combined_result

@@ -249,7 +249,7 @@ def test_external_impute_stratify_keeps_donors_within_stratum(client):
     assert by_row[3]["imputed_value"] > 200
 
 
-def test_external_impute_stratify_fails_when_stratum_missing_in_reference(client):
+def test_external_impute_stratify_skips_stratum_missing_in_reference(client):
     sid = _stratified_seed("external_stratify_missing_ref")
     ref = pd.DataFrame({
         "age": [52, 58],
@@ -271,8 +271,40 @@ def test_external_impute_stratify_fails_when_stratum_missing_in_reference(client
         },
         files={"file": ref_file},
     )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Only the dm=0 stratum (row 1) can be imputed; dm=1 stratum (row 3) is skipped.
+    assert body["n_imputed"] == 1
+    by_row = {row["row_index"]: row for row in body["preview_rows"]}
+    assert 1 in by_row
+    assert 3 not in by_row
+    assert any("Skipped stratum" in w for w in body["warnings"])
+
+
+def test_external_impute_stratify_fails_when_all_strata_missing_in_reference(client):
+    sid = _stratified_seed("external_stratify_all_missing_ref")
+    ref = pd.DataFrame({
+        "age": [52, 58],
+        "dm": [2, 2],
+        "glucose": [92.0, 88.0],
+    })
+    ref_file = ("reference.csv", io.BytesIO(ref.to_csv(index=False).encode("utf-8")), "text/csv")
+    response = client.post(
+        "/api/missing_data/external_impute_preview",
+        data={
+            "session_id": sid,
+            "target": "glucose",
+            "predictors": '["age"]',
+            "stratify_by": "dm",
+            "method": "pmm",
+            "mechanism": "MAR",
+            "max_iter": "5",
+            "random_state": "11",
+        },
+        files={"file": ref_file},
+    )
     assert response.status_code == 422
-    assert "Stratum '1' has no matching reference rows" in response.text
+    assert "No strata" in response.text
 
 
 def test_external_impute_stratify_allows_stratify_column_as_predictor(client):
