@@ -113,6 +113,58 @@ describe('MissingDataPanel', () => {
     await waitFor(() => expect(screen.getByText('Diagnostics failed')).toBeInTheDocument())
   })
 
+  it('previews reference dataset imputation', async () => {
+    installMissingSession()
+    server.use(
+      http.post('/api/missing_data/external_impute_reference_columns', () =>
+        HttpResponse.json({
+          n_rows: 2,
+          columns: [
+            { name: 'AGE', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'LDL', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'REFERENCE_ONLY', dtype: 'object', kind: 'categorical', n_missing: 0 },
+          ],
+        }),
+      ),
+      http.post('/api/missing_data/external_impute_preview', async ({ request }) => {
+        const fd = await request.formData()
+        expect(fd.get('target')).toBe('LDL')
+        expect(fd.get('predictors')).toBe(JSON.stringify(['AGE']))
+        expect(fd.get('file')).toBeTruthy()
+        return HttpResponse.json({
+          target: 'LDL',
+          predictors: ['AGE'],
+          method: 'PMM',
+          mechanism: 'unknown',
+          n_missing_target: 1,
+          n_imputed: 1,
+          reference_rows: 2,
+          reference_complete_rows: 2,
+          preview_rows: [{ row_index: 0, imputed_value: 128, predictors_missing: 0 }],
+          result_text: "1 missing value(s) in 'LDL' were imputed using 1 predictor(s).",
+        })
+      }),
+    )
+
+    const user = userEvent.setup()
+    render(<MissingDataPanel />)
+
+    await user.selectOptions(screen.getByLabelText(/missing target/i), 'LDL')
+    await user.upload(
+      screen.getByLabelText(/reference dataset/i),
+      new File(['AGE,LDL\n55,128\n61,140\n'], 'reference.csv', { type: 'text/csv' }),
+    )
+    await waitFor(() => expect(screen.getByText('REFERENCE_ONLY')).toBeInTheDocument())
+    expect(screen.getByLabelText('REFERENCE_ONLY')).toBeDisabled()
+    const agePredictor = screen.getAllByLabelText('AGE').at(-1)!
+    await user.click(agePredictor)
+    await user.click(screen.getByRole('button', { name: /^preview$/i }))
+
+    await waitFor(() => expect(screen.getByText(/1 missing value/)).toBeInTheDocument())
+    expect(screen.getByText('128')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /transfer data/i })).toBeEnabled()
+  })
+
   it('switches to the Data Cleaning sub-tab', async () => {
     installMissingSession()
     const user = userEvent.setup()

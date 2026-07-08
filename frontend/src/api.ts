@@ -155,6 +155,53 @@ export const runCronbach     = (data: object) => api.post("/api/reliability/cron
 export const runMissingPattern = (data: object) => api.post("/api/missing_data/pattern", data);
 export const runMCARTest     = (data: object) => api.post("/api/missing_data/mcar_test", data);
 export const runImputationCompare = (data: object) => api.post("/api/missing_data/imputation_compare", data);
+export const getExternalImputeReferenceColumns = (file: File) => {
+  const fd = new FormData();
+  fd.append("file", file);
+  return api.post("/api/missing_data/external_impute_reference_columns", fd);
+};
+export const runExternalImputePreview = (data: {
+  sessionId: string;
+  target: string;
+  predictors: string[];
+  method: string;
+  mechanism: string;
+  maxIter: number;
+  randomState: number;
+  file: File;
+}) => {
+  const fd = new FormData();
+  fd.append("session_id", data.sessionId);
+  fd.append("target", data.target);
+  fd.append("predictors", JSON.stringify(data.predictors));
+  fd.append("method", data.method);
+  fd.append("mechanism", data.mechanism);
+  fd.append("max_iter", String(data.maxIter));
+  fd.append("random_state", String(data.randomState));
+  fd.append("file", data.file);
+  return api.post("/api/missing_data/external_impute_preview", fd);
+};
+export const runExternalImputeApply = (data: {
+  sessionId: string;
+  target: string;
+  predictors: string[];
+  method: string;
+  mechanism: string;
+  maxIter: number;
+  randomState: number;
+  file: File;
+}) => {
+  const fd = new FormData();
+  fd.append("session_id", data.sessionId);
+  fd.append("target", data.target);
+  fd.append("predictors", JSON.stringify(data.predictors));
+  fd.append("method", data.method);
+  fd.append("mechanism", data.mechanism);
+  fd.append("max_iter", String(data.maxIter));
+  fd.append("random_state", String(data.randomState));
+  fd.append("file", data.file);
+  return api.post("/api/missing_data/external_impute_apply", fd);
+};
 export const runMissingDiagnostics = (sessionId: string, columns?: string[]) =>
   api.post(`/api/compute/${sessionId}/missing_diagnostics`, { columns });
 export const fillBlanks = (sessionId: string, column: string, value: string, newColumn?: string) =>

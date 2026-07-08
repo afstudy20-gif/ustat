@@ -1,6 +1,15 @@
 import { useState, type ReactNode } from "react";
 import { useStore, isNumericKind } from "../store";
-import { runMICE, runMCARTest, runImputationCompare, runMissingDiagnostics, fillBlanks } from "../api";
+import {
+  fillBlanks,
+  getExternalImputeReferenceColumns,
+  runExternalImputeApply,
+  runExternalImputePreview,
+  runImputationCompare,
+  runMCARTest,
+  runMICE,
+  runMissingDiagnostics,
+} from "../api";
 import ResultExporter from "./ResultExporter";
 import api from "../api";
 import { CleaningTab } from "./CleaningTab";
@@ -30,6 +39,25 @@ interface CompareColumn {
 }
 interface CompareEntry { strategy: string; columns: CompareColumn[] }
 interface CompareResult { comparisons?: CompareEntry[] }
+interface ExternalPreviewRow { row_index: number; imputed_value: unknown; predictors_missing: number }
+interface ExternalReferenceColumn { name: string; dtype: string; kind: string; n_missing: number }
+interface ExternalReferenceColumnsResult { columns: ExternalReferenceColumn[]; n_rows: number }
+interface ExternalImputeResult {
+  target: string;
+  predictors: string[];
+  method: string;
+  mechanism: string;
+  n_missing_target: number;
+  n_imputed: number;
+  reference_rows: number;
+  reference_complete_rows: number;
+  preview_rows: ExternalPreviewRow[];
+  warnings?: string[];
+  result_text?: string;
+  methods_text?: string;
+  export_rows?: unknown[][];
+  applied?: boolean;
+}
 
 const QUICK_SUFFIX: Record<QuickMethod, string> = {
   __mean__: "mean",
@@ -81,6 +109,13 @@ export default function MissingDataPanel() {
   const [mcar, setMcar] = useState<McarResult | null>(null);
   const [mcarNote, setMcarNote] = useState<string | null>(null);
   const [compare, setCompare] = useState<CompareResult | null>(null);
+  const [externalTarget, setExternalTarget] = useState("");
+  const [externalPredictors, setExternalPredictors] = useState<string[]>([]);
+  const [externalFile, setExternalFile] = useState<File | null>(null);
+  const [externalReferenceMeta, setExternalReferenceMeta] = useState<ExternalReferenceColumnsResult | null>(null);
+  const [externalMethod, setExternalMethod] = useState<"pmm" | "mice">("pmm");
+  const [externalResult, setExternalResult] = useState<ExternalImputeResult | null>(null);
+  const [externalLoading, setExternalLoading] = useState<"columns" | "preview" | "apply" | null>(null);
 
   if (!session) return <p className="text-gray-400 text-sm p-6">Upload data first.</p>;
 
@@ -181,6 +216,88 @@ export default function MissingDataPanel() {
       setErr(errText(e));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const externalTargetName = externalTarget || missingInfo[0]?.name || "";
+  const currentColumnNames = new Set(columns.map((c) => c.name));
+  const externalReferenceColumns = externalReferenceMeta?.columns ?? [];
+  const externalPredictorColumns = externalReferenceColumns.filter((c) => c.name !== externalTargetName);
+  const externalPayload = () => ({
+    sessionId: sid,
+    target: externalTargetName,
+    predictors: externalPredictors,
+    method: externalMethod,
+    mechanism: miceMechanism,
+    maxIter: miceIter,
+    randomState: miceSeed,
+    file: externalFile!,
+  });
+
+  const validateExternal = (): boolean => {
+    if (!externalTargetName) { setErr("Select a target column with missing values"); return false; }
+    if (externalPredictors.length === 0) { setErr("Select at least one predictor for the target"); return false; }
+    if (!externalFile) { setErr("Upload a reference dataset first"); return false; }
+    if (!externalReferenceColumns.some((c) => c.name === externalTargetName)) {
+      setErr(`Reference dataset must contain target column '${externalTargetName}'`);
+      return false;
+    }
+    const missingCurrent = externalPredictors.filter((name) => !currentColumnNames.has(name));
+    if (missingCurrent.length > 0) {
+      setErr(`Predictor(s) missing in current data: ${missingCurrent.join(", ")}`);
+      return false;
+    }
+    return true;
+  };
+
+  const loadExternalReferenceColumns = async (file: File | null) => {
+    setExternalFile(file);
+    setExternalReferenceMeta(null);
+    setExternalPredictors([]);
+    setExternalResult(null);
+    if (!file) return;
+    setExternalLoading("columns"); setErr(null);
+    try {
+      const res = await getExternalImputeReferenceColumns(file);
+      const meta = res.data as ExternalReferenceColumnsResult;
+      setExternalReferenceMeta(meta);
+      setExternalPredictors((prev) =>
+        prev.filter((name) =>
+          meta.columns.some((c) => c.name === name) && currentColumnNames.has(name) && name !== externalTargetName
+        )
+      );
+    } catch (e: unknown) {
+      setErr(errText(e));
+    } finally {
+      setExternalLoading(null);
+    }
+  };
+
+  const runExternalPreview = async () => {
+    if (!validateExternal()) return;
+    setExternalLoading("preview"); setErr(null); setExternalResult(null); setMutationNotice(null);
+    try {
+      const res = await runExternalImputePreview(externalPayload());
+      setExternalResult(res.data);
+    } catch (e: unknown) {
+      setErr(errText(e));
+    } finally {
+      setExternalLoading(null);
+    }
+  };
+
+  const applyExternalImputation = async () => {
+    if (!validateExternal()) return;
+    setExternalLoading("apply"); setErr(null); setMutationNotice(null);
+    try {
+      const res = await runExternalImputeApply(externalPayload());
+      setExternalResult(res.data);
+      await refresh();
+      setMutationNotice(`${res.data.n_imputed} value(s) transferred into ${res.data.target}.`);
+    } catch (e: unknown) {
+      setErr(errText(e));
+    } finally {
+      setExternalLoading(null);
     }
   };
 
@@ -421,6 +538,147 @@ export default function MissingDataPanel() {
               {miceMechanism === "MNAR" && (
                 <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">
                   ⚠️ MNAR: MICE assumes MAR and may bias results. For &gt;40–50% missing, use a dedicated MNAR sensitivity analysis (pattern-mixture / selection model).
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ── External reference-assisted target imputation ── */}
+          <div className="border border-sky-200 rounded-xl overflow-hidden">
+            <div className="px-5 py-3.5 bg-sky-50 border-b border-sky-100">
+              <h3 className="text-sm font-semibold text-sky-800">Reference Dataset Imputation</h3>
+              <p className="text-[11px] text-sky-500 mt-0.5">
+                Upload a similar dataset, select one missing target and its predictors, preview PMM/MICE estimates, then transfer values into the Data tab.
+              </p>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_1fr]">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-500 font-medium">Missing target</span>
+                  <select
+                    value={externalTargetName}
+                    onChange={(e) => {
+                      const nextTarget = e.target.value;
+                      setExternalTarget(nextTarget);
+                      setExternalPredictors((prev) => prev.filter((name) => name !== nextTarget));
+                      setExternalResult(null);
+                    }}
+                    className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-sky-400"
+                  >
+                    {missingInfo.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-500 font-medium">Reference dataset</span>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.sas7bdat,.sav,.dta"
+                    onChange={(e) => void loadExternalReferenceColumns(e.target.files?.[0] ?? null)}
+                    className="text-xs border border-gray-300 rounded-lg px-3 py-2 bg-white file:mr-3 file:border-0 file:bg-sky-50 file:text-sky-700 file:px-2 file:py-1 file:rounded"
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] items-end">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-500 font-medium">Method</span>
+                  <select
+                    value={externalMethod}
+                    onChange={(e) => { setExternalMethod(e.target.value as "pmm" | "mice"); setExternalResult(null); }}
+                    className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-sky-400"
+                  >
+                    <option value="pmm">PMM</option>
+                    <option value="mice">MICE / PMM</option>
+                  </select>
+                </label>
+                <button
+                  onClick={runExternalPreview}
+                  disabled={externalLoading !== null}
+                  className="px-4 py-2 text-sm font-medium border border-sky-300 text-sky-700 rounded-lg hover:bg-sky-50 disabled:opacity-50"
+                >
+                  {externalLoading === "preview" ? "Calculating…" : "Preview"}
+                </button>
+                <button
+                  onClick={applyExternalImputation}
+                  disabled={externalLoading !== null || !externalResult}
+                  className="px-4 py-2 text-sm font-medium bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                >
+                  {externalLoading === "apply" ? "Transferring…" : "Transfer data"}
+                </button>
+              </div>
+
+              <div>
+                <p className="text-xs text-gray-500 font-medium mb-2">Reference predictors</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-40 overflow-y-auto rounded-lg border border-gray-200 p-2">
+                  {externalLoading === "columns" && (
+                    <div className="col-span-full text-xs text-gray-400">Reading columns...</div>
+                  )}
+                  {!externalLoading && externalFile && externalPredictorColumns.length === 0 && (
+                    <div className="col-span-full text-xs text-gray-400">No reference predictors found.</div>
+                  )}
+                  {!externalFile && (
+                    <div className="col-span-full text-xs text-gray-400">Upload reference dataset first.</div>
+                  )}
+                  {externalPredictorColumns.map((c) => {
+                    const usable = currentColumnNames.has(c.name);
+                    return (
+                    <label
+                      key={c.name}
+                      className={`flex items-center gap-2 text-xs min-w-0 ${usable ? "text-gray-700" : "text-gray-400"}`}
+                      title={usable ? `${c.kind}, ${c.n_missing} missing` : "Not found in current data"}
+                    >
+                      <input
+                        type="checkbox"
+                        className="accent-sky-600"
+                        checked={externalPredictors.includes(c.name)}
+                        disabled={!usable}
+                        onChange={() => {
+                          setExternalResult(null);
+                          setExternalPredictors((prev) =>
+                            prev.includes(c.name) ? prev.filter((x) => x !== c.name) : [...prev, c.name]
+                          );
+                        }}
+                      />
+                      <span className="truncate">{c.name}</span>
+                    </label>
+                    );
+                  })}
+                </div>
+                {externalReferenceMeta && (
+                  <p className="mt-1 text-[10px] text-gray-400">
+                    {externalReferenceMeta.n_rows} rows, {externalReferenceMeta.columns.length} columns
+                  </p>
+                )}
+              </div>
+
+              {externalResult?.result_text && (
+                <div className="bg-sky-50 border border-sky-200 rounded-xl px-4 py-3 text-sm text-sky-800">
+                  {externalResult.result_text}
+                </div>
+              )}
+              {externalResult?.warnings?.map((w) => (
+                <div key={w} className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">{w}</div>
+              ))}
+              {externalResult?.preview_rows?.length > 0 && (
+                <div className="overflow-auto rounded-lg border border-gray-200">
+                  <table className="text-xs w-full">
+                    <thead>
+                      <tr className="bg-gray-50 text-left text-gray-500">
+                        <th className="px-3 py-1.5">Row</th>
+                        <th className="px-3 py-1.5">Imputed value</th>
+                        <th className="px-3 py-1.5">Predictors missing</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {externalResult.preview_rows.map((row) => (
+                        <tr key={row.row_index} className="border-t border-gray-100">
+                          <td className="px-3 py-1 text-gray-700">{row.row_index}</td>
+                          <td className="px-3 py-1 text-gray-700">{String(row.imputed_value)}</td>
+                          <td className="px-3 py-1 text-gray-700">{row.predictors_missing}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

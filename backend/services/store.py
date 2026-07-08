@@ -378,6 +378,28 @@ def get_filtered(session_id: str) -> Optional[pd.DataFrame]:
     return _apply_conditions(df, conditions)
 
 
+def fill_values_by_index(session_id: str, column: str, values: Dict[int, object]) -> bool:
+    """Fill selected dataframe labels in one column and persist through save().
+
+    Used by workflows that analyze the active filtered view but need mutation to
+    land in the backing dataset. Keys are dataframe index labels preserved by
+    get_filtered().
+    """
+    with _lock:
+        entry = _store.get(session_id)
+        if entry is None:
+            return False
+        df = entry["df"]
+        if column not in df.columns:
+            return False
+    updated = df.copy()
+    for idx, value in values.items():
+        if idx in updated.index:
+            updated.at[idx, column] = value
+    save(session_id, updated)
+    return True
+
+
 def delete(session_id: str) -> None:
     """Fully remove a session and every per-session map (kinds/decimals/filename
     included — they used to leak here)."""

@@ -1,13 +1,16 @@
 """Missing data analysis: pattern detection, MCAR test, imputation comparison."""
+import json
+
 import numpy as np
 import pandas as pd
 from scipy import stats as sp
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 
 from services import store
 from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column, sentinel_values
+from services.external_impute import external_reference_impute
 from services.impute import add_survival_auxiliary_variables, apply_imputation, apply_passive_imputation
 
 router = APIRouter()
@@ -373,7 +376,119 @@ def imputation_compare(req: ImputationCompareRequest):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. MNAR SENSITIVITY / ADVANCED IMPUTATION DIAGNOSTICS
+# 4. EXTERNAL REFERENCE-ASSISTED TARGET IMPUTATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _parse_predictors_form(raw: str) -> List[str]:
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    except Exception:
+        pass
+    return [p.strip() for p in raw.split(",") if p.strip()]
+
+
+async def _read_reference_file(file: UploadFile) -> pd.DataFrame:
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Reference dataset is empty.")
+    from routers.upload import _read
+    try:
+        ref_df, _ = _read(file.filename or "reference.csv", content)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse reference dataset: {type(exc).__name__}: {exc}")
+    if ref_df.empty:
+        raise HTTPException(status_code=400, detail="Reference dataset has no rows.")
+    return ref_df
+
+
+@router.post("/external_impute_reference_columns")
+async def external_impute_reference_columns(file: UploadFile = File(...)):
+    ref_df = await _read_reference_file(file)
+    return {
+        "columns": [
+            {
+                "name": str(col),
+                "dtype": str(ref_df[col].dtype),
+                "kind": "numeric" if pd.api.types.is_numeric_dtype(ref_df[col]) else "categorical",
+                "n_missing": int(ref_df[col].isna().sum()),
+            }
+            for col in ref_df.columns
+        ],
+        "n_rows": int(len(ref_df)),
+    }
+
+
+@router.post("/external_impute_preview")
+async def external_impute_preview(
+    session_id: str = Form(...),
+    target: str = Form(...),
+    predictors: str = Form(...),
+    method: str = Form("pmm"),
+    mechanism: str = Form("unknown"),
+    max_iter: int = Form(20),
+    random_state: int = Form(42),
+    file: UploadFile = File(...),
+):
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    ref_df = await _read_reference_file(file)
+    result = external_reference_impute(
+        df,
+        ref_df,
+        target=target,
+        predictors=_parse_predictors_form(predictors),
+        method=method,
+        mechanism=mechanism,
+        max_iter=max_iter,
+        random_state=random_state,
+    )
+    return result.result
+
+
+@router.post("/external_impute_apply")
+async def external_impute_apply(
+    session_id: str = Form(...),
+    target: str = Form(...),
+    predictors: str = Form(...),
+    method: str = Form("pmm"),
+    mechanism: str = Form("unknown"),
+    max_iter: int = Form(20),
+    random_state: int = Form(42),
+    file: UploadFile = File(...),
+):
+    df = store.get_filtered(session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    ref_df = await _read_reference_file(file)
+    result = external_reference_impute(
+        df,
+        ref_df,
+        target=target,
+        predictors=_parse_predictors_form(predictors),
+        method=method,
+        mechanism=mechanism,
+        max_iter=max_iter,
+        random_state=random_state,
+    )
+    if not store.fill_values_by_index(session_id, result.target, result.filled_values):
+        raise HTTPException(status_code=404, detail="Session not found")
+    store.log_action(session_id, "external_reference_impute", {
+        "target": result.target,
+        "predictors": result.predictors,
+        "method": result.method,
+        "mechanism": result.mechanism,
+        "n_imputed": len(result.filled_values),
+    })
+    response = dict(result.result)
+    response["applied"] = True
+    return response
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 5. MNAR SENSITIVITY / ADVANCED IMPUTATION DIAGNOSTICS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class MNARSensitivityRequest(BaseModel):
