@@ -142,3 +142,64 @@ def test_panel_mice_returns_and_audits_methods_text():
     document = Document(io.BytesIO(docx.content))
     text = "\n".join(paragraph.text for paragraph in document.paragraphs)
     assert methods in text
+
+
+def test_panel_mice_preview_does_not_modify_session():
+    sid = _seed("mi_preview")
+    before = store.get(sid)["age"].copy()
+    r = client.post("/api/survival_advanced/mice_preview", json={
+        "session_id": sid,
+        "columns": ["age", "sex"],
+        "max_iter": 5,
+        "random_state": 42,
+        "mechanism": "MAR",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["preview_only"] is True
+    assert body["result_text"].startswith("Preview:")
+    assert len(body["preview_rows"]) > 0
+    assert all(r["column"] in ("age", "sex") for r in body["preview_rows"])
+    # Original session frame must be untouched.
+    assert store.get(sid)["age"].equals(before)
+
+
+def test_panel_mice_preview_and_transfer_writes_original_columns():
+    sid = _seed("mi_transfer")
+    original_cols = list(store.get(sid).columns)
+
+    preview = client.post("/api/survival_advanced/mice_preview", json={
+        "session_id": sid,
+        "columns": ["age", "sex"],
+        "max_iter": 5,
+        "random_state": 42,
+    })
+    assert preview.status_code == 200, preview.text
+    preview_rows = preview.json()["preview_rows"]
+    assert len(preview_rows) > 0
+
+    transfer = client.post("/api/survival_advanced/mice_transfer", json={
+        "session_id": sid,
+        "preview_rows": preview_rows,
+    })
+    assert transfer.status_code == 200, transfer.text
+    t = transfer.json()
+    assert t["total_imputed"] == len(preview_rows)
+    assert "age" in t["columns"] or "sex" in t["columns"]
+
+    df = store.get(sid)
+    assert df["age"].isna().sum() == 0
+    assert df["sex"].isna().sum() == 0
+    # No new _imp columns should be created.
+    assert not any(c.endswith("_imp") for c in df.columns)
+    # Column order should be unchanged.
+    assert list(df.columns) == original_cols
+
+
+def test_panel_mice_transfer_rejects_empty_preview():
+    sid = _seed("mi_transfer_empty")
+    r = client.post("/api/survival_advanced/mice_transfer", json={
+        "session_id": sid,
+        "preview_rows": [],
+    })
+    assert r.status_code == 422, r.text

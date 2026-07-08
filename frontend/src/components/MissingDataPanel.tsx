@@ -7,7 +7,8 @@ import {
   runExternalImputeTransfer,
   runImputationCompare,
   runMCARTest,
-  runMICE,
+  runMICEPreview,
+  runMICETransfer,
   runMissingDiagnostics,
 } from "../api";
 import ResultExporter from "./ResultExporter";
@@ -20,10 +21,20 @@ interface DiagResult { columns: DiagCol[]; overall_hint: string; recommendation:
 type MissingSort = "missing-desc" | "missing-asc" | "name-asc" | "name-desc";
 type QuickMethod = "__mean__" | "__median__" | "__mode__" | "__mice__";
 
+interface MicePreviewRow {
+  row_index: number;
+  column: string;
+  imputed_value: unknown;
+}
 interface MiceExportResult {
   result_text?: string;
   methods_text?: string;
   export_rows?: unknown[][];
+  preview_rows?: MicePreviewRow[];
+  columns?: Array<{ column: string; method: string; n_imputed: number; mean_imputed?: number | null; min_imputed?: number | null; max_imputed?: number | null; mode_imputed?: unknown }>;
+  total_imputed?: number;
+  preview_only?: boolean;
+  applied?: boolean;
 }
 interface McarResult {
   statistic: number | string;
@@ -103,8 +114,9 @@ export default function MissingDataPanel() {
   const [miceIter, setMiceIter] = useState(20);
   const [miceSeed, setMiceSeed] = useState(42);
   const [miceMechanism, setMiceMechanism] = useState<"unknown" | "MCAR" | "MAR" | "MNAR">("unknown");
-  const [miceResult, setMiceResult] = useState<MiceExportResult | null>(null);
   const [miceLoading, setMiceLoading] = useState(false);
+  const [micePreviewResult, setMicePreviewResult] = useState<MiceExportResult | null>(null);
+  const [miceTransferLoading, setMiceTransferLoading] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // per-row action in flight
   const [err, setErr] = useState<string | null>(null);
   const [mutationNotice, setMutationNotice] = useState<string | null>(null);
@@ -341,21 +353,44 @@ export default function MissingDataPanel() {
     }
   };
 
-  const handleMICE = async () => {
+  const handleMICEPreview = async () => {
     if (selected.length === 0) { setErr("Select columns to impute"); return; }
-    setMiceLoading(true); setErr(null); setMutationNotice(null); setMiceResult(null);
+    setMiceLoading(true); setErr(null); setMutationNotice(null); setMicePreviewResult(null);
     try {
-      const res = await runMICE({
-        session_id: sid, columns: selected, n_imputations: 1,
+      const res = await runMICEPreview({
+        session_id: sid, columns: selected,
         max_iter: miceIter, random_state: miceSeed, mechanism: miceMechanism,
-        new_columns: true,
       });
-      setMiceResult(res.data);
-      await refresh();
+      setMicePreviewResult(res.data);
     } catch (e: unknown) {
       setErr(errText(e));
     } finally {
       setMiceLoading(false);
+    }
+  };
+
+  const handleMICETransfer = async () => {
+    if (!micePreviewResult?.preview_rows?.length) {
+      setErr("Preview PMM estimates before transferring");
+      return;
+    }
+    setMiceTransferLoading(true); setErr(null); setMutationNotice(null);
+    try {
+      const res = await runMICETransfer({
+        session_id: sid,
+        preview_rows: micePreviewResult.preview_rows.map((r) => ({
+          row_index: r.row_index,
+          column: r.column,
+          imputed_value: r.imputed_value,
+        })),
+      });
+      setMicePreviewResult((current) => current ? { ...current, applied: true } : current);
+      await refresh();
+      setMutationNotice(`${res.data.total_imputed} value(s) transferred into original columns: ${res.data.columns.join(", ")}.`);
+    } catch (e: unknown) {
+      setErr(errText(e));
+    } finally {
+      setMiceTransferLoading(false);
     }
   };
 
@@ -589,7 +624,7 @@ export default function MissingDataPanel() {
             <div className="px-5 py-3.5 bg-indigo-50 border-b border-indigo-100">
               <h3 className="text-sm font-semibold text-indigo-800">PMM Imputation (selected columns)</h3>
               <p className="text-[11px] text-indigo-400 mt-0.5">
-                Keeps each original column and creates a new imputed column. For variance-correct inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
+                Preview PMM estimates for the selected columns, then transfer the imputed values directly into the original columns. For variance-correct inference, prefer the model panels' MICE option (m datasets + Rubin's-rules pooling).
               </p>
             </div>
             <div className="px-5 py-4 space-y-4">
@@ -606,9 +641,9 @@ export default function MissingDataPanel() {
                 ))}
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={handleMICE} disabled={miceLoading || selected.length === 0}
+                <button onClick={handleMICEPreview} disabled={miceLoading || selected.length === 0}
                   className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                  {miceLoading ? "Imputing…" : `Apply PMM to ${selected.length || ""} column(s)`}
+                  {miceLoading ? "Calculating…" : `Preview PMM for ${selected.length || ""} column(s)`}
                 </button>
                 <button onClick={runCompare} disabled={busy === "compare" || selected.length === 0}
                   className="px-4 py-2 text-sm font-medium border border-indigo-300 text-indigo-600 rounded-lg hover:bg-indigo-50 disabled:opacity-50">
@@ -617,35 +652,69 @@ export default function MissingDataPanel() {
                 {selected.length === 0 && <p className="text-xs text-gray-400">Select columns above</p>}
               </div>
 
-              {miceResult?.result_text && (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-800">{miceResult.result_text}</div>
+              {micePreviewResult?.result_text && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-800">{micePreviewResult.result_text}</div>
               )}
-              {miceResult?.methods_text && (
+              {micePreviewResult?.methods_text && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
                   <div className="flex items-center justify-between gap-3 mb-1.5">
                     <p className="text-xs font-semibold text-indigo-800">Methods</p>
                     <button
-                      onClick={() => navigator.clipboard.writeText(miceResult.methods_text)}
+                      onClick={() => navigator.clipboard.writeText(micePreviewResult.methods_text)}
                       className="text-[10px] px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-white transition-colors"
                     >
                       Copy
                     </button>
                   </div>
-                  <p className="text-xs text-indigo-800 leading-relaxed">{miceResult.methods_text}</p>
+                  <p className="text-xs text-indigo-800 leading-relaxed">{micePreviewResult.methods_text}</p>
                 </div>
               )}
-              {miceResult?.export_rows?.length > 1 && (
+              {micePreviewResult?.export_rows?.length > 1 && (
                 <>
                   <div className="overflow-auto rounded-lg border border-gray-200">
                     <table className="text-xs w-full">
-                      <thead><tr className="bg-gray-50">{(miceResult.export_rows[0] as unknown[]).map((h, i: number) => <th key={i} className="px-3 py-1.5 text-left text-gray-500 font-medium">{String(h)}</th>)}</tr></thead>
-                      <tbody>{miceResult.export_rows.slice(1).map((row, ri: number) => (
+                      <thead><tr className="bg-gray-50">{(micePreviewResult.export_rows[0] as unknown[]).map((h, i: number) => <th key={i} className="px-3 py-1.5 text-left text-gray-500 font-medium">{String(h)}</th>)}</tr></thead>
+                      <tbody>{micePreviewResult.export_rows.slice(1).map((row, ri: number) => (
                         <tr key={ri} className="border-t border-gray-100">{(row as unknown[]).map((v, ci: number) => <td key={ci} className="px-3 py-1 text-gray-700">{(v as ReactNode) ?? "—"}</td>)}</tr>
                       ))}</tbody>
                     </table>
                   </div>
-                  <ResultExporter title="MICE_imputation" headers={miceResult.export_rows[0]} rows={miceResult.export_rows.slice(1)} />
+                  <ResultExporter title="MICE_imputation_preview" headers={micePreviewResult.export_rows[0]} rows={micePreviewResult.export_rows.slice(1)} />
                 </>
+              )}
+              {micePreviewResult?.preview_rows?.length > 0 && (
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold text-gray-700">Previewed imputed values</p>
+                  <div className="overflow-auto rounded-lg border border-gray-200 max-h-64">
+                    <table className="text-xs w-full">
+                      <thead>
+                        <tr className="bg-gray-50 text-left text-gray-500">
+                          <th className="px-3 py-1.5">Row</th>
+                          <th className="px-3 py-1.5">Column</th>
+                          <th className="px-3 py-1.5">Estimated value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {micePreviewResult.preview_rows.map((row) => (
+                          <tr key={`${row.row_index}:${row.column}`} className="border-t border-gray-100">
+                            <td className="px-3 py-1 text-gray-700">{row.row_index}</td>
+                            <td className="px-3 py-1 text-gray-700">{row.column}</td>
+                            <td className="px-3 py-1 text-gray-700">{String(row.imputed_value)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleMICETransfer}
+                      disabled={miceTransferLoading || micePreviewResult.applied}
+                      className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {miceTransferLoading ? "Transferring…" : micePreviewResult.applied ? "Transferred" : "Transfer to original columns"}
+                    </button>
+                  </div>
+                </div>
               )}
 
               {/* CCA vs MI comparison (sensitivity) */}

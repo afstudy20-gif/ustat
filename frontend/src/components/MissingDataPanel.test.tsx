@@ -272,6 +272,85 @@ describe('MissingDataPanel', () => {
     expect(stratifyBySent).toBe('DM')
   })
 
+  it('previews PMM imputation and transfers values into original columns', async () => {
+    installMissingSession()
+    server.use(
+      http.post('/api/survival_advanced/mice_preview', async ({ request }) => {
+        const body = (await request.json()) as {
+          session_id: string
+          columns: string[]
+          max_iter: number
+          random_state: number
+          mechanism: string
+        }
+        expect(body.session_id).toBe('test-session')
+        expect(body.columns).toEqual(expect.arrayContaining(['AGE', 'LDL']))
+        expect(body.mechanism).toBe('unknown')
+        return HttpResponse.json({
+          preview_rows: [
+            { row_index: 1, column: 'AGE', imputed_value: 58 },
+            { row_index: 0, column: 'LDL', imputed_value: 125 },
+          ],
+          columns: [
+            { column: 'AGE', method: 'PMM', n_imputed: 1, mean_imputed: 58, min_imputed: 58, max_imputed: 58 },
+            { column: 'LDL', method: 'PMM', n_imputed: 1, mean_imputed: 125, min_imputed: 125, max_imputed: 125 },
+          ],
+          total_imputed: 2,
+          result_text: 'Preview: 2 missing values will be imputed.',
+          methods_text: 'PMM preview.',
+          export_rows: [['Column', 'Method', 'N Imputed', 'Mean / Mode', 'Min', 'Max'], ['AGE', 'PMM', 1, 58, 58, 58]],
+          preview_only: true,
+        })
+      }),
+      http.post('/api/survival_advanced/mice_transfer', async ({ request }) => {
+        const body = (await request.json()) as {
+          session_id: string
+          preview_rows: Array<{ row_index: number; column: string; imputed_value: unknown }>
+        }
+        expect(body.session_id).toBe('test-session')
+        expect(body.preview_rows).toEqual([
+          { row_index: 1, column: 'AGE', imputed_value: 58 },
+          { row_index: 0, column: 'LDL', imputed_value: 125 },
+        ])
+        return HttpResponse.json({
+          n_imputed: { AGE: 1, LDL: 1 },
+          total_imputed: 2,
+          columns: ['AGE', 'LDL'],
+          result_text: 'Transferred 2 previewed value(s) into original columns: AGE, LDL.',
+        })
+      }),
+      http.get('/api/stats/test-session/refresh', () =>
+        HttpResponse.json({
+          columns: columnsWithMissing,
+          preview: [
+            { AGE: 55, LDL: 125, GROUP: 'A' },
+            { AGE: 58, LDL: 140, GROUP: 'B' },
+            { AGE: 48, LDL: 110, GROUP: '' },
+          ],
+        }),
+      ),
+    )
+
+    const user = userEvent.setup()
+    render(<MissingDataPanel />)
+
+    const table = screen.getAllByRole('table')[0]
+    const ageRow = within(table).getByText('AGE').closest('tr')!
+    const ldlRow = within(table).getByText('LDL').closest('tr')!
+    await user.click(within(ageRow).getByRole('checkbox'))
+    await user.click(within(ldlRow).getByRole('checkbox'))
+
+    await user.click(screen.getByRole('button', { name: /preview pmm/i }))
+    await waitFor(() => expect(screen.getByText(/preview:/i)).toBeInTheDocument())
+    expect(screen.getByText('125')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /transfer to original columns/i })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: /transfer to original columns/i }))
+    await waitFor(() =>
+      expect(screen.getByText(/2 value\(s\) transferred into original columns/i)).toBeInTheDocument(),
+    )
+  })
+
   it('switches to the Data Cleaning sub-tab', async () => {
     installMissingSession()
     const user = userEvent.setup()

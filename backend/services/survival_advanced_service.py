@@ -509,39 +509,50 @@ def _recurrent_specific_diagnostics(
 
 
 
-def fit_mice(req):
-    df = _get_df(req.session_id)
+def _missing_mask(series: pd.Series) -> pd.Series:
+    """Return a boolean mask of missing, blank, or sentinel values."""
+    mask = series.isna()
+    if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+        mask = mask | series.astype(str).str.strip().eq("")
+    from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column
+    mask = mask | flag_sentinels(series, plausibility_max_for_column(series.name))
+    return mask
 
-    # Validate columns
-    missing_cols = [c for c in req.columns if c not in df.columns]
-    if missing_cols:
-        raise HTTPException(status_code=400, detail=f"Columns not found: {missing_cols}")
 
-    def _missing_mask(series):
-        mask = series.isna()
-        if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
-            mask = mask | series.astype(str).str.strip().eq("")
-        from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column
-        mask = mask | flag_sentinels(series, plausibility_max_for_column(series.name))
-        return mask
+def _is_numeric_target(df: pd.DataFrame, c: str) -> bool:
+    """Whether column c should be treated as numeric for MICE/PMM."""
+    if pd.api.types.is_numeric_dtype(df[c]):
+        return True
+    coerced = pd.to_numeric(df[c], errors="coerce")
+    return bool(df[c].notna().any() and coerced.notna().mean() >= 0.8)
 
-    # Check there are actually missing values, including blank text cells.
-    missing_masks = {c: _missing_mask(df[c]) for c in req.columns}
-    cols_with_missing = [c for c in req.columns if missing_masks[c].any()]
+
+def _compute_mice(df: pd.DataFrame, columns: List[str], max_iter: int, random_state: int):
+    """Compute MICE/PMM imputation and return working frame + metadata.
+
+    Returns
+    -------
+    df_work : pd.DataFrame
+        Copy of ``df`` with missing values in ``columns`` filled.
+    missing_masks : dict[str, pd.Series]
+        Mask used to identify missing cells per target column.
+    cols_with_missing : list[str]
+        Target columns that actually had missing values.
+    num_targets : list[str]
+        Numeric targets imputed by PMM.
+    cat_targets : list[str]
+        Non-numeric targets imputed by mode.
+    col_summaries : list[dict]
+        Summary rows for each imputed column.
+    """
+    from services.missing_data import mice_multiple
+
+    missing_masks = {c: _missing_mask(df[c]) for c in columns}
+    cols_with_missing = [c for c in columns if missing_masks[c].any()]
     if not cols_with_missing:
         raise HTTPException(status_code=422, detail="No missing values in selected columns")
 
-    from services.missing_data import mice_multiple
-
-    # Split targets: numeric → PMM; non-numeric (text/categorical) → mode.
-    # Previously any non-numeric target hard-failed the whole request.
-    def _is_numeric(c: str) -> bool:
-        if pd.api.types.is_numeric_dtype(df[c]):
-            return True
-        coerced = pd.to_numeric(df[c], errors="coerce")
-        return bool(df[c].notna().any() and coerced.notna().mean() >= 0.8)
-
-    num_targets = [c for c in cols_with_missing if _is_numeric(c)]
+    num_targets = [c for c in cols_with_missing if _is_numeric_target(df, c)]
     cat_targets = [c for c in cols_with_missing if c not in num_targets]
 
     df_work = df.copy()
@@ -576,7 +587,7 @@ def fit_mice(req):
             # and could yield impossible values).
             subset = df_work[numeric_cols].apply(pd.to_numeric, errors="coerce")
             imp = mice_multiple(subset, numeric_cols, n_imputations=1,
-                                max_iter=req.max_iter, random_state=req.random_state)
+                                max_iter=max_iter, random_state=random_state)
             subset_filled = imp.imputed_datasets[0]
             for t in num_targets:
                 df_work[t] = subset_filled[t]
@@ -601,25 +612,22 @@ def fit_mice(req):
             "mode_imputed": _safe(fill_val), "mean_imputed": None, "min_imputed": None, "max_imputed": None,
         })
 
-    # Keep originals + write imputed values to new "<col>_imp" columns.
-    new_column_map: dict = {}
-    if getattr(req, "new_columns", False):
-        for s in col_summaries:
-            c = s["column"]
-            newname = f"{c}_imp"
-            k, base = 2, newname
-            while newname in df_work.columns:
-                newname = f"{base}_{k}"
-                k += 1
-            source_pos = list(df_work.columns).index(c)
-            df_work.insert(source_pos + 1, newname, df_work[c].copy())
-            df_work[c] = df[c]              # restore the original column
-            new_column_map[c] = newname
-            s["source_column"] = c
-            s["column"] = newname
+    return df_work, missing_masks, cols_with_missing, num_targets, cat_targets, col_summaries
 
-    store.save(req.session_id, df_work)
 
+def _build_mice_response(
+    df: pd.DataFrame,
+    req,
+    df_work: pd.DataFrame,
+    cols_with_missing: List[str],
+    num_targets: List[str],
+    cat_targets: List[str],
+    col_summaries: List[dict],
+    new_column_map: Dict[str, str],
+    *,
+    preview_rows: Optional[List[dict]] = None,
+) -> dict:
+    """Build the JSON response shared by apply/preview MICE endpoints."""
     total_imputed = sum(s["n_imputed"] for s in col_summaries)
 
     mech = req.mechanism.upper()
@@ -637,7 +645,7 @@ def fit_mice(req):
         {"name": "Single completed dataset", "met": True,
          "detail": (
              "Original columns are preserved and one PMM-completed column is created for each selected variable. "
-             if getattr(req, "new_columns", False)
+             if new_column_map
              else "The session is filled with one PMM-completed dataset (single imputation). "
          )
                    + "For variance-correct inference use the model panels' MICE option "
@@ -697,10 +705,11 @@ def fit_mice(req):
         center = s.get("mode_imputed") if s.get("method") == "mode" else s.get("mean_imputed")
         export_rows.append([s["column"], s.get("method", "MICE"), s["n_imputed"], center, s.get("min_imputed"), s.get("max_imputed")])
 
+    n_imputations = getattr(req, "n_imputations", 1)
     r_code = (
         f"library(mice)\n"
         f"imp <- mice(data[, c({', '.join(repr(c) for c in req.columns)})],\n"
-        f"            m = {req.n_imputations}, maxit = {req.max_iter}, method = 'pmm', seed = {req.random_state})\n"
+        f"            m = {n_imputations}, maxit = {req.max_iter}, method = 'pmm', seed = {req.random_state})\n"
         f"completed_data <- complete(imp, action = 'long')\n"
         f"# Pool estimates with Rubin's rules:\n"
         f"# fit <- with(imp, lm(outcome ~ predictors))\n"
@@ -725,7 +734,7 @@ def fit_mice(req):
         "n_total": len(df),
         "total_imputed": total_imputed,
         "columns": col_summaries,
-        "n_imputations": req.n_imputations,
+        "n_imputations": n_imputations,
         "max_iter": req.max_iter,
         "new_column_map": new_column_map,
         "preserved_originals": bool(new_column_map),
@@ -734,6 +743,107 @@ def fit_mice(req):
         "methods_text": methods_text,
         "export_rows": export_rows,
         "r_code": r_code,
+        "preview_rows": preview_rows,
+    }
+
+
+def fit_mice(req):
+    df = _get_df(req.session_id)
+
+    # Validate columns
+    missing_cols = [c for c in req.columns if c not in df.columns]
+    if missing_cols:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing_cols}")
+
+    df_work, missing_masks, cols_with_missing, num_targets, cat_targets, col_summaries = _compute_mice(
+        df, req.columns, req.max_iter, req.random_state
+    )
+
+    # Keep originals + write imputed values to new "<col>_imp" columns.
+    new_column_map: dict = {}
+    if getattr(req, "new_columns", False):
+        for s in col_summaries:
+            c = s["column"]
+            newname = f"{c}_imp"
+            k, base = 2, newname
+            while newname in df_work.columns:
+                newname = f"{base}_{k}"
+                k += 1
+            source_pos = list(df_work.columns).index(c)
+            df_work.insert(source_pos + 1, newname, df_work[c].copy())
+            df_work[c] = df[c]              # restore the original column
+            new_column_map[c] = newname
+            s["source_column"] = c
+            s["column"] = newname
+
+    store.save(req.session_id, df_work)
+
+    return _build_mice_response(
+        df, req, df_work, cols_with_missing, num_targets, cat_targets,
+        col_summaries, new_column_map
+    )
+
+
+def mice_preview(req):
+    df = _get_df(req.session_id)
+
+    missing_cols = [c for c in req.columns if c not in df.columns]
+    if missing_cols:
+        raise HTTPException(status_code=400, detail=f"Columns not found: {missing_cols}")
+
+    df_work, missing_masks, cols_with_missing, num_targets, cat_targets, col_summaries = _compute_mice(
+        df, req.columns, req.max_iter, req.random_state
+    )
+
+    preview_rows = []
+    for c in cols_with_missing:
+        for idx in missing_masks[c][missing_masks[c]].index:
+            preview_rows.append({
+                "row_index": int(idx),
+                "column": c,
+                "imputed_value": _safe(df_work.at[idx, c]),
+            })
+
+    resp = _build_mice_response(
+        df, req, df_work, cols_with_missing, num_targets, cat_targets,
+        col_summaries, {}, preview_rows=preview_rows
+    )
+    # Prefix result text so the UI clearly shows this is a preview.
+    resp["result_text"] = "Preview: " + resp["result_text"]
+    resp["preview_only"] = True
+    return resp
+
+
+def mice_transfer(req):
+    df = _get_df(req.session_id)
+
+    preview_rows = getattr(req, "preview_rows", None)
+    if not preview_rows:
+        raise HTTPException(status_code=422, detail="No preview rows provided for transfer")
+
+    n_imputed: Dict[str, int] = {}
+    for row in preview_rows:
+        col = row.get("column")
+        idx = row.get("row_index")
+        value = row.get("imputed_value")
+        if col is None or idx is None or col not in df.columns:
+            continue
+        if not _missing_mask(df[col].loc[[idx]]).iloc[0]:
+            continue
+        df.at[idx, col] = value
+        n_imputed[col] = n_imputed.get(col, 0) + 1
+
+    if not n_imputed:
+        raise HTTPException(status_code=422, detail="No missing cells matched the previewed rows")
+
+    store.save(req.session_id, df)
+
+    total = sum(n_imputed.values())
+    return {
+        "n_imputed": n_imputed,
+        "total_imputed": total,
+        "columns": list(n_imputed.keys()),
+        "result_text": f"Transferred {total} previewed value(s) into original columns: {', '.join(n_imputed.keys())}.",
     }
 
 

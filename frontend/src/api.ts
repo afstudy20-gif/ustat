@@ -256,7 +256,10 @@ export const runDAGAdjustment  = (data: object) => api.post("/api/causal/dag_adj
 export const runSEM            = (data: object) => api.post("/api/causal/sem", data);
 
 // Survival advanced
-export const runMICE       = (data: object) => api.post("/api/survival_advanced/mice", data);
+export const runMICE         = (data: object) => api.post("/api/survival_advanced/mice", data);
+export const runMICEPreview  = (data: object) => api.post("/api/survival_advanced/mice_preview", data);
+export const runMICETransfer = (data: { session_id: string; preview_rows: Array<{ row_index: number; column: string; imputed_value: unknown }> }) =>
+  api.post("/api/survival_advanced/mice_transfer", data);
 export const runFineGray   = (data: object) => api.post("/api/survival_advanced/fine_gray", data);
 export const runEValue     = (data: object) => api.post("/api/survival_advanced/evalue", data);
 export const runLandmark   = (data: object) => api.post("/api/survival_advanced/landmark", data);

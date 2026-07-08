@@ -28,9 +28,32 @@ class MICERequest(BaseModel):
     new_columns: bool = False
 
 
+class MICEPreviewRequest(BaseModel):
+    session_id: str
+    columns: List[str]
+    max_iter: int = 10
+    random_state: int = 42
+    mechanism: str = "unknown"
+
+
+class MICETransferRequest(BaseModel):
+    session_id: str
+    preview_rows: List[Dict[str, Any]]
+
+
 @router.post("/mice")
 def mice_imputation(req: MICERequest):
     return _svc.fit_mice(req)
+
+
+@router.post("/mice_preview")
+def mice_preview(req: MICEPreviewRequest):
+    return _svc.mice_preview(req)
+
+
+@router.post("/mice_transfer")
+def mice_transfer(req: MICETransferRequest):
+    return _svc.mice_transfer(req)
 
 
 class FineGrayRequest(BaseModel):
