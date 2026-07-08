@@ -332,3 +332,34 @@ def test_external_impute_stratify_allows_stratify_column_as_predictor(client):
     by_row = {row["row_index"]: row for row in body["preview_rows"]}
     assert by_row[1]["imputed_value"] < 150
     assert by_row[3]["imputed_value"] > 200
+
+
+def test_external_impute_stratify_matches_int_and_float_stratum_values(client):
+    sid = _stratified_seed("external_stratify_int_float")
+    # Reference uses float dm values (0.0 / 1.0) like SPSS/.sav imports often do.
+    ref = pd.DataFrame({
+        "age": [52.0, 58.0, 72.0, 78.0],
+        "dm": [0.0, 0.0, 1.0, 1.0],
+        "glucose": [92.0, 88.0, 295.0, 305.0],
+    })
+    ref_file = ("reference.csv", io.BytesIO(ref.to_csv(index=False).encode("utf-8")), "text/csv")
+    response = client.post(
+        "/api/missing_data/external_impute_preview",
+        data={
+            "session_id": sid,
+            "target": "glucose",
+            "predictors": '["age"]',
+            "stratify_by": "dm",
+            "method": "pmm",
+            "mechanism": "MAR",
+            "max_iter": "5",
+            "random_state": "11",
+        },
+        files={"file": ref_file},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["n_imputed"] == 2
+    by_row = {row["row_index"]: row for row in body["preview_rows"]}
+    assert by_row[1]["imputed_value"] < 150
+    assert by_row[3]["imputed_value"] > 200

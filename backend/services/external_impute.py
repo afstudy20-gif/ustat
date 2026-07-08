@@ -78,12 +78,25 @@ def _resolve_column(columns: Iterable[str], requested: str, *, dataset_name: str
 
 
 def _stratum_value(value: Any) -> str:
-    """Stable string key for grouping categorical strata."""
+    """Stable string key for grouping categorical strata.
+
+    Numeric values are normalized so that integer-valued floats (e.g., 0.0)
+    and integers (e.g., 0) map to the same key. This handles SPSS/.sav files
+    where binary flags are often read as floats while the current dataset
+    stores them as integers.
+    """
     if value is None:
         return "__missing__"
     try:
         if pd.isna(value):
             return "__missing__"
+    except (TypeError, ValueError):
+        pass
+    # Normalize floats that represent whole numbers to integers.
+    try:
+        numeric = float(value)
+        if numeric.is_integer():
+            return str(int(numeric))
     except (TypeError, ValueError):
         pass
     return str(value).strip()
@@ -287,6 +300,12 @@ def external_reference_impute(
     if not strata:
         raise HTTPException(status_code=400, detail=f"No strata found in stratify column '{current_stratify_col}' for missing rows.")
 
+    reference_strata = sorted({
+        _stratum_value(v)
+        for v in reference_df[reference_stratify_col]
+        if _stratum_value(v) != "__missing__"
+    })
+
     # Drop the stratify column from the predictor list: within each stratum it is
     # constant, so it carries no information for the regression. The user may still
     # have selected it as a predictor; it is honored via stratification instead.
@@ -334,7 +353,12 @@ def external_reference_impute(
     if combined_result is None:
         raise HTTPException(
             status_code=422,
-            detail=f"No strata from '{current_stratify_col}' had matching reference rows; cannot impute.",
+            detail=(
+                f"No strata from '{current_stratify_col}' had matching reference rows; cannot impute. "
+                f"Current strata (for missing target rows): {strata}; "
+                f"reference strata: {reference_strata}. "
+                "Check that the stratify column uses the same values/encoding in both datasets."
+            ),
         )
 
     combined_result.result["preview_rows"] = combined_result.result["preview_rows"][:200]
@@ -371,6 +395,7 @@ def external_reference_impute(
     if skipped_strata:
         combined_result.result["warnings"].append(
             f"Skipped stratum(s) with no matching reference rows: {', '.join(skipped_strata)}. "
+            f"Reference strata found: {reference_strata or 'none'}. "
             "Their missing target values were not imputed."
         )
     return combined_result
