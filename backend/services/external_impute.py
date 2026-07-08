@@ -56,12 +56,35 @@ def _parse_predictors(predictors: Iterable[str]) -> list[str]:
     return out
 
 
+def _norm_name(name: str) -> str:
+    return str(name).strip().casefold()
+
+
+def _resolve_column(columns: Iterable[str], requested: str, *, dataset_name: str) -> str:
+    columns = [str(col) for col in columns]
+    if requested in columns:
+        return requested
+
+    norm_requested = _norm_name(requested)
+    matches = [col for col in columns if _norm_name(col) == norm_requested]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ambiguous column '{requested}' in {dataset_name}: {matches}",
+        )
+    raise HTTPException(status_code=400, detail=f"Column missing in {dataset_name}: {requested}")
+
+
 def external_reference_impute(
     current_df: pd.DataFrame,
     reference_df: pd.DataFrame,
     *,
     target: str,
     predictors: Iterable[str],
+    reference_target: str | None = None,
+    predictor_mappings: dict[str, str] | None = None,
     method: str = "pmm",
     mechanism: str = "unknown",
     max_iter: int = 20,
@@ -80,33 +103,44 @@ def external_reference_impute(
         raise HTTPException(status_code=400, detail="Select a target column.")
     if not predictors:
         raise HTTPException(status_code=400, detail="Select at least one predictor column.")
-    if target in predictors:
+    if _norm_name(target) in {_norm_name(p) for p in predictors}:
         raise HTTPException(status_code=400, detail="Target column cannot also be a predictor.")
 
-    needed = [target] + predictors
-    missing_current = [c for c in needed if c not in current_df.columns]
-    missing_reference = [c for c in needed if c not in reference_df.columns]
-    if missing_current:
-        raise HTTPException(status_code=400, detail=f"Columns missing in current data: {missing_current}")
-    if missing_reference:
-        raise HTTPException(status_code=400, detail=f"Columns missing in reference data: {missing_reference}")
+    predictor_mappings = predictor_mappings or {}
+    current_target = _resolve_column(current_df.columns, target, dataset_name="current data")
+    reference_target_name = str(reference_target or target).strip()
+    reference_target_col = _resolve_column(reference_df.columns, reference_target_name, dataset_name="reference data")
+    current_predictors = [
+        _resolve_column(current_df.columns, predictor_mappings.get(predictor, predictor), dataset_name="current data")
+        for predictor in predictors
+    ]
+    if current_target in current_predictors:
+        raise HTTPException(status_code=400, detail="Target column cannot also be a mapped predictor.")
+    reference_predictors = [
+        _resolve_column(reference_df.columns, predictor, dataset_name="reference data")
+        for predictor in predictors
+    ]
 
-    target_missing = _missing_mask(current_df[target])
+    needed = [current_target] + current_predictors
+    reference_needed = [reference_target_col] + reference_predictors
+
+    target_missing = _missing_mask(current_df[current_target])
     missing_rows = [int(i) for i in current_df.index[target_missing].tolist()]
     if not missing_rows:
-        raise HTTPException(status_code=400, detail=f"Column '{target}' has no missing values to impute.")
+        raise HTTPException(status_code=400, detail=f"Column '{current_target}' has no missing values to impute.")
 
     current_part = current_df[needed].copy()
-    reference_part = reference_df[needed].copy()
+    reference_part = reference_df[reference_needed].copy()
+    reference_part.columns = needed
     current_part["__ustat_source"] = "current"
     reference_part["__ustat_source"] = "reference"
     current_part["__ustat_row_index"] = list(current_df.index)
     reference_part["__ustat_row_index"] = -1
     combined = pd.concat([current_part, reference_part], ignore_index=True)
 
-    observed_target = combined.loc[~_missing_mask(combined[target]), target]
+    observed_target = combined.loc[~_missing_mask(combined[current_target]), current_target]
     if observed_target.empty:
-        raise HTTPException(status_code=422, detail=f"No observed '{target}' values found in current or reference data.")
+        raise HTTPException(status_code=422, detail=f"No observed '{current_target}' values found in current or reference data.")
 
     imputation_cols = needed
     imputed = mice_multiple(
@@ -117,19 +151,21 @@ def external_reference_impute(
         random_state=int(random_state),
     ).imputed_datasets[0]
 
-    imputed[target] = imputed[target].where(~_missing_mask(imputed[target]), combined[target])
+    imputed[current_target] = imputed[current_target].where(
+        ~_missing_mask(imputed[current_target]), combined[current_target]
+    )
     current_positions = combined.index[(combined["__ustat_source"] == "current") & combined["__ustat_row_index"].isin(missing_rows)]
     filled_values = {
-        int(combined.loc[pos, "__ustat_row_index"]): _clean_scalar(imputed.loc[pos, target])
+        int(combined.loc[pos, "__ustat_row_index"]): _clean_scalar(imputed.loc[pos, current_target])
         for pos in current_positions
     }
     filled_values = {k: v for k, v in filled_values.items() if v is not None}
     if not filled_values:
-        raise HTTPException(status_code=422, detail=f"Could not impute any missing '{target}' values.")
+        raise HTTPException(status_code=422, detail=f"Could not impute any missing '{current_target}' values.")
 
     preview_rows = []
     for row_index, value in filled_values.items():
-        pred_missing = int(_missing_mask(current_df.loc[row_index, predictors]).sum())
+        pred_missing = int(_missing_mask(current_df.loc[row_index, current_predictors]).sum())
         preview_rows.append({
             "row_index": row_index,
             "imputed_value": value,
@@ -137,7 +173,7 @@ def external_reference_impute(
         })
 
     ref_complete = int(reference_part[needed].dropna().shape[0])
-    current_observed = int((~_missing_mask(current_df[target])).sum())
+    current_observed = int((~_missing_mask(current_df[current_target])).sum())
     warnings: list[str] = []
     if mechanism == "MNAR":
         warnings.append("MNAR selected: PMM/MICE remains a MAR reference imputation; use sensitivity analysis for MNAR assumptions.")
@@ -145,8 +181,11 @@ def external_reference_impute(
         warnings.append("Reference dataset has few complete donor rows; inspect imputed values carefully.")
 
     result = {
-        "target": target,
-        "predictors": predictors,
+        "target": current_target,
+        "reference_target": reference_target_col,
+        "predictors": current_predictors,
+        "reference_predictors": reference_predictors,
+        "predictor_mappings": dict(zip(reference_predictors, current_predictors)),
         "method": "PMM" if method == "pmm" else "MICE/PMM",
         "mechanism": mechanism,
         "n_missing_target": len(missing_rows),
@@ -157,12 +196,12 @@ def external_reference_impute(
         "preview_rows": preview_rows[:200],
         "warnings": warnings,
         "result_text": (
-            f"{len(filled_values)} missing value(s) in '{target}' were imputed using "
-            f"{len(predictors)} predictor(s) and a reference dataset with {len(reference_df)} row(s)."
+            f"{len(filled_values)} missing value(s) in '{current_target}' were imputed using "
+            f"{len(current_predictors)} predictor(s) and a reference dataset with {len(reference_df)} row(s)."
         ),
         "methods_text": (
             f"External reference-assisted imputation used current data plus an uploaded reference dataset. "
-            f"The target variable was {target}; predictors were {', '.join(predictors)}. "
+            f"The target variable was {current_target}; predictors were {', '.join(current_predictors)}. "
             f"Missing target values were filled by chained equations with predictive mean matching "
             f"({max(1, int(max_iter))} iterations; random seed {int(random_state)}), under a {mechanism} mechanism label."
         ),
@@ -172,8 +211,8 @@ def external_reference_impute(
         ],
     }
     return ExternalImputeResult(
-        target=target,
-        predictors=predictors,
+        target=current_target,
+        predictors=current_predictors,
         method=method,
         mechanism=mechanism,
         missing_rows=missing_rows,

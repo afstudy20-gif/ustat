@@ -120,8 +120,8 @@ describe('MissingDataPanel', () => {
         HttpResponse.json({
           n_rows: 2,
           columns: [
-            { name: 'AGE', dtype: 'int64', kind: 'numeric', n_missing: 0 },
-            { name: 'LDL', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'age', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'ldl', dtype: 'int64', kind: 'numeric', n_missing: 0 },
             { name: 'REFERENCE_ONLY', dtype: 'object', kind: 'categorical', n_missing: 0 },
           ],
         }),
@@ -129,11 +129,15 @@ describe('MissingDataPanel', () => {
       http.post('/api/missing_data/external_impute_preview', async ({ request }) => {
         const fd = await request.formData()
         expect(fd.get('target')).toBe('LDL')
-        expect(fd.get('predictors')).toBe(JSON.stringify(['AGE']))
+        expect(fd.get('reference_target')).toBe('ldl')
+        expect(fd.get('predictors')).toBe(JSON.stringify(['age']))
+        expect(fd.get('predictor_mappings')).toBe(JSON.stringify({ age: 'AGE' }))
         expect(fd.get('file')).toBeTruthy()
         return HttpResponse.json({
           target: 'LDL',
+          reference_target: 'ldl',
           predictors: ['AGE'],
+          reference_predictors: ['age'],
           method: 'PMM',
           mechanism: 'unknown',
           n_missing_target: 1,
@@ -149,14 +153,16 @@ describe('MissingDataPanel', () => {
     const user = userEvent.setup()
     render(<MissingDataPanel />)
 
-    await user.selectOptions(screen.getByLabelText(/missing target/i), 'LDL')
+    await user.click(screen.getByRole('tab', { name: /reference imputation/i }))
+    await user.selectOptions(screen.getByLabelText(/current missing target/i), 'LDL')
     await user.upload(
       screen.getByLabelText(/reference dataset/i),
-      new File(['AGE,LDL\n55,128\n61,140\n'], 'reference.csv', { type: 'text/csv' }),
+      new File(['age,ldl\n55,128\n61,140\n'], 'reference.csv', { type: 'text/csv' }),
     )
-    await waitFor(() => expect(screen.getByText('REFERENCE_ONLY')).toBeInTheDocument())
-    expect(screen.getByLabelText('REFERENCE_ONLY')).toBeDisabled()
-    const agePredictor = screen.getAllByLabelText('AGE').at(-1)!
+    await waitFor(() => expect(screen.getByLabelText(/reference target match/i)).toHaveValue('ldl'))
+    await waitFor(() => expect(screen.getAllByText('REFERENCE_ONLY').length).toBeGreaterThan(0))
+    expect(screen.getByDisplayValue('AGE')).toBeInTheDocument()
+    const agePredictor = screen.getByLabelText('age')
     await user.click(agePredictor)
     await user.click(screen.getByRole('button', { name: /^preview$/i }))
 

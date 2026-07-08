@@ -163,7 +163,9 @@ export const getExternalImputeReferenceColumns = (file: File) => {
 export const runExternalImputePreview = (data: {
   sessionId: string;
   target: string;
+  referenceTarget?: string;
   predictors: string[];
+  predictorMappings?: Record<string, string>;
   method: string;
   mechanism: string;
   maxIter: number;
@@ -173,7 +175,9 @@ export const runExternalImputePreview = (data: {
   const fd = new FormData();
   fd.append("session_id", data.sessionId);
   fd.append("target", data.target);
+  if (data.referenceTarget) fd.append("reference_target", data.referenceTarget);
   fd.append("predictors", JSON.stringify(data.predictors));
+  fd.append("predictor_mappings", JSON.stringify(data.predictorMappings ?? {}));
   fd.append("method", data.method);
   fd.append("mechanism", data.mechanism);
   fd.append("max_iter", String(data.maxIter));
@@ -184,7 +188,9 @@ export const runExternalImputePreview = (data: {
 export const runExternalImputeApply = (data: {
   sessionId: string;
   target: string;
+  referenceTarget?: string;
   predictors: string[];
+  predictorMappings?: Record<string, string>;
   method: string;
   mechanism: string;
   maxIter: number;
@@ -194,7 +200,9 @@ export const runExternalImputeApply = (data: {
   const fd = new FormData();
   fd.append("session_id", data.sessionId);
   fd.append("target", data.target);
+  if (data.referenceTarget) fd.append("reference_target", data.referenceTarget);
   fd.append("predictors", JSON.stringify(data.predictors));
+  fd.append("predictor_mappings", JSON.stringify(data.predictorMappings ?? {}));
   fd.append("method", data.method);
   fd.append("mechanism", data.mechanism);
   fd.append("max_iter", String(data.maxIter));

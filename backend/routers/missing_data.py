@@ -389,6 +389,22 @@ def _parse_predictors_form(raw: str) -> List[str]:
     return [p.strip() for p in raw.split(",") if p.strip()]
 
 
+def _parse_predictor_mappings_form(raw: Optional[str]) -> Dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        str(k).strip(): str(v).strip()
+        for k, v in parsed.items()
+        if str(k).strip() and str(v).strip()
+    }
+
+
 async def _read_reference_file(file: UploadFile) -> pd.DataFrame:
     content = await file.read()
     if not content:
@@ -424,7 +440,9 @@ async def external_impute_reference_columns(file: UploadFile = File(...)):
 async def external_impute_preview(
     session_id: str = Form(...),
     target: str = Form(...),
+    reference_target: Optional[str] = Form(None),
     predictors: str = Form(...),
+    predictor_mappings: Optional[str] = Form(None),
     method: str = Form("pmm"),
     mechanism: str = Form("unknown"),
     max_iter: int = Form(20),
@@ -440,6 +458,8 @@ async def external_impute_preview(
         ref_df,
         target=target,
         predictors=_parse_predictors_form(predictors),
+        reference_target=reference_target,
+        predictor_mappings=_parse_predictor_mappings_form(predictor_mappings),
         method=method,
         mechanism=mechanism,
         max_iter=max_iter,
@@ -452,7 +472,9 @@ async def external_impute_preview(
 async def external_impute_apply(
     session_id: str = Form(...),
     target: str = Form(...),
+    reference_target: Optional[str] = Form(None),
     predictors: str = Form(...),
+    predictor_mappings: Optional[str] = Form(None),
     method: str = Form("pmm"),
     mechanism: str = Form("unknown"),
     max_iter: int = Form(20),
@@ -468,6 +490,8 @@ async def external_impute_apply(
         ref_df,
         target=target,
         predictors=_parse_predictors_form(predictors),
+        reference_target=reference_target,
+        predictor_mappings=_parse_predictor_mappings_form(predictor_mappings),
         method=method,
         mechanism=mechanism,
         max_iter=max_iter,

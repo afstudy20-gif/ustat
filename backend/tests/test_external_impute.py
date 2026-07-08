@@ -25,11 +25,34 @@ def _reference_file() -> tuple[str, io.BytesIO, str]:
     return "reference.csv", io.BytesIO(ref.to_csv(index=False).encode("utf-8")), "text/csv"
 
 
+def _mapped_reference_file() -> tuple[str, io.BytesIO, str]:
+    ref = pd.DataFrame({
+        "AGE_YEARS": [58, 62, 68, 75],
+        "BMI": [27.0, 29.0, 32.0, 34.0],
+        "LDL_VALUE": [126.0, 134.0, 150.0, 164.0],
+    })
+    return "reference.csv", io.BytesIO(ref.to_csv(index=False).encode("utf-8")), "text/csv"
+
+
 def _form(sid: str) -> dict:
     return {
         "session_id": sid,
         "target": "ldl",
         "predictors": '["age","bmi"]',
+        "method": "pmm",
+        "mechanism": "MAR",
+        "max_iter": "5",
+        "random_state": "11",
+    }
+
+
+def _mapped_form(sid: str) -> dict:
+    return {
+        "session_id": sid,
+        "target": "ldl",
+        "reference_target": "LDL_VALUE",
+        "predictors": '["AGE_YEARS","BMI"]',
+        "predictor_mappings": '{"AGE_YEARS":"age","BMI":"bmi"}',
         "method": "pmm",
         "mechanism": "MAR",
         "max_iter": "5",
@@ -53,6 +76,42 @@ def test_external_impute_preview_uses_reference_dataset(client):
     assert body["reference_rows"] == 4
     assert {row["row_index"] for row in body["preview_rows"]} == {1, 2}
     assert store.get(sid)["ldl"].isna().sum() == 2
+
+
+def test_external_impute_preview_accepts_explicit_column_mapping(client):
+    sid = _seed("external_preview_mapping")
+    response = client.post(
+        "/api/missing_data/external_impute_preview",
+        data=_mapped_form(sid),
+        files={"file": _mapped_reference_file()},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["target"] == "ldl"
+    assert body["reference_target"] == "LDL_VALUE"
+    assert body["predictors"] == ["age", "bmi"]
+    assert body["reference_predictors"] == ["AGE_YEARS", "BMI"]
+    assert body["predictor_mappings"] == {"AGE_YEARS": "age", "BMI": "bmi"}
+    assert body["n_imputed"] == 2
+
+
+def test_external_impute_preview_matches_columns_case_insensitively(client):
+    sid = _seed("external_preview_case")
+    response = client.post(
+        "/api/missing_data/external_impute_preview",
+        data={
+            **_form(sid),
+            "target": "LDL",
+            "predictors": '["AGE","BMI"]',
+        },
+        files={"file": _reference_file()},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["target"] == "ldl"
+    assert body["reference_target"] == "ldl"
+    assert body["predictors"] == ["age", "bmi"]
+    assert body["reference_predictors"] == ["age", "bmi"]
 
 
 def test_external_reference_columns_reads_uploaded_dataset(client):
