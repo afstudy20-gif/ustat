@@ -1,6 +1,7 @@
 """Session management: cell editing, dataset export, session save/load, audit."""
 import io
 import json
+import math
 import os
 import tempfile
 import time
@@ -19,6 +20,65 @@ router = APIRouter()
 
 PLACEHOLDER_COLS = 5
 PLACEHOLDER_ROWS = 10
+
+
+def _sav_scalar(value: Any, numeric: bool) -> Any:
+    if value is None:
+        return None
+    if numeric:
+        try:
+            numeric_value = float(value)
+        except (TypeError, ValueError):
+            return value
+        if math.isfinite(numeric_value) and numeric_value.is_integer():
+            return int(numeric_value)
+        return numeric_value
+    return str(value)
+
+
+def _sav_value_labels(labels: dict, series: pd.Series) -> dict:
+    if not isinstance(labels, dict):
+        return {}
+    numeric = pd.api.types.is_numeric_dtype(series)
+    out = {}
+    for raw_key, raw_label in labels.items():
+        if raw_label is None or str(raw_label) == "":
+            continue
+        key = _sav_scalar(raw_key, numeric)
+        if numeric and not isinstance(key, (int, float)):
+            continue
+        out[key] = str(raw_label)
+    return out
+
+
+def _sav_missing_ranges(ranges: Any, series: pd.Series) -> list:
+    if not isinstance(ranges, list):
+        return []
+    numeric = pd.api.types.is_numeric_dtype(series)
+    out = []
+    for item in ranges:
+        if isinstance(item, dict):
+            lo = _sav_scalar(item.get("lo"), numeric)
+            hi = _sav_scalar(item.get("hi", item.get("lo")), numeric)
+            if lo is None:
+                continue
+            out.append({"lo": lo, "hi": hi if hi is not None else lo})
+        else:
+            value = _sav_scalar(item, numeric)
+            if value is not None:
+                out.append(value)
+    return out
+
+
+def _measure_for_export(kind: str, metadata: dict) -> str:
+    measure = str((metadata or {}).get("measure", "")).strip().lower()
+    if measure in {"nominal", "ordinal", "scale"}:
+        return measure
+    if kind == "ordinal":
+        return "ordinal"
+    if kind in {"categorical", "text"}:
+        return "nominal"
+    return "scale"
 
 
 @router.post("/blank")
@@ -238,34 +298,37 @@ async def export_dataset(
         # Build a clean copy of the dataframe suitable for pyreadstat
         df_sav = df.copy()
 
+        from routers.upload import _detect_kind
+
+        kind_overrides = store.get_kind_overrides(session_id)
+        column_labels: dict = {}
         variable_measure: dict = {}
         variable_value_labels: dict = {}
+        missing_ranges: dict = {}
 
         for col in df_sav.columns:
-            kind = kinds.get(col, "numeric")
+            kind = kinds.get(col) or kind_overrides.get(col) or _detect_kind(df_sav[col])
+            if kind not in ("categorical", "text", "ordinal") and df_sav[col].dtype == object:
+                df_sav[col] = pd.to_numeric(df_sav[col], errors="coerce")
 
-            # Check for user-defined value labels (from Data Dictionary / Value Labels modal)
-            user_labels = (col_metadata.get(col, {}) or {}).get("value_labels", {})
+            metadata = col_metadata.get(col, {}) or {}
+            label = metadata.get("label")
+            if label:
+                column_labels[col] = str(label)
 
-            if kind == "date":
-                variable_measure[col] = "scale"
-            elif kind in ("categorical", "text", "ordinal"):
-                variable_measure[col] = "ordinal" if kind == "ordinal" else "nominal"
-                if pd.api.types.is_numeric_dtype(df_sav[col]):
-                    if user_labels:
-                        # Use custom value labels: convert keys to float for SPSS
-                        variable_value_labels[col] = {float(k): str(v) for k, v in user_labels.items() if v}
-                    else:
-                        unique_vals = sorted(df_sav[col].dropna().unique())
-                        variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
-            else:
-                variable_measure[col] = "scale"
-                # Even numeric/scale columns can have value labels
-                if user_labels and pd.api.types.is_numeric_dtype(df_sav[col]):
-                    variable_value_labels[col] = {float(k): str(v) for k, v in user_labels.items() if v}
-                # Ensure object columns declared numeric are cast to float
-                if df_sav[col].dtype == object:
-                    df_sav[col] = pd.to_numeric(df_sav[col], errors="coerce")
+            variable_measure[col] = _measure_for_export(kind, metadata)
+
+            user_labels = metadata.get("value_labels", {})
+            labels = _sav_value_labels(user_labels, df_sav[col])
+            if labels:
+                variable_value_labels[col] = labels
+            elif kind in ("categorical", "text", "ordinal") and pd.api.types.is_numeric_dtype(df_sav[col]):
+                unique_vals = sorted(df_sav[col].dropna().unique())
+                variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
+
+            user_missing = _sav_missing_ranges(metadata.get("missing_ranges"), df_sav[col])
+            if user_missing:
+                missing_ranges[col] = user_missing
 
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".sav")
         os.close(tmp_fd)
@@ -273,8 +336,10 @@ async def export_dataset(
             pyreadstat.write_sav(
                 df_sav,
                 tmp_path,
+                column_labels=column_labels if column_labels else None,
                 variable_measure=variable_measure,
                 variable_value_labels=variable_value_labels if variable_value_labels else None,
+                missing_ranges=missing_ranges if missing_ranges else None,
             )
             with open(tmp_path, "rb") as f:
                 content = f.read()
@@ -529,17 +594,24 @@ async def get_audit(session_id: str):
 # ── Undo / Redo ──────────────────────────────────────────────────────────────
 
 def _attach_value_labels(columns: list, session_id: str) -> list:
-    """Merge persisted per-column value labels (set at recode time via the
+    """Merge persisted per-column metadata (set at recode/import time via the
     metadata endpoint) into the column objects, so the frontend Data
-    Dictionary and legends see them after a refresh / reload. Without this
-    the labels live only in the separate _metadata map and column.value_labels
-    arrives empty."""
+    Dictionary and legends see them after a refresh / reload."""
     meta = store.get_metadata(session_id) or {}
     for c in columns:
         m = meta.get(c.get("name"), {}) or {}
-        vl = m.get("value_labels")
-        if vl:
-            c["value_labels"] = vl
+        for key in (
+            "label",
+            "description",
+            "units",
+            "role",
+            "value_labels",
+            "missing_ranges",
+            "missing_user_values",
+            "measure",
+        ):
+            if m.get(key):
+                c[key] = m.get(key)
         # Per-column flags that drive the data tab + analysis pickers.
         if m.get("analysis_excluded") is not None:
             c["analysis_excluded"] = bool(m.get("analysis_excluded"))

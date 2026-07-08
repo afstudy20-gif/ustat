@@ -1,8 +1,11 @@
 import io
+import math
 import os
 import re
 import tempfile
 import uuid
+from numbers import Integral, Real
+from typing import Any
 
 import pandas as pd
 import pyreadstat
@@ -156,12 +159,136 @@ SUPPORTED = {
 }
 
 
-def _read(filename: str, content: bytes) -> pd.DataFrame:
+def _json_scalar(value: Any) -> Any:
+    """Return a JSON-safe scalar while keeping numeric metadata usable."""
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if hasattr(value, "item"):
+        value = value.item()
+    if isinstance(value, Integral) and not isinstance(value, bool):
+        return int(value)
+    if isinstance(value, Real) and not isinstance(value, bool):
+        value = float(value)
+        if math.isfinite(value) and value.is_integer():
+            return int(value)
+        return value
+    return value
+
+
+def _metadata_key(value: Any) -> str:
+    value = _json_scalar(value)
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _labels_by_name(meta: Any) -> dict:
+    raw = getattr(meta, "variable_labels", None)
+    column_names = getattr(meta, "column_names", []) or []
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        return {name: label for name, label in zip(column_names, raw)}
+
+    raw = getattr(meta, "column_names_to_labels", None)
+    if isinstance(raw, dict):
+        return raw
+
+    raw = getattr(meta, "column_labels", None)
+    if isinstance(raw, list):
+        return {name: label for name, label in zip(column_names, raw)}
+    return {}
+
+
+def _normalise_missing_ranges(raw_ranges: Any) -> list:
+    out = []
+    for item in raw_ranges or []:
+        if isinstance(item, dict):
+            lo = item.get("lo")
+            hi = item.get("hi", lo)
+        else:
+            lo = getattr(item, "lo", item)
+            hi = getattr(item, "hi", lo)
+        lo = _json_scalar(lo)
+        hi = _json_scalar(hi)
+        if lo is None:
+            continue
+        out.append({"lo": lo, "hi": hi if hi is not None else lo})
+    return out
+
+
+def _extract_readstat_metadata(meta: Any) -> dict[str, dict]:
+    if meta is None:
+        return {}
+
+    variable_labels = _labels_by_name(meta)
+    variable_value_labels = getattr(meta, "variable_value_labels", None) or {}
+    missing_ranges = getattr(meta, "missing_ranges", None) or {}
+    missing_user_values = getattr(meta, "missing_user_values", None) or {}
+    variable_measure = getattr(meta, "variable_measure", None) or {}
+    if not isinstance(variable_value_labels, dict):
+        variable_value_labels = {}
+    if not isinstance(missing_ranges, dict):
+        missing_ranges = {}
+    if not isinstance(missing_user_values, dict):
+        missing_user_values = {}
+    if not isinstance(variable_measure, dict):
+        variable_measure = {}
+
+    columns = set(variable_labels) | set(variable_value_labels) | set(missing_ranges) | set(missing_user_values) | set(variable_measure)
+    out: dict[str, dict] = {}
+    for col in columns:
+        entry: dict[str, Any] = {}
+
+        label = variable_labels.get(col)
+        if label:
+            entry["label"] = str(label)
+
+        value_labels = variable_value_labels.get(col)
+        if value_labels:
+            entry["value_labels"] = {_metadata_key(k): str(v) for k, v in value_labels.items() if v is not None}
+
+        ranges = _normalise_missing_ranges(missing_ranges.get(col))
+        if ranges:
+            entry["missing_ranges"] = ranges
+
+        user_values = missing_user_values.get(col)
+        if user_values:
+            entry["missing_user_values"] = [_json_scalar(v) for v in user_values]
+
+        measure = variable_measure.get(col)
+        if measure:
+            entry["measure"] = str(measure)
+
+        if entry:
+            out[col] = entry
+    return out
+
+
+def _kind_with_imported_metadata(series: pd.Series, metadata: dict) -> str:
+    measure = str(metadata.get("measure", "")).strip().lower()
+    if measure == "ordinal":
+        return "ordinal"
+    if measure == "nominal":
+        return "categorical"
+    if measure == "scale" and pd.api.types.is_numeric_dtype(series):
+        return "numeric"
+    if metadata.get("value_labels") and measure != "scale":
+        return "categorical"
+    return _detect_kind(series)
+
+
+def _read(filename: str, content: bytes) -> tuple[pd.DataFrame, dict[str, dict]]:
     ext = filename.rsplit(".", 1)[-1].lower()
     if ext == "csv":
-        return pd.read_csv(io.BytesIO(content))
+        return pd.read_csv(io.BytesIO(content)), {}
     elif ext in ("xlsx", "xls"):
-        return pd.read_excel(io.BytesIO(content))
+        return pd.read_excel(io.BytesIO(content)), {}
     elif ext in ("sas7bdat", "sav", "dta"):
         # pyreadstat requires a real file path, not BytesIO
         with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
@@ -169,14 +296,15 @@ def _read(filename: str, content: bytes) -> pd.DataFrame:
             tmp_path = tmp.name
         try:
             if ext == "sas7bdat":
-                df, _ = pyreadstat.read_sas7bdat(tmp_path)
+                df, meta = pyreadstat.read_sas7bdat(tmp_path)
             elif ext == "sav":
-                df, _ = pyreadstat.read_sav(tmp_path)
+                df, meta = pyreadstat.read_sav(tmp_path)
+                _, meta = pyreadstat.read_sav(tmp_path, metadataonly=True, user_missing=True)
             elif ext == "dta":
-                df, _ = pyreadstat.read_dta(tmp_path)
+                df, meta = pyreadstat.read_dta(tmp_path)
         finally:
             os.unlink(tmp_path)
-        return df
+        return df, _extract_readstat_metadata(meta)
     else:
         raise ValueError(f"Unsupported file type: .{ext}")
 
@@ -194,7 +322,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"File too large. Maximum upload size is {_max_mb} MB.")
     try:
-        df = _read(file.filename, content)
+        df, imported_metadata = _read(file.filename, content)
     except Exception as e:
         logger.exception("upload: failed to parse {}", file.filename)
         raise HTTPException(status_code=400, detail=f"{type(e).__name__}: {e}")
@@ -207,6 +335,8 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
     session_id = str(uuid.uuid4())
     store.save(session_id, df)
+    if imported_metadata:
+        store.save_metadata(session_id, imported_metadata)
     # Persist the uploaded filename so subsequent save_session snapshots
     # embed it (and resume restores it). Without this, get_filename returns
     # None and save_session falls back to "session_{id}.json", which diverges
@@ -216,9 +346,20 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     store.set_filename(session_id, file.filename)
 
     columns = []
+    kind_overrides = {}
     for col in df.columns:
-        kind = _detect_kind(df[col])
-        columns.append({"name": col, "dtype": str(df[col].dtype), "kind": kind})
+        col_metadata = imported_metadata.get(col, {})
+        detected_kind = _detect_kind(df[col])
+        kind = _kind_with_imported_metadata(df[col], col_metadata)
+        if kind != detected_kind:
+            kind_overrides[col] = kind
+        col_obj = {"name": col, "dtype": str(df[col].dtype), "kind": kind}
+        for key in ("label", "value_labels", "missing_ranges", "missing_user_values", "measure"):
+            if key in col_metadata:
+                col_obj[key] = col_metadata[key]
+        columns.append(col_obj)
+    if kind_overrides:
+        store.save_kind_overrides(session_id, kind_overrides)
 
     # Use pandas to_json → loads to guarantee NaN/Inf become null
     import numpy as np

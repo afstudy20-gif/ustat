@@ -13,6 +13,9 @@ export interface ColMeta {
   description?: string;
   units?: string;
   value_labels?: Record<string, string>;
+  missing_ranges?: Array<{ lo: string | number | null; hi: string | number | null }>;
+  missing_user_values?: Array<string | number | null>;
+  measure?: "nominal" | "ordinal" | "scale" | string;
   role?: "outcome" | "predictor" | "covariate" | "id" | "time" | "event" | "";
   /** When true the column is hidden from analysis variable pickers (kept in the
    *  dataset, e.g. NAME / row-id columns). Toggled from the data-tab menu. */

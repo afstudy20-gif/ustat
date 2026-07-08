@@ -21,6 +21,18 @@ function autoDetectRole(name: string): string {
   return "";
 }
 
+function formatMissing(m: Partial<ColMeta>): string {
+  const ranges = (m.missing_ranges ?? [])
+    .filter((r) => r.lo !== null && r.lo !== undefined)
+    .map((r) => (r.lo === r.hi ? String(r.lo) : `${String(r.lo)}-${String(r.hi)}`))
+    .filter(Boolean);
+  const values = (m.missing_user_values ?? [])
+    .filter((v) => v !== null && v !== undefined)
+    .map((v) => String(v))
+    .filter(Boolean);
+  return [...ranges, ...values].join(", ");
+}
+
 export default function DataDictionaryPanel() {
   const session = useStore((s) => s.session);
   if (!session) return null;
@@ -48,6 +60,9 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
         units: col.units ?? "",
         role: col.role ?? (autoDetectRole(col.name) as ColMeta["role"]),
         value_labels: col.value_labels ?? {},
+        missing_ranges: col.missing_ranges ?? [],
+        missing_user_values: col.missing_user_values ?? [],
+        measure: col.measure ?? "",
       };
     }
     setMeta(m);
@@ -129,10 +144,10 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
   };
 
   const exportCSV = () => {
-    const rows = [["Name", "Label", "Type", "Units", "Role", "Description"]];
+    const rows = [["Name", "Label", "Type", "SPSS Measure", "Units", "Role", "Missing", "Description"]];
     for (const col of session.columns) {
       const m = meta[col.name] ?? {};
-      rows.push([col.name, m.label ?? "", col.kind, m.units ?? "", m.role ?? "", m.description ?? ""]);
+      rows.push([col.name, m.label ?? "", col.kind, m.measure ?? "", m.units ?? "", m.role ?? "", formatMissing(m), m.description ?? ""]);
     }
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\r\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -171,10 +186,12 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
             <tr>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-40">Variable</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-12">Type</th>
+              <th className="px-3 py-2 text-left text-gray-500 font-medium w-20">Measure</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-48">Label</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-20">Units</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-28">Role</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium w-32">Value labels</th>
+              <th className="px-3 py-2 text-left text-gray-500 font-medium w-28">Missing</th>
               <th className="px-3 py-2 text-left text-gray-500 font-medium">Description</th>
             </tr>
           </thead>
@@ -185,6 +202,7 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
               const vLabelCount = Object.values(vLabels).filter((v) => v && String(v).trim() !== "").length;
               const isOpen = openValueLabelsFor === col.name;
               const unique = uniqueValuesByCol[col.name];
+              const missing = formatMissing(m);
               return (
                 <Fragment key={col.name}>
                 <tr className="border-t border-gray-100 hover:bg-gray-50">
@@ -198,6 +216,7 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
                       "bg-gray-100 text-gray-500"
                     }`}>{col.kind === "numeric" ? "num" : col.kind === "categorical" ? "cat" : col.kind === "ordinal" ? "ord" : col.kind === "date" ? "date" : "txt"}</span>
                   </td>
+                  <td className="px-3 py-1.5 text-gray-500">{m.measure || "-"}</td>
                   <td className="px-1 py-1">
                     <input className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-indigo-400 rounded px-2 py-0.5 text-xs focus:outline-none"
                       value={m.label ?? ""} placeholder="Variable label\u2026"
@@ -229,6 +248,7 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
                       {isOpen ? "Close \u25b2" : vLabelCount > 0 ? `${vLabelCount} label${vLabelCount > 1 ? "s" : ""}` : "Edit \u25be"}
                     </button>
                   </td>
+                  <td className="px-3 py-1.5 font-mono text-[10px] text-gray-500 max-w-28 truncate" title={missing || ""}>{missing || "-"}</td>
                   <td className="px-1 py-1">
                     <input className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-indigo-400 rounded px-2 py-0.5 text-xs focus:outline-none"
                       value={m.description ?? ""} placeholder="Description\u2026"
@@ -237,7 +257,7 @@ function DataDictionaryPanelBody({ session }: { session: Session }) {
                 </tr>
                 {isOpen && (
                   <tr className="bg-indigo-50/40 border-t border-indigo-100">
-                    <td colSpan={7} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <div className="flex items-center justify-between mb-2">
                         <p className="text-xs text-gray-700">
                           <span className="font-semibold">Value labels for <span className="font-mono">{col.name}</span></span>

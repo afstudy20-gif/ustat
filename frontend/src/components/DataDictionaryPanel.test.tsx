@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 import { server } from '../test/server'
-import { clearSession, installSession } from '../test/testUtils'
+import { clearSession, installSession, makeSession } from '../test/testUtils'
 import DataDictionaryPanel from './DataDictionaryPanel'
 
 afterEach(() => clearSession())
@@ -41,6 +41,30 @@ describe('DataDictionaryPanel', () => {
     const roleSelect = within(row).getByRole('combobox')
     await user.selectOptions(roleSelect, 'covariate')
     expect(roleSelect).toHaveValue('covariate')
+  })
+
+  it('shows imported SPSS dictionary metadata', () => {
+    installSession(makeSession({
+      columns: [
+        {
+          name: 'Grup',
+          dtype: 'float64',
+          kind: 'categorical',
+          label: 'Patient control group',
+          value_labels: { '0': 'Hasta', '1': 'Kontrol', '9': 'Cevapsiz' },
+          missing_ranges: [{ lo: 9, hi: 9 }],
+          measure: 'nominal',
+        },
+      ],
+      preview: [{ Grup: 0 }, { Grup: 1 }, { Grup: null }],
+    }))
+
+    render(<DataDictionaryPanel />)
+    const row = screen.getByText('Grup').closest('tr')!
+    expect(within(row).getByDisplayValue('Patient control group')).toBeInTheDocument()
+    expect(within(row).getByText('nominal')).toBeInTheDocument()
+    expect(within(row).getByText('9')).toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: /3 labels/i })).toBeInTheDocument()
   })
 
   it('saves metadata and shows the saved confirmation on success', async () => {
