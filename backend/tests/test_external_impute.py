@@ -273,3 +273,30 @@ def test_external_impute_stratify_fails_when_stratum_missing_in_reference(client
     )
     assert response.status_code == 422
     assert "Stratum '1' has no matching reference rows" in response.text
+
+
+def test_external_impute_stratify_allows_stratify_column_as_predictor(client):
+    sid = _stratified_seed("external_stratify_predictor")
+    response = client.post(
+        "/api/missing_data/external_impute_preview",
+        data={
+            "session_id": sid,
+            "target": "glucose",
+            "predictors": '["age","dm"]',
+            "stratify_by": "dm",
+            "method": "pmm",
+            "mechanism": "MAR",
+            "max_iter": "5",
+            "random_state": "11",
+        },
+        files={"file": _stratified_reference_file()},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["n_imputed"] == 2
+    # dm is dropped from the per-stratum predictor list because it is constant within each stratum.
+    assert "dm" not in body["predictors"]
+
+    by_row = {row["row_index"]: row for row in body["preview_rows"]}
+    assert by_row[1]["imputed_value"] < 150
+    assert by_row[3]["imputed_value"] > 200

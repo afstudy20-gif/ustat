@@ -277,11 +277,6 @@ def external_reference_impute(
 
     if current_stratify_col == _resolve_column(current_df.columns, target, dataset_name="current data"):
         raise HTTPException(status_code=400, detail="Stratify column cannot be the target column.")
-    if current_stratify_col in [
-        _resolve_column(current_df.columns, predictor_mappings.get(p, p), dataset_name="current data")
-        for p in predictors
-    ]:
-        raise HTTPException(status_code=400, detail="Stratify column cannot also be a predictor.")
 
     target_missing = _missing_mask(current_df[target])
     missing_rows = current_df.index[target_missing]
@@ -291,6 +286,17 @@ def external_reference_impute(
     })
     if not strata:
         raise HTTPException(status_code=400, detail=f"No strata found in stratify column '{current_stratify_col}' for missing rows.")
+
+    # Drop the stratify column from the predictor list: within each stratum it is
+    # constant, so it carries no information for the regression. The user may still
+    # have selected it as a predictor; it is honored via stratification instead.
+    stratify_norm = _norm_name(current_stratify_col)
+    predictors_for_strata = [
+        p for p in predictors
+        if _norm_name(predictor_mappings.get(p, p)) != stratify_norm
+    ]
+    if not predictors_for_strata:
+        raise HTTPException(status_code=400, detail="Select at least one predictor column other than the stratify column.")
 
     combined_result: Optional[ExternalImputeResult] = None
     for stratum in strata:
@@ -309,7 +315,7 @@ def external_reference_impute(
             current_subset,
             reference_subset,
             target=target,
-            predictors=predictors,
+            predictors=predictors_for_strata,
             reference_target=reference_target_name,
             predictor_mappings=predictor_mappings,
             method=method,
