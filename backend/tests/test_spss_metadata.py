@@ -104,5 +104,43 @@ def test_spss_export_writes_dictionary_metadata(client):
     assert meta.variable_value_labels["Grup"] == {0.0: "Hasta", 1.0: "Kontrol", 9.0: "Cevapsiz"}
     assert meta.missing_ranges["Grup"] == [{"lo": 9.0, "hi": 9.0}]
     assert meta.missing_ranges["Age"] == [{"lo": -99.0, "hi": -99.0}]
+
     assert meta.variable_measure["Grup"] == "nominal"
     assert meta.variable_measure["Age"] == "scale"
+
+
+def test_spss_export_sanitizes_invalid_variable_names(client):
+    """Columns with spaces, long names, or leading digits must not crash SAV export."""
+    df = pd.DataFrame(
+        {
+            "x y": [1, 2, 3],
+            "a" * 70: [4, 5, 6],
+            "1x": [7, 8, 9],
+            "yaş aralığı": [10, 11, 12],
+        }
+    )
+    store.save("sav_sanitize", df)
+
+    response = client.get("/api/sessions/sav_sanitize/export", params={"fmt": "sav", "filename": "sanitized"})
+    assert response.status_code == 200, response.text
+
+    fd, path = tempfile.mkstemp(suffix=".sav")
+    os.close(fd)
+    try:
+        with open(path, "wb") as f:
+            f.write(response.content)
+        df_out, meta = pyreadstat.read_sav(path, metadataonly=True, user_missing=True)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    names = list(df_out.columns)
+    assert "x_y" in names
+    assert "v1x" in names
+    assert all(len(n) <= 64 for n in names)
+    # Original names survive as column labels
+    assert meta.column_names_to_labels["x_y"] == "x y"
+    assert meta.column_names_to_labels["v1x"] == "1x"
+    assert meta.column_names_to_labels["ya__aral"] == "yaş aralığı"

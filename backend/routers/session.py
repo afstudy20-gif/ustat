@@ -3,6 +3,7 @@ import io
 import json
 import math
 import os
+import re
 import tempfile
 import time
 import uuid
@@ -79,6 +80,36 @@ def _measure_for_export(kind: str, metadata: dict) -> str:
     if kind in {"categorical", "text"}:
         return "nominal"
     return "scale"
+
+
+_SPSS_NAME_MAX_LEN = 64
+
+
+def _sanitize_spss_name(name: str, used: set) -> str:
+    """Return a valid SPSS variable name, preserving the original via column_labels later."""
+    if not name:
+        base = "var"
+    else:
+        # Replace spaces and any character that is not alphanumeric, @, #, $, _, or .
+        base = re.sub(r"[^A-Za-z0-9@#$_.]", "_", str(name))
+        # SPSS names must start with a letter or @/#/$; underscore is not allowed at the start.
+        if base and base[0] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz@#$":
+            base = "v" + base
+
+    # Truncate to leave room for a uniqueness suffix (_nnn)
+    base = base[:_SPSS_NAME_MAX_LEN]
+
+    # Remove trailing underscores/periods and ensure non-empty
+    base = base.rstrip("_.") or "var"
+
+    candidate = base
+    counter = 1
+    while candidate.lower() in {u.lower() for u in used}:
+        suffix = f"_{counter}"
+        candidate = base[: _SPSS_NAME_MAX_LEN - len(suffix)] + suffix
+        counter += 1
+
+    return candidate
 
 
 @router.post("/blank")
@@ -301,34 +332,48 @@ async def export_dataset(
         from routers.upload import _detect_kind
 
         kind_overrides = store.get_kind_overrides(session_id)
+
+        # SPSS variable names are restrictive. Sanitize them and keep original names as labels.
+        used_names: set = set()
+        name_map: dict = {}
+        for col in df_sav.columns:
+            sanitized = _sanitize_spss_name(col, used_names)
+            used_names.add(sanitized)
+            name_map[col] = sanitized
+
+        df_sav.rename(columns=name_map, inplace=True)
+
         column_labels: dict = {}
         variable_measure: dict = {}
         variable_value_labels: dict = {}
         missing_ranges: dict = {}
 
-        for col in df_sav.columns:
-            kind = kinds.get(col) or kind_overrides.get(col) or _detect_kind(df_sav[col])
-            if kind not in ("categorical", "text", "ordinal") and df_sav[col].dtype == object:
-                df_sav[col] = pd.to_numeric(df_sav[col], errors="coerce")
+        for original_col, sav_col in name_map.items():
+            kind = kinds.get(original_col) or kind_overrides.get(original_col) or _detect_kind(df_sav[sav_col])
+            if kind not in ("categorical", "text", "ordinal") and df_sav[sav_col].dtype == object:
+                df_sav[sav_col] = pd.to_numeric(df_sav[sav_col], errors="coerce")
 
-            metadata = col_metadata.get(col, {}) or {}
+            metadata = col_metadata.get(original_col, {}) or {}
             label = metadata.get("label")
-            if label:
-                column_labels[col] = str(label)
+            if original_col != sav_col:
+                # Preserve the original column name; append any user label after a separator.
+                column_labels[sav_col] = f"{original_col} | {label}" if label else original_col
+            elif label:
+                column_labels[sav_col] = str(label)
 
-            variable_measure[col] = _measure_for_export(kind, metadata)
+            variable_measure[sav_col] = _measure_for_export(kind, metadata)
 
             user_labels = metadata.get("value_labels", {})
-            labels = _sav_value_labels(user_labels, df_sav[col])
+            labels = _sav_value_labels(user_labels, df_sav[sav_col])
             if labels:
-                variable_value_labels[col] = labels
-            elif kind in ("categorical", "text", "ordinal") and pd.api.types.is_numeric_dtype(df_sav[col]):
-                unique_vals = sorted(df_sav[col].dropna().unique())
-                variable_value_labels[col] = {float(v): str(v) for v in unique_vals}
+                variable_value_labels[sav_col] = labels
+            elif kind in ("categorical", "text", "ordinal") and pd.api.types.is_numeric_dtype(df_sav[sav_col]):
+                unique_vals = sorted(df_sav[sav_col].dropna().unique())
+                variable_value_labels[sav_col] = {float(v): str(v) for v in unique_vals}
 
-            user_missing = _sav_missing_ranges(metadata.get("missing_ranges"), df_sav[col])
+            user_missing = _sav_missing_ranges(metadata.get("missing_ranges"), df_sav[sav_col])
             if user_missing:
-                missing_ranges[col] = user_missing
+                missing_ranges[sav_col] = user_missing
 
         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".sav")
         os.close(tmp_fd)
@@ -343,6 +388,8 @@ async def export_dataset(
             )
             with open(tmp_path, "rb") as f:
                 content = f.read()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"SAV export failed: {exc}") from exc
         finally:
             os.unlink(tmp_path)
 
