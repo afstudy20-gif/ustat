@@ -6,7 +6,7 @@ import pandas as pd
 from scipy import stats as sp
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from services import store
 from services.dirty_value_guard import flag_sentinels, plausibility_max_for_column, sentinel_values
@@ -405,6 +405,27 @@ def _parse_predictor_mappings_form(raw: Optional[str]) -> Dict[str, str]:
     }
 
 
+def _missing_scalar(value: Any) -> bool:
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip() == ""
+
+
+def _resolve_existing_column(columns: List[str], requested: str) -> str:
+    if requested in columns:
+        return requested
+    norm = requested.strip().casefold()
+    matches = [col for col in columns if str(col).strip().casefold() == norm]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise HTTPException(status_code=400, detail=f"Ambiguous column '{requested}': {matches}")
+    raise HTTPException(status_code=400, detail=f"Column not found: {requested}")
+
+
 async def _read_reference_file(file: UploadFile) -> pd.DataFrame:
     content = await file.read()
     if not content:
@@ -509,6 +530,58 @@ async def external_impute_apply(
     response = dict(result.result)
     response["applied"] = True
     return response
+
+
+class ExternalImputeTransferRow(BaseModel):
+    row_index: int
+    imputed_value: Any
+
+
+class ExternalImputeTransferRequest(BaseModel):
+    session_id: str
+    target: str
+    preview_rows: List[ExternalImputeTransferRow]
+
+
+@router.post("/external_impute_transfer")
+def external_impute_transfer(req: ExternalImputeTransferRequest):
+    df = store.get_filtered(req.session_id)
+    if df is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not req.preview_rows:
+        raise HTTPException(status_code=400, detail="Run preview before transferring data.")
+
+    target = _resolve_existing_column([str(c) for c in df.columns], req.target)
+    values: Dict[int, Any] = {}
+    stale_rows: List[int] = []
+    for row in req.preview_rows:
+        if row.row_index not in df.index:
+            stale_rows.append(row.row_index)
+            continue
+        if _missing_scalar(df.at[row.row_index, target]):
+            values[int(row.row_index)] = row.imputed_value
+
+    if stale_rows:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Preview rows no longer match current filtered data: {stale_rows}. Run preview again.",
+        )
+    if not values:
+        raise HTTPException(status_code=400, detail="No currently missing previewed values to transfer.")
+    if not store.fill_values_by_index(req.session_id, target, values):
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    store.log_action(req.session_id, "external_reference_impute_transfer", {
+        "target": target,
+        "n_imputed": len(values),
+        "source": "preview_rows",
+    })
+    return {
+        "target": target,
+        "n_imputed": len(values),
+        "applied": True,
+        "result_text": f"{len(values)} previewed value(s) were transferred into '{target}'.",
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

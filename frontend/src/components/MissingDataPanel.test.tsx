@@ -148,6 +148,32 @@ describe('MissingDataPanel', () => {
           result_text: "1 missing value(s) in 'LDL' were imputed using 1 predictor(s).",
         })
       }),
+      http.post('/api/missing_data/external_impute_transfer', async ({ request }) => {
+        const body = await request.json() as {
+          session_id: string;
+          target: string;
+          preview_rows: Array<{ row_index: number; imputed_value: unknown }>;
+        }
+        expect(body.session_id).toBe('test-session')
+        expect(body.target).toBe('LDL')
+        expect(body.preview_rows).toEqual([{ row_index: 0, imputed_value: 128 }])
+        return HttpResponse.json({
+          target: 'LDL',
+          n_imputed: 1,
+          applied: true,
+          result_text: "1 previewed value(s) were transferred into 'LDL'.",
+        })
+      }),
+      http.get('/api/stats/test-session/refresh', () =>
+        HttpResponse.json({
+          columns: columnsWithMissing,
+          preview: [
+            { AGE: 55, LDL: 128, GROUP: 'A' },
+            { AGE: null, LDL: 140, GROUP: 'B' },
+            { AGE: 48, LDL: 110, GROUP: '' },
+          ],
+        }),
+      ),
     )
 
     const user = userEvent.setup()
@@ -164,11 +190,13 @@ describe('MissingDataPanel', () => {
     expect(screen.getByDisplayValue('AGE')).toBeInTheDocument()
     const agePredictor = screen.getByLabelText('age')
     await user.click(agePredictor)
-    await user.click(screen.getByRole('button', { name: /^preview$/i }))
+    await user.click(screen.getByRole('button', { name: /preview target estimates/i }))
 
     await waitFor(() => expect(screen.getByText(/1 missing value/)).toBeInTheDocument())
     expect(screen.getByText('128')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /transfer data/i })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: /transfer data/i }))
+    await waitFor(() => expect(screen.getByText(/1 value\(s\) transferred into LDL/)).toBeInTheDocument())
   })
 
   it('switches to the Data Cleaning sub-tab', async () => {

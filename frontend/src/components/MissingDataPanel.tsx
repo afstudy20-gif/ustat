@@ -3,8 +3,8 @@ import { useStore, isNumericKind } from "../store";
 import {
   fillBlanks,
   getExternalImputeReferenceColumns,
-  runExternalImputeApply,
   runExternalImputePreview,
+  runExternalImputeTransfer,
   runImputationCompare,
   runMCARTest,
   runMICE,
@@ -315,11 +315,21 @@ export default function MissingDataPanel() {
   };
 
   const applyExternalImputation = async () => {
-    if (!validateExternal()) return;
+    if (!externalResult?.preview_rows?.length) {
+      setErr("Preview target estimates before transferring data");
+      return;
+    }
     setExternalLoading("apply"); setErr(null); setMutationNotice(null);
     try {
-      const res = await runExternalImputeApply(externalPayload());
-      setExternalResult(res.data);
+      const res = await runExternalImputeTransfer({
+        sessionId: sid,
+        target: externalResult.target || externalTargetName,
+        previewRows: externalResult.preview_rows.map((row) => ({
+          row_index: row.row_index,
+          imputed_value: row.imputed_value,
+        })),
+      });
+      setExternalResult((current) => current ? { ...current, applied: true } : current);
       await refresh();
       setMutationNotice(`${res.data.n_imputed} value(s) transferred into ${res.data.target}.`);
     } catch (e: unknown) {
@@ -393,8 +403,8 @@ export default function MissingDataPanel() {
       </div>
 
       <div className={activeSubTab === "overview" ? "space-y-5" : "hidden"} role="tabpanel">
-        {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">{err}</div>}
-        {mutationNotice && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700">{mutationNotice}</div>}
+        {activeSubTab === "overview" && err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-xs text-red-600">{err}</div>}
+        {activeSubTab === "overview" && mutationNotice && <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 text-xs text-emerald-700">{mutationNotice}</div>}
 
         {/* ── Overview — list ── */}
         <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -814,14 +824,7 @@ export default function MissingDataPanel() {
                   disabled={externalLoading !== null}
                   className="px-4 py-2 text-sm font-medium border border-sky-300 text-sky-700 rounded-lg hover:bg-sky-50 disabled:opacity-50"
                 >
-                  {externalLoading === "preview" ? "Calculating…" : "Preview"}
-                </button>
-                <button
-                  onClick={applyExternalImputation}
-                  disabled={externalLoading !== null || !externalResult}
-                  className="px-4 py-2 text-sm font-medium bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50"
-                >
-                  {externalLoading === "apply" ? "Transferring…" : "Transfer data"}
+                  {externalLoading === "preview" ? "Calculating…" : "Preview target estimates"}
                 </button>
               </div>
 
@@ -834,25 +837,36 @@ export default function MissingDataPanel() {
                 <div key={w} className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">{w}</div>
               ))}
               {externalResult?.preview_rows?.length > 0 && (
-                <div className="overflow-auto rounded-lg border border-gray-200">
-                  <table className="text-xs w-full">
-                    <thead>
-                      <tr className="bg-gray-50 text-left text-gray-500">
-                        <th className="px-3 py-1.5">Row</th>
-                        <th className="px-3 py-1.5">Imputed value</th>
-                        <th className="px-3 py-1.5">Predictors missing</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {externalResult.preview_rows.map((row) => (
-                        <tr key={row.row_index} className="border-t border-gray-100">
-                          <td className="px-3 py-1 text-gray-700">{row.row_index}</td>
-                          <td className="px-3 py-1 text-gray-700">{String(row.imputed_value)}</td>
-                          <td className="px-3 py-1 text-gray-700">{row.predictors_missing}</td>
+                <div className="space-y-3">
+                  <div className="overflow-auto rounded-lg border border-gray-200">
+                    <table className="text-xs w-full">
+                      <thead>
+                        <tr className="bg-gray-50 text-left text-gray-500">
+                          <th className="px-3 py-1.5">Row</th>
+                          <th className="px-3 py-1.5">Estimated value</th>
+                          <th className="px-3 py-1.5">Predictors missing</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {externalResult.preview_rows.map((row) => (
+                          <tr key={row.row_index} className="border-t border-gray-100">
+                            <td className="px-3 py-1 text-gray-700">{row.row_index}</td>
+                            <td className="px-3 py-1 text-gray-700">{String(row.imputed_value)}</td>
+                            <td className="px-3 py-1 text-gray-700">{row.predictors_missing}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      onClick={applyExternalImputation}
+                      disabled={externalLoading !== null || externalResult.applied}
+                      className="px-4 py-2 text-sm font-medium bg-sky-600 text-white rounded-lg hover:bg-sky-700 disabled:opacity-50"
+                    >
+                      {externalLoading === "apply" ? "Transferring…" : externalResult.applied ? "Transferred" : "Transfer data"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

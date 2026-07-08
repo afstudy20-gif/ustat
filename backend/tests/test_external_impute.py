@@ -148,6 +148,40 @@ def test_external_impute_apply_writes_back_to_current_session(client):
     assert audit[-1]["params"]["target"] == "ldl"
 
 
+def test_external_impute_transfer_writes_previewed_values(client):
+    sid = _seed("external_transfer")
+    response = client.post("/api/missing_data/external_impute_transfer", json={
+        "session_id": sid,
+        "target": "LDL",
+        "preview_rows": [
+            {"row_index": 1, "imputed_value": 133.0},
+            {"row_index": 2, "imputed_value": 151.0},
+        ],
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["n_imputed"] == 2
+
+    df = store.get(sid)
+    assert float(df.loc[1, "ldl"]) == 133.0
+    assert float(df.loc[2, "ldl"]) == 151.0
+    assert float(df.loc[0, "ldl"]) == 110.0
+
+    audit = store.get_audit(sid)
+    assert audit[-1]["action"] == "external_reference_impute_transfer"
+
+
+def test_external_impute_transfer_does_not_overwrite_observed_values(client):
+    sid = _seed("external_transfer_observed")
+    response = client.post("/api/missing_data/external_impute_transfer", json={
+        "session_id": sid,
+        "target": "ldl",
+        "preview_rows": [{"row_index": 0, "imputed_value": 999.0}],
+    })
+    assert response.status_code == 400
+    assert "No currently missing" in response.text
+    assert float(store.get(sid).loc[0, "ldl"]) == 110.0
+
+
 def test_external_impute_apply_respects_active_case_filter(client):
     sid = _seed("external_apply_filter")
     filter_response = client.post(f"/api/sessions/{sid}/select_cases", json={

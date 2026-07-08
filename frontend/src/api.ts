@@ -210,6 +210,15 @@ export const runExternalImputeApply = (data: {
   fd.append("file", data.file);
   return api.post("/api/missing_data/external_impute_apply", fd);
 };
+export const runExternalImputeTransfer = (data: {
+  sessionId: string;
+  target: string;
+  previewRows: Array<{ row_index: number; imputed_value: unknown }>;
+}) => api.post("/api/missing_data/external_impute_transfer", {
+  session_id: data.sessionId,
+  target: data.target,
+  preview_rows: data.previewRows,
+});
 export const runMissingDiagnostics = (sessionId: string, columns?: string[]) =>
   api.post(`/api/compute/${sessionId}/missing_diagnostics`, { columns });
 export const fillBlanks = (sessionId: string, column: string, value: string, newColumn?: string) =>
