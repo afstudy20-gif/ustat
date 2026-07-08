@@ -170,6 +170,7 @@ export const runExternalImputePreview = (data: {
   mechanism: string;
   maxIter: number;
   randomState: number;
+  stratifyBy?: string;
   file: File;
 }) => {
   const fd = new FormData();
@@ -182,6 +183,7 @@ export const runExternalImputePreview = (data: {
   fd.append("mechanism", data.mechanism);
   fd.append("max_iter", String(data.maxIter));
   fd.append("random_state", String(data.randomState));
+  if (data.stratifyBy) fd.append("stratify_by", data.stratifyBy);
   fd.append("file", data.file);
   return api.post("/api/missing_data/external_impute_preview", fd);
 };
@@ -195,6 +197,7 @@ export const runExternalImputeApply = (data: {
   mechanism: string;
   maxIter: number;
   randomState: number;
+  stratifyBy?: string;
   file: File;
 }) => {
   const fd = new FormData();
@@ -207,6 +210,7 @@ export const runExternalImputeApply = (data: {
   fd.append("mechanism", data.mechanism);
   fd.append("max_iter", String(data.maxIter));
   fd.append("random_state", String(data.randomState));
+  if (data.stratifyBy) fd.append("stratify_by", data.stratifyBy);
   fd.append("file", data.file);
   return api.post("/api/missing_data/external_impute_apply", fd);
 };

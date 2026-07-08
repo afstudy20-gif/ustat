@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import numpy as np
 import pandas as pd
@@ -77,39 +77,35 @@ def _resolve_column(columns: Iterable[str], requested: str, *, dataset_name: str
     raise HTTPException(status_code=400, detail=f"Column missing in {dataset_name}: {requested}")
 
 
-def external_reference_impute(
+def _stratum_value(value: Any) -> str:
+    """Stable string key for grouping categorical strata."""
+    if value is None:
+        return "__missing__"
+    try:
+        if pd.isna(value):
+            return "__missing__"
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def _external_reference_impute_single(
     current_df: pd.DataFrame,
     reference_df: pd.DataFrame,
     *,
     target: str,
-    predictors: Iterable[str],
-    reference_target: str | None = None,
-    predictor_mappings: dict[str, str] | None = None,
-    method: str = "pmm",
-    mechanism: str = "unknown",
-    max_iter: int = 20,
-    random_state: int = 42,
+    predictors: list[str],
+    reference_target: str,
+    predictor_mappings: dict[str, str],
+    method: str,
+    mechanism: str,
+    max_iter: int,
+    random_state: int,
+    stratum_label: Optional[str] = None,
 ) -> ExternalImputeResult:
-    target = str(target).strip()
-    predictors = _parse_predictors(predictors)
-    method = (method or "pmm").strip().lower()
-    mechanism = (mechanism or "unknown").strip()
-
-    if method not in SUPPORTED_METHODS:
-        raise HTTPException(status_code=400, detail=f"Unknown external imputation method '{method}'.")
-    if mechanism not in SUPPORTED_MECHANISMS:
-        raise HTTPException(status_code=400, detail=f"Unknown missingness mechanism '{mechanism}'.")
-    if not target:
-        raise HTTPException(status_code=400, detail="Select a target column.")
-    if not predictors:
-        raise HTTPException(status_code=400, detail="Select at least one predictor column.")
-    if _norm_name(target) in {_norm_name(p) for p in predictors}:
-        raise HTTPException(status_code=400, detail="Target column cannot also be a predictor.")
-
-    predictor_mappings = predictor_mappings or {}
+    """Core external-reference imputation for a single (possibly stratified) subset."""
     current_target = _resolve_column(current_df.columns, target, dataset_name="current data")
-    reference_target_name = str(reference_target or target).strip()
-    reference_target_col = _resolve_column(reference_df.columns, reference_target_name, dataset_name="reference data")
+    reference_target_col = _resolve_column(reference_df.columns, reference_target, dataset_name="reference data")
     current_predictors = [
         _resolve_column(current_df.columns, predictor_mappings.get(predictor, predictor), dataset_name="current data")
         for predictor in predictors
@@ -166,11 +162,14 @@ def external_reference_impute(
     preview_rows = []
     for row_index, value in filled_values.items():
         pred_missing = int(_missing_mask(current_df.loc[row_index, current_predictors]).sum())
-        preview_rows.append({
+        row = {
             "row_index": row_index,
             "imputed_value": value,
             "predictors_missing": pred_missing,
-        })
+        }
+        if stratum_label is not None:
+            row["stratum"] = stratum_label
+        preview_rows.append(row)
 
     ref_complete = int(reference_part[needed].dropna().shape[0])
     current_observed = int((~_missing_mask(current_df[current_target])).sum())
@@ -210,6 +209,9 @@ def external_reference_impute(
             *[[r["row_index"], r["imputed_value"], r["predictors_missing"]] for r in preview_rows],
         ],
     }
+    if stratum_label is not None:
+        result["stratum"] = stratum_label
+
     return ExternalImputeResult(
         target=current_target,
         predictors=current_predictors,
@@ -219,3 +221,136 @@ def external_reference_impute(
         filled_values=filled_values,
         result=result,
     )
+
+
+def external_reference_impute(
+    current_df: pd.DataFrame,
+    reference_df: pd.DataFrame,
+    *,
+    target: str,
+    predictors: Iterable[str],
+    reference_target: str | None = None,
+    predictor_mappings: dict[str, str] | None = None,
+    method: str = "pmm",
+    mechanism: str = "unknown",
+    max_iter: int = 20,
+    random_state: int = 42,
+    stratify_by: Optional[str] = None,
+) -> ExternalImputeResult:
+    target = str(target).strip()
+    predictors = _parse_predictors(predictors)
+    method = (method or "pmm").strip().lower()
+    mechanism = (mechanism or "unknown").strip()
+    stratify_by = str(stratify_by).strip() if stratify_by else None
+
+    if method not in SUPPORTED_METHODS:
+        raise HTTPException(status_code=400, detail=f"Unknown external imputation method '{method}'.")
+    if mechanism not in SUPPORTED_MECHANISMS:
+        raise HTTPException(status_code=400, detail=f"Unknown missingness mechanism '{mechanism}'.")
+    if not target:
+        raise HTTPException(status_code=400, detail="Select a target column.")
+    if not predictors:
+        raise HTTPException(status_code=400, detail="Select at least one predictor column.")
+    if _norm_name(target) in {_norm_name(p) for p in predictors}:
+        raise HTTPException(status_code=400, detail="Target column cannot also be a predictor.")
+
+    predictor_mappings = predictor_mappings or {}
+    reference_target_name = str(reference_target or target).strip()
+
+    if not stratify_by:
+        return _external_reference_impute_single(
+            current_df,
+            reference_df,
+            target=target,
+            predictors=predictors,
+            reference_target=reference_target_name,
+            predictor_mappings=predictor_mappings,
+            method=method,
+            mechanism=mechanism,
+            max_iter=max_iter,
+            random_state=random_state,
+        )
+
+    # Stratified imputation: run separately per stratum and combine results.
+    current_stratify_col = _resolve_column(current_df.columns, stratify_by, dataset_name="current data")
+    reference_stratify_col = _resolve_column(reference_df.columns, stratify_by, dataset_name="reference data")
+
+    if current_stratify_col == _resolve_column(current_df.columns, target, dataset_name="current data"):
+        raise HTTPException(status_code=400, detail="Stratify column cannot be the target column.")
+    if current_stratify_col in [
+        _resolve_column(current_df.columns, predictor_mappings.get(p, p), dataset_name="current data")
+        for p in predictors
+    ]:
+        raise HTTPException(status_code=400, detail="Stratify column cannot also be a predictor.")
+
+    target_missing = _missing_mask(current_df[target])
+    missing_rows = current_df.index[target_missing]
+    strata = sorted({
+        _stratum_value(v)
+        for v in current_df.loc[missing_rows, current_stratify_col]
+    })
+    if not strata:
+        raise HTTPException(status_code=400, detail=f"No strata found in stratify column '{current_stratify_col}' for missing rows.")
+
+    combined_result: Optional[ExternalImputeResult] = None
+    for stratum in strata:
+        current_mask = current_df[current_stratify_col].apply(_stratum_value) == stratum
+        reference_mask = reference_df[reference_stratify_col].apply(_stratum_value) == stratum
+        current_subset = current_df.loc[current_mask].copy()
+        reference_subset = reference_df.loc[reference_mask].copy()
+
+        if reference_subset.empty:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Stratum '{stratum}' has no matching reference rows; cannot impute."
+            )
+
+        stratum_result = _external_reference_impute_single(
+            current_subset,
+            reference_subset,
+            target=target,
+            predictors=predictors,
+            reference_target=reference_target_name,
+            predictor_mappings=predictor_mappings,
+            method=method,
+            mechanism=mechanism,
+            max_iter=max_iter,
+            random_state=random_state,
+            stratum_label=stratum,
+        )
+
+        if combined_result is None:
+            combined_result = stratum_result
+        else:
+            combined_result.missing_rows.extend(stratum_result.missing_rows)
+            combined_result.filled_values.update(stratum_result.filled_values)
+            combined_result.result["preview_rows"].extend(stratum_result.result["preview_rows"])
+
+    assert combined_result is not None
+    combined_result.result["preview_rows"] = combined_result.result["preview_rows"][:200]
+    combined_result.result["n_missing_target"] = len(combined_result.missing_rows)
+    combined_result.result["n_imputed"] = len(combined_result.filled_values)
+    combined_result.result["reference_rows"] = int(len(reference_df))
+    combined_result.result["reference_complete_rows"] = None  # not meaningful across strata
+    combined_result.result["result_text"] = (
+        f"{len(combined_result.filled_values)} missing value(s) in '{combined_result.target}' were imputed "
+        f"using {len(combined_result.predictors)} predictor(s), stratified by '{current_stratify_col}'."
+    )
+    combined_result.result["methods_text"] = (
+        f"External reference-assisted imputation used current data plus an uploaded reference dataset, "
+        f"stratified by '{current_stratify_col}'. The target variable was {combined_result.target}; "
+        f"predictors were {', '.join(combined_result.predictors)}. Missing target values were filled "
+        f"by chained equations with predictive mean matching within each stratum "
+        f"({max(1, int(max_iter))} iterations; random seed {int(random_state)}), under a {mechanism} mechanism label."
+    )
+    combined_result.result["export_rows"] = [
+        ["Row", "Imputed value", "Predictors missing", "Stratum"],
+        *[[
+            r["row_index"], r["imputed_value"], r.get("predictors_missing"), r.get("stratum", "")
+        ] for r in combined_result.result["preview_rows"]],
+    ]
+    combined_result.result["warnings"].insert(
+        0,
+        f"Imputation was stratified by '{current_stratify_col}'. Donors were drawn only from the same stratum."
+    )
+    return combined_result

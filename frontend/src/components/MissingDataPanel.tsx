@@ -39,7 +39,7 @@ interface CompareColumn {
 }
 interface CompareEntry { strategy: string; columns: CompareColumn[] }
 interface CompareResult { comparisons?: CompareEntry[] }
-interface ExternalPreviewRow { row_index: number; imputed_value: unknown; predictors_missing: number }
+interface ExternalPreviewRow { row_index: number; imputed_value: unknown; predictors_missing: number; stratum?: string }
 interface ExternalReferenceColumn { name: string; dtype: string; kind: string; n_missing: number }
 interface ExternalReferenceColumnsResult { columns: ExternalReferenceColumn[]; n_rows: number }
 interface ExternalImputeResult {
@@ -121,6 +121,7 @@ export default function MissingDataPanel() {
   const [externalFile, setExternalFile] = useState<File | null>(null);
   const [externalReferenceMeta, setExternalReferenceMeta] = useState<ExternalReferenceColumnsResult | null>(null);
   const [externalMethod, setExternalMethod] = useState<"pmm" | "mice">("pmm");
+  const [externalStratifyBy, setExternalStratifyBy] = useState("");
   const [externalResult, setExternalResult] = useState<ExternalImputeResult | null>(null);
   const [externalLoading, setExternalLoading] = useState<"columns" | "preview" | "apply" | null>(null);
 
@@ -253,6 +254,7 @@ export default function MissingDataPanel() {
     mechanism: miceMechanism,
     maxIter: miceIter,
     randomState: miceSeed,
+    stratifyBy: externalStratifyBy || undefined,
     file: externalFile!,
   });
 
@@ -759,6 +761,19 @@ export default function MissingDataPanel() {
                     <option value="mice">MICE / PMM</option>
                   </select>
                 </label>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-gray-500 font-medium">Stratify by (optional)</span>
+                  <select
+                    value={externalStratifyBy}
+                    onChange={(e) => { setExternalStratifyBy(e.target.value); setExternalResult(null); }}
+                    className="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-sky-400"
+                  >
+                    <option value="">No stratification</option>
+                    {columns
+                      .filter((c) => c.name !== externalTargetName)
+                      .map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  </select>
+                </label>
               </div>
 
               <div>
@@ -845,6 +860,9 @@ export default function MissingDataPanel() {
                           <th className="px-3 py-1.5">Row</th>
                           <th className="px-3 py-1.5">Estimated value</th>
                           <th className="px-3 py-1.5">Predictors missing</th>
+                          {externalResult.preview_rows.some((r) => r.stratum) && (
+                            <th className="px-3 py-1.5">Stratum</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
@@ -853,6 +871,9 @@ export default function MissingDataPanel() {
                             <td className="px-3 py-1 text-gray-700">{row.row_index}</td>
                             <td className="px-3 py-1 text-gray-700">{String(row.imputed_value)}</td>
                             <td className="px-3 py-1 text-gray-700">{row.predictors_missing}</td>
+                            {externalResult.preview_rows.some((r) => r.stratum) && (
+                              <td className="px-3 py-1 text-gray-700">{row.stratum ?? ""}</td>
+                            )}
                           </tr>
                         ))}
                       </tbody>

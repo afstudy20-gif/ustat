@@ -468,6 +468,7 @@ async def external_impute_preview(
     mechanism: str = Form("unknown"),
     max_iter: int = Form(20),
     random_state: int = Form(42),
+    stratify_by: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ):
     df = store.get_filtered(session_id)
@@ -485,6 +486,7 @@ async def external_impute_preview(
         mechanism=mechanism,
         max_iter=max_iter,
         random_state=random_state,
+        stratify_by=stratify_by,
     )
     return result.result
 
@@ -500,6 +502,7 @@ async def external_impute_apply(
     mechanism: str = Form("unknown"),
     max_iter: int = Form(20),
     random_state: int = Form(42),
+    stratify_by: Optional[str] = Form(None),
     file: UploadFile = File(...),
 ):
     df = store.get_filtered(session_id)
@@ -517,6 +520,7 @@ async def external_impute_apply(
         mechanism=mechanism,
         max_iter=max_iter,
         random_state=random_state,
+        stratify_by=stratify_by,
     )
     if not store.fill_values_by_index(session_id, result.target, result.filled_values):
         raise HTTPException(status_code=404, detail="Session not found")

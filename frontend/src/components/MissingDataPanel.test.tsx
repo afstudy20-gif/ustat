@@ -199,6 +199,79 @@ describe('MissingDataPanel', () => {
     await waitFor(() => expect(screen.getByText(/1 value\(s\) transferred into LDL/)).toBeInTheDocument())
   })
 
+  it('sends stratify_by when a stratification column is selected', async () => {
+    const columnsWithStratum: ColMeta[] = [
+      { name: 'AGE', dtype: 'float64', kind: 'numeric' },
+      { name: 'LDL', dtype: 'float64', kind: 'numeric' },
+      { name: 'DM', dtype: 'int64', kind: 'numeric' },
+    ]
+    installSession(
+      makeSession({
+        columns: columnsWithStratum,
+        preview: [
+          { AGE: 55, LDL: null, DM: 0 },
+          { AGE: 61, LDL: 140, DM: 1 },
+        ],
+      }),
+    )
+
+    let stratifyBySent: string | null = null
+    server.use(
+      http.post('/api/missing_data/external_impute_reference_columns', () =>
+        HttpResponse.json({
+          n_rows: 2,
+          columns: [
+            { name: 'age', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'ldl', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+            { name: 'dm', dtype: 'int64', kind: 'numeric', n_missing: 0 },
+          ],
+        }),
+      ),
+      http.post('/api/missing_data/external_impute_preview', async ({ request }) => {
+        const fd = await request.formData()
+        stratifyBySent = fd.get('stratify_by') as string | null
+        return HttpResponse.json({
+          target: 'LDL',
+          reference_target: 'ldl',
+          predictors: ['AGE'],
+          method: 'PMM',
+          mechanism: 'unknown',
+          n_missing_target: 1,
+          n_imputed: 1,
+          reference_rows: 2,
+          reference_complete_rows: 2,
+          preview_rows: [{ row_index: 0, imputed_value: 128, predictors_missing: 0, stratum: '0' }],
+          result_text: "1 missing value(s) in 'LDL' were imputed using 1 predictor(s).",
+        })
+      }),
+    )
+
+    const user = userEvent.setup()
+    render(<MissingDataPanel />)
+
+    await user.click(screen.getByRole('tab', { name: /reference imputation/i }))
+    await user.selectOptions(screen.getByLabelText(/current missing target/i), 'LDL')
+    await user.upload(
+      screen.getByLabelText(/reference dataset/i),
+      new File(['age,ldl,dm\n55,128,0\n61,140,1\n'], 'reference.csv', { type: 'text/csv' }),
+    )
+    await waitFor(() => expect(screen.getByLabelText(/reference target match/i)).toHaveValue('ldl'))
+
+    const agePredictor = screen.getByLabelText('age')
+    await user.click(agePredictor)
+
+    await user.selectOptions(screen.getByLabelText(/stratify by/i), 'DM')
+    await user.click(screen.getByRole('button', { name: /preview target estimates/i }))
+
+    await waitFor(() => expect(screen.getByText('128')).toBeInTheDocument())
+    const previewTable = screen.getAllByRole('table').find((t) =>
+      within(t).queryByText(/estimated value/i),
+    )!
+    const row = within(previewTable).getByText('128').closest('tr')!
+    expect(within(row).getAllByText('0').length).toBeGreaterThanOrEqual(2)
+    expect(stratifyBySent).toBe('DM')
+  })
+
   it('switches to the Data Cleaning sub-tab', async () => {
     installMissingSession()
     const user = userEvent.setup()
