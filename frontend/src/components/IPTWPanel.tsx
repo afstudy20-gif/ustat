@@ -83,8 +83,9 @@ interface IPTWResult {
   outcome_result?: OutcomeResult;
 }
 
-const smdColor = (smd: number) =>
-  smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
+const smdColor = (smd: number | undefined | null) =>
+  smd == null || !Number.isFinite(smd) ? "text-gray-400"
+    : smd < 0.10 ? "text-emerald-600" : smd < 0.20 ? "text-amber-500" : "text-red-500";
 
 const PLOT_BASE = {
   paper_bgcolor: "transparent",
@@ -347,16 +348,26 @@ function IPTWPanelBody({ session }: { session: Session }) {
     } finally { setLoading(false); }
   };
 
+  // Older backend builds returned smd_before/smd_after as scalar averages.
+  // Normalise to per-covariate maps so the table/Love plot never crash on
+  // a stale API response.
+  const smdBeforeMap: Record<string, number> =
+    result && typeof result.smd_before === "object" && result.smd_before !== null ? result.smd_before : {};
+  const smdAfterMap: Record<string, number> =
+    result && typeof result.smd_after === "object" && result.smd_after !== null ? result.smd_after : {};
+  const fmtNum = (v: number | undefined | null, d: number) =>
+    typeof v === "number" && Number.isFinite(v) ? v.toFixed(d) : "—";
+
   const smdExportHeaders = ["Covariate", "SMD Before", "SMD After", "Reduction %", "Balanced (<0.10)"];
-  const smdExportRows = result
-    ? Object.keys(result.smd_before).map((cov) => [
-        cov,
-        result.smd_before[cov].toFixed(4),
-        result.smd_after[cov].toFixed(4),
-        (((result.smd_before[cov] - result.smd_after[cov]) / result.smd_before[cov]) * 100).toFixed(1) + "%",
-        result.smd_after[cov] < 0.10 ? "Yes" : "No",
-      ])
-    : [];
+  const smdExportRows = Object.keys(smdBeforeMap).map((cov) => [
+    cov,
+    fmtNum(smdBeforeMap[cov], 4),
+    fmtNum(smdAfterMap[cov], 4),
+    smdBeforeMap[cov] > 0
+      ? (((smdBeforeMap[cov] - (smdAfterMap[cov] ?? 0)) / smdBeforeMap[cov]) * 100).toFixed(1) + "%"
+      : "—",
+    (smdAfterMap[cov] ?? Infinity) < 0.10 ? "Yes" : "No",
+  ]);
 
   const availableCovs = allCols.filter(
     (c) => c !== treatCol && c !== outcomeCol &&
@@ -817,8 +828,8 @@ function IPTWPanelBody({ session }: { session: Session }) {
               </div>
 
               <LovePlot
-                smdBefore={result.smd_before}
-                smdAfter={result.smd_after}
+                smdBefore={smdBeforeMap}
+                smdAfter={smdAfterMap}
                 threshold={threshold}
                 showConnectors={showConnectors}
                 showGrid={showGrid}
@@ -876,11 +887,11 @@ function IPTWPanelBody({ session }: { session: Session }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.keys(result.smd_before).map((cov) => {
-                      const before = result.smd_before[cov];
-                      const after = result.smd_after[cov];
-                      const reduction = before > 0 ? ((before - after) / before * 100).toFixed(1) : "—";
-                      const balanced = after < threshold;
+                    {Object.keys(smdBeforeMap).map((cov) => {
+                      const before = smdBeforeMap[cov];
+                      const after = smdAfterMap[cov];
+                      const reduction = before > 0 && Number.isFinite(after) ? ((before - after) / before * 100).toFixed(1) : "—";
+                      const balanced = Number.isFinite(after) && after < threshold;
                       const vr = result.variance_ratio_after?.[cov] as number | null | undefined;
                       const vrBefore = result.variance_ratio_before?.[cov] as number | null | undefined;
                       const ksAfter = result.ks_p_after?.[cov] as number | null | undefined;
@@ -888,8 +899,8 @@ function IPTWPanelBody({ session }: { session: Session }) {
                       return (
                         <tr key={cov} className="border-b border-gray-100 hover:bg-gray-50">
                           <td className="px-3 py-1.5 font-mono text-gray-800">{cov}</td>
-                          <td className={`px-3 py-1.5 text-right font-mono ${smdColor(before)}`}>{before.toFixed(4)}</td>
-                          <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(after)}`}>{after.toFixed(4)}</td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${smdColor(before)}`}>{fmtNum(before, 4)}</td>
+                          <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(after)}`}>{fmtNum(after, 4)}</td>
                           <td className={`px-3 py-1.5 text-right font-mono ${vrOk ? "text-gray-600" : "text-amber-600 font-semibold"}`}
                               title={vrBefore != null ? `Before: ${vrBefore.toFixed(3)}` : ""}>
                             {vr != null ? vr.toFixed(3) : "—"}
@@ -912,8 +923,8 @@ function IPTWPanelBody({ session }: { session: Session }) {
                   <tfoot className="bg-gray-50 border-t-2 border-gray-200">
                     <tr>
                       <td className="px-3 py-1.5 font-semibold text-gray-700">Average</td>
-                      <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(result.avg_smd_before)}`}>{result.avg_smd_before.toFixed(4)}</td>
-                      <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(result.avg_smd_after)}`}>{result.avg_smd_after.toFixed(4)}</td>
+                      <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(result.avg_smd_before)}`}>{fmtNum(result.avg_smd_before, 4)}</td>
+                      <td className={`px-3 py-1.5 text-right font-mono font-semibold ${smdColor(result.avg_smd_after)}`}>{fmtNum(result.avg_smd_after, 4)}</td>
                       <td className="px-3 py-1.5 text-gray-400" colSpan={2}>—</td>
                       <td className="px-3 py-1.5 text-right text-indigo-600 font-semibold">{result.reduction_pct}%</td>
                       <td className="px-3 py-1.5 text-center">

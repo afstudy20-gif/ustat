@@ -57,6 +57,8 @@ class IPTWRequest(BaseModel):
     estimand: str = "ate"
     stabilize: bool = True
     weight_truncation: str = "none"
+    weight_truncation_lo: float = 0.01
+    weight_truncation_hi: float = 0.99
     weight_truncation_max: float = 10.0
     outcome_type: str = "binary"
     outcome_col: Optional[str] = None
@@ -64,6 +66,9 @@ class IPTWRequest(BaseModel):
     survival_event_col: Optional[str] = None
     se_method: str = "robust"
     imputation: Optional[str] = "listwise"
+    score_method: Optional[str] = "logistic"
+    random_state: Optional[int] = 42
+    trim_common_support: Optional[bool] = False
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -643,10 +648,37 @@ def _run_iptw(req: IPTWRequest):
     df, cat_warnings = _clean_covariate_categories(df, req.covariates)
 
     treat = pd.to_numeric(df[req.treatment_col], errors="coerce").astype(int)
+    if set(treat.dropna().unique()) - {0, 1}:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Treatment column '{req.treatment_col}' must be binary (0 = control, 1 = treated).",
+        )
     X = pd.get_dummies(df[req.covariates], drop_first=True).astype(float)
 
-    ps = _fit_propensity_scores(X.values, treat.values, method="logistic", random_state=42)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    ps = _fit_propensity_scores(
+        X_scaled, treat.values,
+        method=(req.score_method or "logistic").lower(),
+        random_state=req.random_state,
+    )
     ps = np.clip(ps, 1e-5, 1.0 - 1e-5)
+
+    # Common-support trimming: drop units whose PS falls outside the
+    # overlap region [max of group minima, min of group maxima].
+    n_trimmed = 0
+    if req.trim_common_support:
+        ps_t, ps_c = ps[treat.values == 1], ps[treat.values == 0]
+        if len(ps_t) and len(ps_c):
+            lo_cs = max(ps_t.min(), ps_c.min())
+            hi_cs = min(ps_t.max(), ps_c.max())
+            keep = (ps >= lo_cs) & (ps <= hi_cs)
+            n_trimmed = int((~keep).sum())
+            if n_trimmed:
+                df = df.loc[keep]
+                X = X.loc[keep]
+                treat = treat.loc[keep]
+                ps = ps[keep]
 
     eps = 1e-6
     if req.estimand == "ate":
@@ -672,7 +704,11 @@ def _run_iptw(req: IPTWRequest):
 
     n_truncated = 0
     if req.weight_truncation == "percentile":
-        lo, hi = np.percentile(w, [1, 99])
+        p_lo = float(np.clip(req.weight_truncation_lo, 0.0, 1.0)) * 100.0
+        p_hi = float(np.clip(req.weight_truncation_hi, 0.0, 1.0)) * 100.0
+        if p_hi <= p_lo:
+            p_lo, p_hi = 1.0, 99.0
+        lo, hi = np.percentile(w, [p_lo, p_hi])
         before = w.copy()
         w = np.clip(w, lo, hi)
         n_truncated = int((before != w).sum())
@@ -690,24 +726,37 @@ def _run_iptw(req: IPTWRequest):
     # comparable to the pre-weight value. Before this fix the "after" mean
     # was computed unweighted, so smd_before always equalled smd_after and
     # the panel claimed perfect balance for any weighting.
-    smd_before = []
-    smd_after = []
+    # Per-covariate dicts (not scalars): the Love plot and SMD balance table
+    # render one row per covariate, mirroring the PSM response contract.
+    smd_before: dict[str, float] = {}
+    smd_after: dict[str, float] = {}
     wt = pd.Series(w, index=X.index)
-    for col in X.columns[:min(5, len(X.columns))]:
+    wt_t = wt.loc[treat == 1]
+    wt_c = wt.loc[treat == 0]
+    sw_t = float(wt_t.sum())
+    sw_c = float(wt_c.sum())
+    for col in X.columns:
         s_t = X.loc[treat == 1, col]
         s_c = X.loc[treat == 0, col]
-        smd_before.append(_compute_smd(s_t, s_c))
+        smd_b = _compute_smd(s_t, s_c)
         denom = _pooled_sd(s_t, s_c) + 1e-9
-        wt_t = wt.loc[treat == 1]
-        wt_c = wt.loc[treat == 0]
-        sw_t = float(wt_t.sum())
-        sw_c = float(wt_c.sum())
-        if sw_t > 0 and sw_c > 0:
+        if sw_t > 0 and sw_c > 0 and denom > 0:
             mean_t = float((s_t * wt_t).sum() / sw_t)
             mean_c = float((s_c * wt_c).sum() / sw_c)
-            smd_after.append(abs(mean_t - mean_c) / denom if denom > 0 else 0.0)
+            smd_a = abs(mean_t - mean_c) / denom
         else:
-            smd_after.append(float("nan"))
+            smd_a = float("nan")
+        if np.isfinite(smd_b) and np.isfinite(smd_a):
+            smd_before[col] = round(float(smd_b), 4)
+            smd_after[col] = round(float(smd_a), 4)
+
+    avg_smd_before = float(np.mean(list(smd_before.values()))) if smd_before else 0.0
+    avg_smd_after = float(np.mean(list(smd_after.values()))) if smd_after else 0.0
+    reduction_pct = (
+        float((avg_smd_before - avg_smd_after) / avg_smd_before * 100)
+        if avg_smd_before > 0 else 0.0
+    )
+    balance_achieved = bool(smd_after) and all(v < 0.10 for v in smd_after.values())
 
     outcome_result = None
     if req.outcome_type == "binary" and req.outcome_col:
@@ -743,6 +792,15 @@ def _run_iptw(req: IPTWRequest):
     weight_sum = float(np.sum(w))
     effective_n = float(np.sum(w) ** 2 / np.sum(w ** 2)) if np.sum(w ** 2) > 0 else 0.0
 
+    def _ess(arr: np.ndarray) -> float:
+        denom = float(np.sum(arr ** 2))
+        return float(np.sum(arr) ** 2 / denom) if denom > 0 else 0.0
+
+    w_treated = np.asarray(w)[treat.values == 1]
+    w_control = np.asarray(w)[treat.values == 0]
+    n_treated = int((treat.values == 1).sum())
+    n_control = int((treat.values == 0).sum())
+
     warnings = list(cat_warnings)
     if n_nonfinite > 0:
         warnings.append(f"{n_nonfinite} non-finite weights were replaced with 0")
@@ -755,20 +813,65 @@ def _run_iptw(req: IPTWRequest):
     if len(w) and float(np.max(w)) > 10:
         warnings.append(f"Extreme IPTW weight detected (max={float(np.max(w)):.2f}); consider truncation or overlap weights.")
 
+    # Weighted-cohort child session: full covariate rows + the IPTW weight,
+    # so the user can export it or load it as the active dataset (same flow
+    # as the PSM "_psm" child session).
+    weighted_sid = req.session_id + "_iptw"
+    df_export = df.copy()
+    df_export["iptw_weight"] = np.round(np.asarray(w, dtype=float), 6)
+    store.save(weighted_sid, df_export)
+    try:
+        parent_metadata = store.get_metadata(req.session_id)
+        if parent_metadata:
+            store.save_metadata(weighted_sid, parent_metadata)
+        parent_kinds = store.get_kind_overrides(req.session_id)
+        if parent_kinds:
+            store.set_kind_overrides(weighted_sid, {**parent_kinds, "iptw_weight": "numeric"})
+        parent_decimals = store.get_decimals(req.session_id)
+        if parent_decimals:
+            store.save_decimals(weighted_sid, parent_decimals)
+    except Exception:
+        logger.exception("Saving IPTW child-session metadata failed")
+
     return {
         "method": "iptw",
         "estimand": req.estimand,
+        "stabilize": bool(req.stabilize),
+        "se_method": req.se_method,
+        "score_method": (req.score_method or "logistic").lower(),
         "n": int(len(df)),
+        "n_total": int(len(df)),
+        "n_treated": n_treated,
+        "n_control": n_control,
+        "n_trimmed_common_support": n_trimmed,
         "weight_summary": {
             "mean": round(float(np.mean(w)), 4),
+            "median": round(float(np.median(w)), 4),
             "max": round(float(np.max(w)), 4),
             "min": round(float(np.min(w)), 4),
             "sum": round(weight_sum, 2),
             "effective_n": round(effective_n, 1),
+            "ess_treated": round(_ess(w_treated), 1),
+            "ess_control": round(_ess(w_control), 1),
             "n_truncated": n_truncated,
         },
-        "smd_before": round(float(np.mean(smd_before)), 4) if smd_before else None,
-        "smd_after": round(float(np.mean(smd_after)), 4) if smd_after else None,
+        "weight_distribution": {
+            "treated": np.round(w_treated, 4).tolist(),
+            "control": np.round(w_control, 4).tolist(),
+        },
+        "ps_distribution": {
+            "treated_unmatched": np.round(ps[treat.values == 1], 4).tolist(),
+            "control_unmatched": np.round(ps[treat.values == 0], 4).tolist(),
+            "treated_matched": [],
+            "control_matched": [],
+        },
+        "smd_before": smd_before,
+        "smd_after": smd_after,
+        "avg_smd_before": round(avg_smd_before, 4),
+        "avg_smd_after": round(avg_smd_after, 4),
+        "reduction_pct": round(reduction_pct, 1),
+        "balance_achieved": balance_achieved,
+        "matched_session_id": weighted_sid,
         "warnings": warnings,
         "outcome_result": outcome_result,
         "result_text": _iptw_results_text(req.estimand, outcome_result, warnings),
