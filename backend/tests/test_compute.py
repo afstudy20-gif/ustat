@@ -438,6 +438,44 @@ def test_fill_blanks_mean(client, synth):
     assert "n_filled" in body
 
 
+def test_fill_blanks_rownum_partial(client, synth):
+    """Blanks get their 1-based row position; observed values untouched."""
+    sid = _fresh(synth, "fill_rownum")
+    df_before = store.get(sid)
+    observed_mask = df_before["LDL"].notna()
+    r = client.post(f"{BASE}/{sid}/fill_blanks",
+                    json={"column": "LDL", "value": "__rownum__"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["fill_value"] == "sequential row number (1…n)"
+    df_after = store.get(sid)
+    assert df_after["LDL"].notna().all()
+    # Observed values unchanged
+    pd.testing.assert_series_equal(
+        df_after.loc[observed_mask, "LDL"], df_before.loc[observed_mask, "LDL"]
+    )
+    # Filled cells hold their 1-based positional index
+    positions = pd.Series(range(1, len(df_after) + 1), index=df_after.index)
+    filled = ~observed_mask
+    assert (df_after.loc[filled, "LDL"].astype(float)
+            == positions[filled].astype(float)).all()
+
+
+def test_fill_blanks_rownum_all_empty_column(client, synth):
+    """Fully-empty new column numbers every case 1..n as a numeric ID."""
+    sid = _fresh(synth, "fill_rownum_id")
+    df = store.get(sid).copy()
+    df["CASE_ID"] = np.nan
+    store.save(sid, df)
+    r = client.post(f"{BASE}/{sid}/fill_blanks",
+                    json={"column": "CASE_ID", "value": "__rownum__"})
+    assert r.status_code == 200, r.text
+    assert r.json()["n_filled"] == len(df)
+    out = store.get(sid)["CASE_ID"]
+    assert pd.api.types.is_numeric_dtype(out)
+    assert out.astype(int).tolist() == list(range(1, len(df) + 1))
+
+
 def test_fill_blanks_column_not_found(client, synth):
     sid = _fresh(synth, "fill_miss")
     r = client.post(f"{BASE}/{sid}/fill_blanks",

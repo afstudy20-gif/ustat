@@ -1638,6 +1638,10 @@ function DataTableBody({ session }: { session: Session }) {
                 className="w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-amber-50 flex items-center gap-2">
                 🧬 MICE (multiple imputation)
               </button>
+              <button onClick={() => { fillBlanks(ctxMenu.col, "__rownum__"); }}
+                className="w-full text-left px-3 py-1 text-xs text-gray-700 hover:bg-amber-50 flex items-center gap-2">
+                🔢 Case number (1…n)
+              </button>
               {fillMode === ctxMenu.col ? (
                 <div className="px-3 py-1 flex items-center gap-1">
                   <input ref={fillRef} autoFocus

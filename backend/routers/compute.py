@@ -1057,6 +1057,19 @@ def fill_blanks(session_id: str, req: FillBlanksRequest):
         if col.dtype == object:
             df.loc[df[target].astype(str).str.strip() == "", target] = fill_val
         method_label = f"most frequent ({fill_val})"
+    elif req.value == "__rownum__":
+        # Sequential case number: each blank cell gets its 1-based row
+        # position. On a fully-empty column this numbers every case 1..n,
+        # giving a ready-made patient/case ID.
+        fill_mask = col.isna() | blank_mask
+        positions = pd.Series(range(1, len(df) + 1), index=df.index)
+        df.loc[fill_mask, target] = positions[fill_mask]
+        # All-blank object column just filled with ints → numeric column.
+        if not pd.api.types.is_numeric_dtype(df[target]):
+            coerced_all = pd.to_numeric(df[target], errors="coerce")
+            if coerced_all.notna().sum() == df[target].notna().sum():
+                df[target] = coerced_all
+        method_label = "sequential row number (1…n)"
     elif req.value == "__mice__":
         coerced = mask_sentinels(col, max_plausible)
         is_numeric_col = pd.api.types.is_numeric_dtype(col) or (
