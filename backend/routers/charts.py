@@ -167,6 +167,75 @@ def boxplot(req: ChartRequest):
     return {"type": "boxplot", "x": req.x, "groups": result}
 
 
+class PairedBoxRequest(BaseModel):
+    session_id: str
+    y: str
+    group: str
+    pair_id: str
+
+
+@router.post("/paired_box")
+def paired_box(req: PairedBoxRequest):
+    """Matched-pair box plot: one box per group plus a connector line joining
+    each pair's two values (e.g. PSM-matched cohorts, before/after cases).
+    Groups are looked up via `pair_id` (typically PSM's `match_set_id` or a
+    per-case ID column) rather than row position, so unsorted or filtered
+    data still pairs correctly."""
+    df = _get_df(req.session_id)
+    for col in (req.y, req.group, req.pair_id):
+        if col not in df.columns:
+            raise HTTPException(status_code=400, detail=f"Column '{col}' not found")
+
+    y = coerce_numeric(df[req.y]).replace([np.inf, -np.inf], np.nan)
+    work = pd.DataFrame({
+        "y": y,
+        "group": df[req.group].astype(str),
+        "pair_id": df[req.pair_id].astype(str),
+    }, index=df.index)
+    work = work.dropna(subset=["y"])
+
+    levels = sorted_groups(df.loc[work.index, req.group])
+    levels = [str(lvl) for lvl in levels]
+    if len(levels) != 2:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Group column '{req.group}' must have exactly 2 levels (found {len(levels)}).",
+        )
+
+    groups_out = []
+    side: dict[str, pd.Series] = {}
+    for lvl in levels:
+        sub = work[work["group"] == lvl]
+        groups_out.append({
+            "group": lvl, "values": sub["y"].tolist(), "row_indices": sub.index.tolist(),
+            # Parallel to values/row_indices — lets the frontend seed each
+            # point's jitter from the same pair_id used in `pairs`, so a
+            # connector line lands exactly on its two marker positions.
+            "pair_ids": sub["pair_id"].tolist(),
+        })
+        # First occurrence per pair_id — duplicates within a side can't be
+        # unambiguously paired, so only the first is used as the pair partner.
+        side[lvl] = sub.dropna(subset=["pair_id"]).drop_duplicates(subset="pair_id", keep="first").set_index("pair_id")["y"]
+
+    g0, g1 = levels
+    common_ids = sorted(set(side[g0].index) & set(side[g1].index))
+    pairs = [
+        {"pair_id": pid, "y0": float(side[g0][pid]), "y1": float(side[g1][pid])}
+        for pid in common_ids
+    ]
+
+    return {
+        "type": "paired_box",
+        "y": req.y,
+        "group": req.group,
+        "pair_id": req.pair_id,
+        "groups": groups_out,
+        "pairs": pairs,
+        "n_pairs": len(pairs),
+        "n_unpaired": len(work) - 2 * len(pairs),
+    }
+
+
 class SplomRequest(BaseModel):
     session_id: str
     variables: List[str]

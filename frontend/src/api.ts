@@ -34,6 +34,7 @@ export const runROCCombined = (data: object) => api.post("/api/stats/roc_combine
 export const getHistogram = (data: object) => api.post("/api/charts/histogram", data);
 export const getScatter = (data: object) => api.post("/api/charts/scatter", data);
 export const getBoxplot = (data: object) => api.post("/api/charts/boxplot", data);
+export const getPairedBox = (data: object) => api.post("/api/charts/paired_box", data);
 export const getBar = (data: object) => api.post("/api/charts/bar", data);
 export const runSubgroupBar = (data: object) => api.post("/api/charts/subgroup_bar", data);
 export const runScoreComposite = (data: object) => api.post("/api/charts/score_composite", data);

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useStore, isNumericKind, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
 import { usePlotLayout, usePalette, useTraceDefaults } from "../plotStyle";
-import { getHistogram, getScatter, getBoxplot, getBar } from "../api";
+import { getHistogram, getScatter, getBoxplot, getBar, getPairedBox } from "../api";
 import type { PlotData, PlotLayout, PlotCaptureHandle } from "../lib/plotTypes";
 import TitledPlot from "./TitledPlot";
 
@@ -24,6 +24,7 @@ function ChartsPanelBody({ session }: { session: Session }) {
   const [x, setX] = usePersistedPanelState<string>("charts", "x", numCols[0] ?? "");
   const [y, setY] = usePersistedPanelState<string>("charts", "y", numCols[1] ?? "");
   const [color, setColor] = usePersistedPanelState<string>("charts", "color", "");
+  const [pairId, setPairId] = usePersistedPanelState<string>("charts", "pairId", session.columns[0]?.name ?? "");
   const [bins, setBins] = usePersistedPanelState<number>("charts", "bins", 20);
   const [plotData, setPlotData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,6 +36,10 @@ function ChartsPanelBody({ session }: { session: Session }) {
   const [customYLabel, setCustomYLabel] = useState("");
 
   const run = async () => {
+    if (chartType === "paired") {
+      if (!color) { setError("Select a Group/Color column with exactly two levels (e.g. treatment status)."); return; }
+      if (!pairId) { setError("Select a Pair ID column linking each matched pair (e.g. match_set_id)."); return; }
+    }
     setLoading(true);
     setError(null);
     try {
@@ -43,6 +48,7 @@ function ChartsPanelBody({ session }: { session: Session }) {
       if (chartType === "histogram") res = await getHistogram(base);
       else if (chartType === "scatter") res = await getScatter({ ...base, y, color: color || undefined });
       else if (chartType === "boxplot" || chartType === "violin") res = await getBoxplot({ ...base, color: color || undefined });
+      else if (chartType === "paired") res = await getPairedBox({ session_id: session.session_id, y: x, group: color, pair_id: pairId });
       else res = await getBar({ ...base, y: y || undefined, color: color || undefined });
       setPlotData(res.data);
 
@@ -76,6 +82,10 @@ function ChartsPanelBody({ session }: { session: Session }) {
         autoTitle = y ? `${yLabelText} by ${xLabelText}` : `Count by ${xLabelText}`;
         autoX = xLabelText;
         autoY = yLabelText;
+      } else if (chartType === "paired") {
+        autoTitle = `Matched-pair ${xLabelText} by ${colorLabelText}`;
+        autoX = colorLabelText;
+        autoY = xLabelText;
       }
 
       setCustomTitle(autoTitle);
@@ -98,11 +108,11 @@ function ChartsPanelBody({ session }: { session: Session }) {
       <div className="w-60 flex-shrink-0 space-y-4 overflow-y-auto pr-1" style={{ maxHeight: "calc(100vh - 120px)" }}>
         <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           <h3 className="text-sm font-semibold text-gray-700">Chart Type</h3>
-          {["histogram", "scatter", "boxplot", "violin", "bar"].map((t) => (
+          {["histogram", "scatter", "boxplot", "violin", "bar", "paired"].map((t) => (
             <label key={t} className="flex items-center gap-2 cursor-pointer">
               <input type="radio" name="chartType" value={t} checked={chartType === t}
                 onChange={() => setChartType(t)} className="accent-indigo-500" />
-              <span className="text-sm text-gray-700 capitalize">{t}</span>
+              <span className="text-sm text-gray-700 capitalize">{t === "paired" ? "Paired box" : t}</span>
             </label>
           ))}
         </div>
@@ -110,9 +120,9 @@ function ChartsPanelBody({ session }: { session: Session }) {
         <div className="panel space-y-3 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           <h3 className="text-sm font-semibold text-gray-700">Variables</h3>
           <div>
-            <label className="text-xs text-gray-400 block mb-1">X axis</label>
+            <label className="text-xs text-gray-400 block mb-1">{chartType === "paired" ? "Outcome (Y)" : "X axis"}</label>
             <select className="select w-full" value={x} onChange={(e) => setX(e.target.value)}>
-              {(chartType === "boxplot" || chartType === "violin" ? numCols : [...numCols, ...catCols]).map((c) => (
+              {(chartType === "boxplot" || chartType === "violin" || chartType === "paired" ? numCols : [...numCols, ...catCols]).map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>
@@ -128,11 +138,21 @@ function ChartsPanelBody({ session }: { session: Session }) {
           )}
           {chartType !== "histogram" && catCols.length > 0 && (
             <div>
-              <label className="text-xs text-gray-400 block mb-1">Color / Group</label>
+              <label className="text-xs text-gray-400 block mb-1">{chartType === "paired" ? "Group (2 levels)" : "Color / Group"}</label>
               <select className="select w-full" value={color} onChange={(e) => setColor(e.target.value)}>
-                <option value="">None</option>
+                <option value="">{chartType === "paired" ? "— select —" : "None"}</option>
                 {catCols.map((c) => <option key={c}>{c}</option>)}
               </select>
+            </div>
+          )}
+          {chartType === "paired" && (
+            <div>
+              <label className="text-xs text-gray-400 block mb-1">Pair ID</label>
+              <select className="select w-full" value={pairId} onChange={(e) => setPairId(e.target.value)}>
+                <option value="">— select —</option>
+                {session.columns.map((c) => <option key={c.name}>{c.name}</option>)}
+              </select>
+              <p className="text-[10px] text-gray-400 mt-1">Links each matched pair — e.g. PSM's <code>match_set_id</code>, or a case-number column.</p>
             </div>
           )}
           {chartType === "histogram" && (
@@ -198,6 +218,7 @@ function ChartsPanelBody({ session }: { session: Session }) {
             chartType === "scatter" ? "Reveals relationships between two continuous variables. The regression line and R² show linear fit strength. Add a Color variable to see group-specific patterns." :
             chartType === "boxplot" ? "Compares distributions across groups. The box shows Q1–Q3 (IQR), the line is the median, whiskers extend to 1.5×IQR. Points beyond whiskers are outliers." :
             chartType === "violin" ? "Combines a box plot with a kernel density estimate. The wider the violin, the more data points at that value. Better than box plots for showing bimodal or skewed distributions." :
+            chartType === "paired" ? "Matched-pair comparison: a box per group plus a line connecting each pair's two values (e.g. PSM-matched cohorts). Pair ID must link exactly one row per group — PSM's match_set_id or any per-case ID column works." :
             "Shows counts or aggregated values for categories. Use for comparing frequencies across groups. Add a Color variable for stacked/grouped comparisons."
           }</p>
         </div>
@@ -210,7 +231,11 @@ function ChartsPanelBody({ session }: { session: Session }) {
             plotRefOut={chartRef}
             storageKey={`charts:${chartType}:${x}`}
             data={traces}
-            layout={{ ...layout, xaxis: { ...(layout.xaxis as PlotLayout) }, yaxis: { ...(layout.yaxis as PlotLayout) } }}
+            layout={{
+              ...layout,
+              xaxis: { ...(layout.xaxis as PlotLayout), ...pairedXAxisOverride(chartType, plotData, session) },
+              yaxis: { ...(layout.yaxis as PlotLayout) },
+            }}
             config={{ responsive: true, displayModeBar: true, displaylogo: false }}
             defaultTitle={customTitle || (plotData?.x ? String(plotData.x) : "")}
             defaultSubtitle=""
@@ -350,6 +375,76 @@ function buildTraces(
     }];
   }
 
+  if (d.type === "paired_box") {
+    const colorLabels = valueLabelsFor(d.group);
+    const groups = d.groups as Array<{ group: unknown; values: number[]; row_indices: number[]; pair_ids: (string | null)[] }>;
+    const pairs = d.pairs as Array<{ pair_id: string; y0: number; y1: number }>;
+
+    const boxTraces: PlotData[] = groups.map((g, i) => ({
+      type: "box",
+      x: g.values.map(() => i),
+      y: g.values,
+      name: colorLabels[String(g.group)] ?? String(g.group),
+      marker: { color: C[i % C.length] },
+      fillcolor: C[i % C.length] + "40",
+      boxpoints: false,
+      width: 0.5,
+    }));
+
+    const lineTraces: PlotData[] = pairs.map((pr) => ({
+      type: "scatter",
+      mode: "lines",
+      x: [0 + pairJitter(pr.pair_id), 1 + pairJitter(pr.pair_id)],
+      y: [pr.y0, pr.y1],
+      line: { color: "#9ca3af", width: 1 },
+      opacity: 0.55,
+      showlegend: false,
+      hoverinfo: "skip",
+    }));
+
+    const markerTraces: PlotData[] = groups.map((g, i) => ({
+      type: "scatter",
+      mode: "markers",
+      x: g.values.map((_, idx) => i + pairJitter(g.pair_ids[idx] ?? `${String(g.group)}-${g.row_indices[idx]}`)),
+      y: g.values,
+      marker: { color: "#1f2937", size: td.markerSize, opacity: 0.85, line: { color: "#fff", width: 0.5 } },
+      showlegend: false,
+      hovertemplate: "%{y}<extra></extra>",
+    }));
+
+    return [...boxTraces, ...lineTraces, ...markerTraces];
+  }
+
   return null;
+}
+
+// Deterministic per-point horizontal jitter (seeded by pair/row id) so the
+// same point renders at the same x offset in both its group's marker trace
+// and its connector line — otherwise a line would miss its own markers.
+function pairJitter(seed: string, amplitude = 0.16): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  const frac = ((h >>> 0) % 10000) / 10000;
+  return (frac - 0.5) * 2 * amplitude;
+}
+
+// Paired box plots use two fixed numeric x positions (0/1) instead of a
+// categorical axis, so tick labels must be supplied manually as the group
+// values' display labels.
+function pairedXAxisOverride(
+  chartType: string,
+  plotData: Record<string, unknown> | null,
+  session: Session,
+): Partial<PlotLayout> {
+  if (chartType !== "paired" || !plotData || plotData.type !== "paired_box") return {};
+  const groupCol = plotData.group as string;
+  const meta = session.columns.find((c) => c.name === groupCol);
+  const labels = (meta?.value_labels as Record<string, string> | undefined) ?? {};
+  const groups = (plotData.groups as Array<{ group: unknown }>) ?? [];
+  return {
+    tickvals: groups.map((_, i) => i),
+    ticktext: groups.map((g) => labels[String(g.group)] ?? String(g.group)),
+    range: [-0.7, groups.length - 0.3],
+  };
 }
 
