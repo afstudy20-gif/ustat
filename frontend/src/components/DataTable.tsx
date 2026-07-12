@@ -735,7 +735,13 @@ function DataTableBody({ session }: { session: Session }) {
         delete next[oldName];
         useStore.setState({ columnDecimals: next });
       }
-      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview }); bumpUndo();
+      useStore.getState().setSession({ ...session, columns: updatedCols, preview: updatedPreview });
+      // Every other panel's persisted variable/covariate selection still
+      // points at the old name (they're plain cached strings, not live
+      // references) — remap them so a rename doesn't silently break the
+      // next analysis run in a panel the user isn't currently looking at.
+      useStore.getState().renameInPanelCache(oldName, newName);
+      bumpUndo();
     } catch (e: unknown) {
       // Surface backend errors (422 duplicate, network, etc.) instead of
       // silently dropping the rename. Falls back to a generic message.

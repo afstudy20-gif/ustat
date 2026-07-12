@@ -516,12 +516,24 @@ async def save_session(session_id: str):
     }
 
     content = json.dumps(payload, allow_nan=False, default=str).encode("utf-8")
-    safe_name = f"session_{session_id[:8]}.json"
+
+    # Download filename should follow the user's dataset name (e.g. "svo"),
+    # not the generic session-id fallback — otherwise every re-save silently
+    # renames the file back to "session_xxxxxxxx.json". Strip any existing
+    # extension from the stored name so we don't double it (".json.json").
+    base = user_filename.rsplit(".", 1)[0] if "." in user_filename else user_filename
+    from urllib.parse import quote
+    ascii_base = base.encode("ascii", errors="replace").decode("ascii")
+    utf8_base = quote(base, safe="")
 
     return StreamingResponse(
         iter([content]),
         media_type="application/json",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=\"{ascii_base}.json\"; filename*=UTF-8''{utf8_base}.json"
+            )
+        },
     )
 
 

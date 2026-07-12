@@ -197,6 +197,23 @@ def test_save_and_load_session(client, df):
     assert "session_id" in body
 
 
+def test_save_session_download_name_follows_rename(client, df):
+    """Regression: the download filename must follow the user's rename
+    (e.g. "svo") — it previously always came back as the generic
+    session_xxxxxxxx.json fallback regardless of what the user named it."""
+    sid = _new_session(df, "saveload_rename")
+    r = client.post(f"/api/sessions/{sid}/rename", json={"filename": "svo"})
+    assert r.status_code == 200, r.text
+
+    saved = client.get(f"/api/sessions/{sid}/save_session")
+    assert saved.status_code == 200, saved.text
+    payload = json.loads(saved.content.decode("utf-8"))
+    assert payload["filename"] == "svo"
+    disposition = saved.headers["content-disposition"]
+    assert "svo.json" in disposition
+    assert "session_" not in disposition
+
+
 def test_save_and_load_session_preserves_case_filter(client, df):
     sid = _new_session(df, "saveload_filter")
     conditions = [{"column": "AGE", "operator": "gt", "value": 50, "join": "AND"}]

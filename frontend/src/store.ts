@@ -134,6 +134,12 @@ interface AppState {
   panelCache: Record<string, unknown>;
   setPanelCache: (panel: string, data: unknown) => void;
   clearPanelCache: (panel: string) => void;
+  // Column rename propagation — every panel's persisted variable selection
+  // (usePersistedPanelState) lives in panelCache, keyed by panel id. A rename
+  // in the Data tab doesn't touch those cached strings, so a panel with the
+  // old name still selected sends it straight to the backend and 404s on
+  // "Column not found" the next time the user runs it there.
+  renameInPanelCache: (oldName: string, newName: string) => void;
   // Cross-panel forest handoff — one panel (e.g. Cox time-horizon) drops
   // a set of forest rows here, the Forest Builder picks them up on mount
   // and clears it. Shape matches ForestRowInput.
@@ -323,6 +329,21 @@ export const useStore = create<AppState>((set) => ({
   clearPanelCache: (panel) => set((state) => {
     const next = { ...state.panelCache };
     delete next[panel];
+    return { panelCache: next };
+  }),
+  renameInPanelCache: (oldName, newName) => set((state) => {
+    const remapValue = (v: unknown): unknown => {
+      if (v === oldName) return newName;
+      if (Array.isArray(v)) return v.map((item) => (item === oldName ? newName : item));
+      return v;
+    };
+    const next: Record<string, unknown> = {};
+    for (const [panelId, data] of Object.entries(state.panelCache)) {
+      if (!data || typeof data !== "object" || Array.isArray(data)) { next[panelId] = data; continue; }
+      const remapped: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(data as Record<string, unknown>)) remapped[k] = remapValue(v);
+      next[panelId] = remapped;
+    }
     return { panelCache: next };
   }),
   forestHandoff: null,
