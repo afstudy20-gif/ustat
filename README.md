@@ -264,8 +264,11 @@ Key invariants:
 
 - **Server-side computation.** The frontend renders results; it does not run
   statistical algorithms.
-- **No persistence.** Uploaded data lives only in process memory and is
-  discarded after `SESSION_TTL_SECONDS` (default 1800).
+- **No persistence (default).** Uploaded data lives only in server RAM and is
+  discarded after `SESSION_TTL_SECONDS` (default 1800). Nothing is written to
+  disk. (An optional `SESSION_DISK_CACHE=1` operator flag can snapshot sessions
+  to a host volume so edits survive a redeploy — off by default; if you enable
+  it, that volume holds unencrypted data at rest, so harden and disclose it.)
 - **No accounts.** Sessions are an opaque UUID handed back to the browser; the
   backend never knows who you are.
 - **Pure-Python deps.** All statistical computation runs on peer-reviewed

@@ -48,10 +48,19 @@ def _purge_locked(session_id: str) -> None:
     _delete_disk_snapshot(session_id)
 
 
-# ── Disk autosave (survives backend restarts / redeploys) ──────────────────
-# Best-effort: a container without a mounted volume at SESSION_CACHE_DIR
-# simply loses the cache on restart, same as before — this only helps when
-# the directory is backed by persistent storage (see docker-compose.yml).
+# ── Disk autosave (opt-in — OFF by default) ────────────────────────────────
+# Privacy default: uploaded data lives ONLY in server RAM and is never written
+# to disk, matching the guarantee in README/privacy policy. This snapshot-to-
+# disk feature (which pickles each session's DataFrame so in-progress edits
+# survive a backend restart/redeploy) is therefore OFF unless the operator
+# explicitly opts in with SESSION_DISK_CACHE=1. When off: no session data ever
+# touches the disk. Resume-after-restart is still covered client-side by the
+# browser's IndexedDB autosave, so the default costs little resilience.
+#
+# ⚠️ If you enable it, the pickle files are UNENCRYPTED clinical data at rest
+# on the host volume — add disk encryption, restrictive file permissions, and a
+# guaranteed-delete policy, and update your privacy disclosure accordingly.
+DISK_CACHE_ENABLED = os.environ.get("SESSION_DISK_CACHE", "0") == "1"
 SESSION_CACHE_DIR = os.environ.get(
     "SESSION_CACHE_DIR",
     "/app/backend/session_cache" if os.path.isdir("/app/backend") else
@@ -98,6 +107,8 @@ def _flush_dirty_to_disk() -> None:
     """Snapshot every session touched since the last flush. Called from the
     autosave thread — overwrites each session's single file pair in place so
     the cache directory never accumulates history."""
+    if not DISK_CACHE_ENABLED:
+        return  # Opt-in only — never write session data to disk by default.
     with _lock:
         pending = list(_dirty)
         _dirty.clear()
@@ -141,14 +152,19 @@ def _autosave_worker() -> None:
             pass  # Autosave must never crash the request-handling thread.
 
 
-_autosave_thread = threading.Thread(target=_autosave_worker, daemon=True)
-_autosave_thread.start()
+# Only spin up the disk-flush thread when the operator has opted in. Off by
+# default → the thread never runs and no session data is written to disk.
+if DISK_CACHE_ENABLED:
+    _autosave_thread = threading.Thread(target=_autosave_worker, daemon=True)
+    _autosave_thread.start()
 
 
 def load_persisted_sessions() -> None:
     """Rehydrate the in-memory store from disk snapshots on backend startup.
     Skips (and deletes) anything past the normal session TTL. Called once
-    from main.py's startup hook."""
+    from main.py's startup hook. No-op unless disk cache is opted in."""
+    if not DISK_CACHE_ENABLED:
+        return
     if not os.path.isdir(SESSION_CACHE_DIR):
         return
     now = time.time()

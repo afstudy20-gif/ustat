@@ -35,6 +35,14 @@ services:
       # === Security Headers ===
       - CSP_ENFORCE=${CSP_ENFORCE:-0}   # Set to 1 after testing in production
 
+      # === Session disk cache (Privacy Critical) ===
+      # OFF by default: uploaded data lives only in server RAM and is never
+      # written to disk. Set to 1 ONLY if you accept unencrypted clinical data
+      # at rest on the volume below (add disk encryption + guaranteed delete +
+      # update your privacy disclosure first). Resume-after-restart is already
+      # handled client-side by the browser's IndexedDB autosave.
+      - SESSION_DISK_CACHE=${SESSION_DISK_CACHE:-0}
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -50,11 +58,11 @@ services:
     #       cpus: '2'
     #       memory: 1G
 
-    # Session cache: lets in-progress workspace edits survive a redeploy
-    # instead of being wiped when the backend process restarts. Purely a
-    # crash/restart safety net — sessions still expire after their normal
-    # 30-minute TTL and the cache never grows since each session's snapshot
-    # is overwritten in place, not versioned.
+    # Session cache volume — ONLY used when SESSION_DISK_CACHE=1 (opt-in,
+    # see above). With the cache off (default) nothing is written here and the
+    # volume stays empty. It lets in-progress edits survive a redeploy, but
+    # stores unencrypted clinical data at rest — leave it disabled unless you
+    # have hardened the host accordingly.
     volumes:
       - ustat-sessions:/app/backend/session_cache
       # - ustat-logs:/app/backend/logs
