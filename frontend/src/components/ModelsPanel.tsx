@@ -145,7 +145,7 @@ export default function ModelsPanel() {
   const [eventCol, setEventCol] = usePersistedPanelState<string>("models", "eventCol", binaryCols[0] ?? numCols[1] ?? "");
   const [groupCol, setGroupCol] = usePersistedPanelState<string>("models", "groupCol", "");
   const [stratifyCol, setStratifyCol] = usePersistedPanelState<string>("models", "stratifyCol", "");
-  const cachedModels = useStore((s) => s.panelCache.models);
+  const cachedModels = useStore((s) => s.panelCache.models) as { result?: ModelResult | null } | undefined;
   const setCacheModels = useStore((s) => s.setPanelCache);
   const [result, _setResultRaw] = useState<ModelResult | null>(cachedModels?.result ?? null);
   const setResult = (r: ModelResult | null) => { _setResultRaw(r); setCacheModels("models", { result: r }); };
@@ -805,12 +805,12 @@ export default function ModelsPanel() {
               <CoxHRTable
                 rows={result.rows}
                 columns={session.columns}
-                n={result.n}
-                nEvents={result.n_events}
-                nPars={result.n_pars}
-                nEventsPars={result.n_events_pars}
-                durationCol={result.duration_col}
-                eventCol={result.event_col}
+                n={result.n ?? 0}
+                nEvents={result.n_events ?? 0}
+                nPars={result.n_pars ?? 0}
+                nEventsPars={result.n_events_pars ?? 0}
+                durationCol={result.duration_col ?? ""}
+                eventCol={result.event_col ?? ""}
               />
             </div>
           ) : isMultiOutcome ? (
@@ -849,7 +849,7 @@ export default function ModelsPanel() {
                   <InfoBanner>
                     {result.n_excluded} row{result.n_excluded !== 1 ? "s" : ""} were excluded due to missing values
                     {result.imputation && result.imputation !== "listwise" ? ` (${result.imputation} imputation applied to numeric columns)` : " (listwise deletion)"}.
-                    Model was fitted on <strong>{result.n}</strong> of <strong>{result.n_total ?? (result.n + result.n_excluded)}</strong> rows.
+                    Model was fitted on <strong>{result.n}</strong> of <strong>{result.n_total ?? ((result.n ?? 0) + result.n_excluded)}</strong> rows.
                   </InfoBanner>
                 </div>
               )}
@@ -982,7 +982,7 @@ export default function ModelsPanel() {
               <div className="panel">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
-                  <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                  <button onClick={() => navigator.clipboard.writeText(result.result_text ?? "")} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
                 </div>
                 <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">{result.result_text}</p>
               </div>
@@ -997,8 +997,8 @@ export default function ModelsPanel() {
                 </h4>
                 <ORTable
                   rows={result.table}
-                  outcome={result.outcome}
-                  selectionMethod={result.selection_method}
+                  outcome={result.outcome ?? ""}
+                  selectionMethod={result.selection_method ?? ""}
                   nMulti={result.n_multi}
                   nTotal={result.n_total}
                 />
@@ -1018,7 +1018,7 @@ export default function ModelsPanel() {
               <div className="panel">
                 <div className="flex items-center justify-between mb-2">
                   <h4 className="font-semibold text-gray-900">Results Paragraph</h4>
-                  <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                  <button onClick={() => navigator.clipboard.writeText(result.result_text ?? "")} className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
                 </div>
                 <p className="text-sm text-gray-700 leading-relaxed bg-gray-50 border border-gray-200 rounded-xl px-4 py-3">{result.result_text}</p>
               </div>
@@ -1148,7 +1148,7 @@ function MultiOutcomeResult({
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] uppercase tracking-wider text-gray-500 font-medium">Results</span>
             <button
-              onClick={() => navigator.clipboard.writeText(result.result_text)}
+              onClick={() => navigator.clipboard.writeText(result.result_text ?? "")}
               className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
             >
               Copy
@@ -1178,7 +1178,7 @@ function MultiOutcomeResult({
               ))}
             </tr>
             <tr className="bg-gray-50 text-[10px] text-gray-500">
-              {outcomes.flatMap((oc, oi) => {
+              {outcomes.flatMap((_, oi) => {
                 const parts = ["B", "SE"];
                 if (showBeta) parts.push("β");
                 parts.push("95% CI", "p");

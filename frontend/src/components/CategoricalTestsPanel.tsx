@@ -75,10 +75,10 @@ function ResultCard({ result }: { result: CategoricalResult }) {
           </div>
         ))}
       </div>
-      {result.effect_sizes?.length > 0 && (
+      {(result.effect_sizes?.length ?? 0) > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: EffectSize, i: number) => (
+          {(result.effect_sizes ?? []).map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -88,14 +88,14 @@ function ResultCard({ result }: { result: CategoricalResult }) {
           ))}
         </div>
       )}
-      {result.posthoc?.length > 0 && (
+      {(result.posthoc?.length ?? 0) > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-600 mb-1">Post-hoc: {result.posthoc_method ?? "Pairwise"}</p>
           <div className="overflow-auto rounded border border-gray-200">
             <table className="w-full text-xs"><thead><tr className="bg-gray-50">
               <th className="px-2 py-1 text-left">Comparison</th><th className="px-2 py-1 text-right"><i>p</i> (adj)</th><th className="px-2 py-1 text-center">Sig</th>
             </tr></thead><tbody>
-              {result.posthoc.map((ph: PostHocRow, i: number) => (
+              {(result.posthoc ?? []).map((ph: PostHocRow, i: number) => (
                 <tr key={i} className={`border-t border-gray-100 ${ph.significant?"":"text-gray-400"}`}>
                   <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
                   <td className="px-2 py-1 text-right font-mono">{fmtP(ph.p_adj)}</td>
@@ -157,7 +157,7 @@ function CategoricalTestsPanelBody({ session }: { session: Session }) {
     setLoading(true); setError(null); setResult(null);
     const sid = session.session_id;
     try {
-      let res: { data?: CategoricalResult };
+      let res: { data?: CategoricalResult } | null = null;
       if (test === "binomial") res = await runBinomial({ session_id: sid, column: col, expected_proportion: +nullProp });
       else if (test === "one_prop") res = await runOneProportion({ session_id: sid, column: col, null_proportion: +nullProp });
       else if (test === "two_prop") res = await runTwoProportions({ session_id: sid, column: col, group_column: groupCol });

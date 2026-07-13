@@ -11,6 +11,9 @@ import ThreeCol from "./ThreeCol";
 
 type Mode = "arima" | "decompose" | "stationarity";
 
+const asNumber = (v: unknown): number | undefined => typeof v === "number" ? v : undefined;
+const asString = (v: unknown): string | undefined => typeof v === "string" ? v : undefined;
+
 /** A point in an ACF/PACF stem plot returned by the stationarity endpoint. */
 interface StemPoint {
   lag: number;
@@ -99,7 +102,7 @@ export default function TimeSeriesPanel() {
     return (
       <TitledPlot
         plotRefOut={mainRef}
-        storageKey={`ts:arima:${result.value_col}`}
+        storageKey={`ts:arima:${asString(result.value_col) ?? ""}`}
         data={[
           { type: "scatter", mode: "lines", x: obsX, y: obsY, line: { color: "#374151", width: 1.5 }, name: "Observed" },
           { type: "scatter", mode: "lines", x: obsX, y: fitY, line: { color: pal[0], width: 1.5, dash: "dot" as const }, name: "Fitted" },
@@ -114,10 +117,10 @@ export default function TimeSeriesPanel() {
           margin: { t: 36, r: 20, b: 50, l: 60 },
         }}
         config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        defaultTitle={`ARIMA${JSON.stringify(result.order)}×${JSON.stringify(result.seasonal_order)} — ${result.value_col}`}
+        defaultTitle={`ARIMA${JSON.stringify(result.order)}×${JSON.stringify(result.seasonal_order)} — ${asString(result.value_col) ?? ""}`}
         defaultSubtitle=""
         defaultXAxis={timeCol || "t"}
-        defaultYAxis={result.value_col} />
+        defaultYAxis={asString(result.value_col)} />
     );
   };
 
@@ -153,7 +156,7 @@ export default function TimeSeriesPanel() {
           })),
         }}
         config={{ responsive: true, displaylogo: false, displayModeBar: false }}
-        defaultTitle={`${result.method.toUpperCase()} decomposition (period ${result.period})`}
+        defaultTitle={`${asString(result.method)?.toUpperCase() ?? ""} decomposition (period ${result.period})`}
         defaultSubtitle=""
         defaultXAxis=""
         defaultYAxis="" />
@@ -358,11 +361,11 @@ export default function TimeSeriesPanel() {
                   <div className="grid grid-cols-2 gap-1.5">
                     <div className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                       <p className="text-[10px] text-gray-400">Trend</p>
-                      <p className="font-semibold text-indigo-700 text-sm font-mono">{result.strength_trend?.toFixed(2)}</p>
+                      <p className="font-semibold text-indigo-700 text-sm font-mono">{asNumber(result.strength_trend)?.toFixed(2) ?? "—"}</p>
                     </div>
                     <div className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                       <p className="text-[10px] text-gray-400">Seasonal</p>
-                      <p className="font-semibold text-indigo-700 text-sm font-mono">{result.strength_seasonal?.toFixed(2)}</p>
+                      <p className="font-semibold text-indigo-700 text-sm font-mono">{asNumber(result.strength_seasonal)?.toFixed(2) ?? "—"}</p>
                     </div>
                   </div>
                 </div>
@@ -374,17 +377,20 @@ export default function TimeSeriesPanel() {
                   <div className="space-y-1 text-xs">
                     <div className={`flex justify-between px-2 py-1 rounded ${result.adf_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>ADF (H₀: unit root)</span>
-                      <span className="font-mono"><i>p</i> = {fmtP(result.adf_p)}</span>
+                      <span className="font-mono"><i>p</i> = {fmtP(asNumber(result.adf_p))}</span>
                     </div>
                     <div className={`flex justify-between px-2 py-1 rounded ${result.kpss_stationary ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
                       <span>KPSS (H₀: stationary)</span>
-                      <span className="font-mono">p = {result.kpss_p == null ? "—" : result.kpss_p < 0.01 ? "<0.01" : result.kpss_p.toFixed(3)}</span>
+                      <span className="font-mono">p = {(() => {
+                        const kpssP = asNumber(result.kpss_p);
+                        return kpssP == null ? "—" : kpssP < 0.01 ? "<0.01" : kpssP.toFixed(3);
+                      })()}</span>
                     </div>
                   </div>
                 </div>
               )}
 
-              {result.interpretation && (
+              {typeof result.interpretation === "string" && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-2 text-xs text-indigo-900 leading-relaxed">
                   {result.interpretation}
                 </div>

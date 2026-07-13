@@ -163,10 +163,10 @@ function ResultCard({ result }: { result: TestResult }) {
       </div>
 
       {/* Effect Sizes */}
-      {result.effect_sizes?.length > 0 && (
+      {(result.effect_sizes?.length ?? 0) > 0 && (
         <div className="mt-2 space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: EffectSize, i: number) => (
+          {(result.effect_sizes ?? []).map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -188,10 +188,10 @@ function ResultCard({ result }: { result: TestResult }) {
       )}
 
       {/* Assumptions */}
-      {result.assumptions?.length > 0 && (
+      {(result.assumptions?.length ?? 0) > 0 && (
         <div className="mt-2 space-y-1">
           <p className="text-xs font-semibold text-gray-600">Assumption Checks</p>
-          {result.assumptions.map((a: AssumptionCheck, i: number) => (
+          {(result.assumptions ?? []).map((a: AssumptionCheck, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1 rounded-lg ${a.met ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"}`}>
               <span>{a.met ? "✓" : "⚠"}</span>
               <span className="font-medium">{a.name}</span>
@@ -202,9 +202,9 @@ function ResultCard({ result }: { result: TestResult }) {
       )}
 
       {/* Warnings */}
-      {result.warnings?.length > 0 && (
+      {(result.warnings?.length ?? 0) > 0 && (
         <div className="mt-2 space-y-1">
-          {result.warnings.map((w: string, i: number) => (
+          {(result.warnings ?? []).map((w: string, i: number) => (
             <div key={i} className="flex items-center gap-2 text-xs px-3 py-1 rounded-lg bg-amber-50 text-amber-800">
               <span>⚠</span> {w}
             </div>
@@ -217,14 +217,14 @@ function ResultCard({ result }: { result: TestResult }) {
         <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[10px] font-semibold text-gray-400 uppercase">Results Paragraph</span>
-            <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+            <button onClick={() => navigator.clipboard.writeText(result.result_text ?? "")} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
           </div>
           <p className="text-sm text-gray-700 leading-relaxed">{result.result_text}</p>
         </div>
       )}
 
       {/* Post-hoc results */}
-      {result.posthoc?.length > 0 && (
+      {(result.posthoc?.length ?? 0) > 0 && (
         <div className="mt-3">
           <p className="text-xs font-semibold text-gray-600 mb-1">
             Post-hoc: {result.posthoc_method ?? "Pairwise comparisons"}
@@ -241,7 +241,7 @@ function ResultCard({ result }: { result: TestResult }) {
                 </tr>
               </thead>
               <tbody>
-                {result.posthoc.map((ph: PostHocRow, i: number) => (
+                {(result.posthoc ?? []).map((ph: PostHocRow, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1 font-medium">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
@@ -281,13 +281,13 @@ function ResultCard({ result }: { result: TestResult }) {
             <thead>
               <tr>
                 <th></th>
-                {result.col_labels.map((l: string) => <th key={l}>{l}</th>)}
+                {(result.col_labels ?? []).map((l: string) => <th key={l}>{l}</th>)}
               </tr>
             </thead>
             <tbody>
               {result.table.map((row: number[], i: number) => (
                 <tr key={i}>
-                  <td className="font-medium text-gray-900">{result.row_labels[i]}</td>
+                  <td className="font-medium text-gray-900">{(result.row_labels ?? [])[i] ?? ""}</td>
                   {row.map((v, j) => <td key={j}>{v}</td>)}
                 </tr>
               ))}
@@ -324,7 +324,7 @@ function HypothesisPanelBody({ session }: { session: Session }) {
   const [posthocCorrection, setPosthocCorrection] = usePersistedPanelState<"holm" | "bonferroni" | "fdr" | "none">("hypothesis", "correction", "holm");
   const cached = useStore((s) => s.panelCache.hypothesis);
   const setCache = useStore((s) => s.setPanelCache);
-  const [result, _setResult] = useState<TestResult | null>((cached?.result as TestResult | undefined) ?? null);
+  const [result, _setResult] = useState<TestResult | null>(((cached as { result?: TestResult | null } | undefined)?.result) ?? null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Merge into the existing cache object so the persisted selection keys

@@ -335,10 +335,10 @@ export function CoefDetailPanel({
             ["SE", se.toFixed(5)],
             ["z / t", (coef.z ?? coef.t)?.toFixed(4) ?? "–"],
             ["p (adj)", fmtP(adjP)],
-            ...(coef.ci_low != null ? [["95% CI", `${coef.ci_low.toFixed(3)} – ${coef.ci_high.toFixed(3)}`]] : []),
-            ...(coef.or_ci_low != null ? [["OR CI", `${coef.or_ci_low.toFixed(3)} – ${coef.or_ci_high.toFixed(3)}`]] : []),
-            ...(coef.hr_ci_low  != null ? [["HR CI", `${coef.hr_ci_low.toFixed(3)} – ${coef.hr_ci_high.toFixed(3)}`]] : []),
-            ...(coef.irr_ci_low != null ? [["IRR CI", `${coef.irr_ci_low.toFixed(3)} – ${coef.irr_ci_high.toFixed(3)}`]] : []),
+            ...(coef.ci_low != null && coef.ci_high != null ? [["95% CI", `${coef.ci_low.toFixed(3)} – ${coef.ci_high.toFixed(3)}`]] : []),
+            ...(coef.or_ci_low != null && coef.or_ci_high != null ? [["OR CI", `${coef.or_ci_low.toFixed(3)} – ${coef.or_ci_high.toFixed(3)}`]] : []),
+            ...(coef.hr_ci_low  != null && coef.hr_ci_high != null ? [["HR CI", `${coef.hr_ci_low.toFixed(3)} – ${coef.hr_ci_high.toFixed(3)}`]] : []),
+            ...(coef.irr_ci_low != null && coef.irr_ci_high != null ? [["IRR CI", `${coef.irr_ci_low.toFixed(3)} – ${coef.irr_ci_high.toFixed(3)}`]] : []),
             ...(coef.odds_ratio != null ? [["OR", coef.odds_ratio.toFixed(4)]] : []),
             ...(coef.hr != null         ? [["HR", coef.hr.toFixed(4)]] : []),
             ...(coef.irr != null        ? [["IRR", coef.irr.toFixed(4)]] : []),
@@ -400,7 +400,7 @@ export function ModelSummaryTable({ s }: { s: ModelSummary }) {
             <td className="px-3 py-1.5 text-indigo-700 font-medium">Nagelkerke R²</td>
             <td className="px-3 py-1.5 text-right font-mono font-bold text-indigo-700">{s.nagelkerke_r2?.toFixed(4)}</td>
             <td className="px-3 py-1.5" colSpan={2}>
-              <span className="text-[10px] text-indigo-600">{s.nagelkerke_r2 >= 0.4 ? "Excellent" : s.nagelkerke_r2 >= 0.2 ? "Good" : s.nagelkerke_r2 >= 0.1 ? "Moderate" : "Weak"} explanatory power</span>
+              <span className="text-[10px] text-indigo-600">{(s.nagelkerke_r2 ?? 0) >= 0.4 ? "Excellent" : (s.nagelkerke_r2 ?? 0) >= 0.2 ? "Good" : (s.nagelkerke_r2 ?? 0) >= 0.1 ? "Moderate" : "Weak"} explanatory power</span>
             </td>
           </tr>
           {s.auc != null && (

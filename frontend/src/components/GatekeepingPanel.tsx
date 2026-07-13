@@ -190,7 +190,7 @@ export default function GatekeepingPanel() {
                             <td className="px-2 py-1 font-mono text-gray-800">{h.label}</td>
                             <td className="px-2 py-1 font-mono text-right text-gray-500">{h.p_raw}</td>
                             <td className={`px-2 py-1 font-mono text-right ${h.reject ? "text-indigo-700 font-semibold" : "text-gray-600"}`}>
-                              {h.p_adjusted >= 1 ? "1.000" : fmtP(h.p_adjusted)}
+                              {h.p_adjusted == null ? "—" : h.p_adjusted >= 1 ? "1.000" : fmtP(h.p_adjusted)}
                             </td>
                             <td className="px-2 py-1 text-center">
                               <span className={`inline-block text-[10px] font-semibold border rounded-full px-1.5 py-0.5 ${

@@ -54,7 +54,16 @@ type ChartTab = "histogram" | "boxplot" | "violin" | "qq";
 interface ScatterResult {
   points: Record<string, unknown>[];
   color?: unknown;
-  regression: { line_x?: number[]; line_y?: number[] };
+  regression: {
+    line_x?: number[];
+    line_y?: number[];
+    r?: number;
+    r2?: number;
+    p?: number | null;
+    slope?: number;
+    intercept?: number;
+    note?: string;
+  };
 }
 
 interface ColMeta {
@@ -615,7 +624,7 @@ function ScatterView({
       .finally(() => setLoading(false));
   }, [xCol, yCol, color, shape, sessionId]);
 
-  const fmt = (v: number, d = 3) =>
+  const fmt = (v: number | null | undefined, d = 3) =>
     typeof v === "number" ? (Math.abs(v) < 0.001 && v !== 0 ? v.toExponential(2) : v.toFixed(d)) : "—";
 
   const traces: PlotData[] = [];
@@ -681,7 +690,7 @@ function ScatterView({
     }
 
     const reg = data.regression;
-    if (reg.line_x?.length > 0) {
+    if ((reg.line_x?.length ?? 0) > 0) {
       traces.push({
         type: "scatter", mode: "lines",
         x: reg.line_x, y: reg.line_y,
@@ -1044,7 +1053,7 @@ export default function DescriptivePanel() {
     return 2;
   };
 
-  const fmt = (v: number, d?: number) => {
+  const fmt = (v: number | null | undefined, d?: number) => {
     if (typeof v !== "number") return "—";
     if (Math.abs(v) < 0.0001 && v !== 0) return v.toExponential(2);
     const dd = typeof d === "number" ? d : colDecimals(selected);
@@ -1206,7 +1215,7 @@ export default function DescriptivePanel() {
                     <span className="text-gray-600">
                       {summary.type === "numeric" ? "Continuous" : "Categorical"} · <i>n</i>={summary.n}
                     </span>
-                    {summary.missing > 0 && (
+                    {(summary.missing ?? 0) > 0 && (
                       <span className="text-amber-600 text-xs">· {summary.missing} missing</span>
                     )}
                     {summary.type === "numeric" && summary.normality_p != null && (
@@ -1263,7 +1272,7 @@ export default function DescriptivePanel() {
                         ({summary.normality_test ?? "Shapiro-Wilk"} <i>p</i> = {fmt(summary.normality_p ?? summary.shapiro_p, 3)})
                       </span>
                       <div className="text-[10px] font-normal text-gray-400 mt-0.5">
-                        {summary.n < 50 ? "n < 50 → Shapiro-Wilk" : "n ≥ 50 → Kolmogorov-Smirnov"}
+                        {(summary.n ?? 0) < 50 ? "n < 50 → Shapiro-Wilk" : "n ≥ 50 → Kolmogorov-Smirnov"}
                       </div>
                     </div>
                   )}
@@ -1313,8 +1322,8 @@ export default function DescriptivePanel() {
                           ? <>Normal distribution ({summary.normality_test}, <i>p</i>={pNorm}) \u2014 report Mean \u00B1 SD ({f(summary.mean)} \u00B1 {f(summary.std)}).</>
                           : <>Non-normal ({summary.normality_test}, <i>p</i>={pNorm}) \u2014 report Median [IQR] ({f(summary.median)} [{f(summary.q1)}\u2013{f(summary.q3)}]).</>;
                       })()}
-                      {Math.abs(summary.skewness) > 2 ? " Highly skewed \u2014 consider log-transformation." :
-                       Math.abs(summary.skewness) > 1 ? " Moderately skewed." : ""}
+                      {Math.abs(summary.skewness ?? 0) > 2 ? " Highly skewed \u2014 consider log-transformation." :
+                       Math.abs(summary.skewness ?? 0) > 1 ? " Moderately skewed." : ""}
                     </p>
                   </div>
                 )}
@@ -1322,7 +1331,7 @@ export default function DescriptivePanel() {
                   <div className="px-4 py-1.5 border-b border-gray-100 bg-amber-50 flex-shrink-0">
                     <p className="text-[10px] text-amber-800 leading-relaxed">
                       {summary.categories?.length} categories, <i>n</i> = {summary.n}. Report as <i>n</i> (%). Most frequent: {summary.categories?.[0]?.value} ({summary.categories?.[0]?.pct}%).
-                      {summary.missing > 0 ? ` Missing: ${summary.missing} (${(summary.missing / (summary.n + summary.missing) * 100).toFixed(1)}%).` : ""}
+                      {(summary.missing ?? 0) > 0 ? ` Missing: ${summary.missing} (${((summary.missing ?? 0) / ((summary.n ?? 0) + (summary.missing ?? 0)) * 100).toFixed(1)}%).` : ""}
                     </p>
                   </div>
                 )}

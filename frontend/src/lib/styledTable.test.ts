@@ -135,7 +135,6 @@ describe('buildTsv', () => {
 describe('copyStyledTable', () => {
   afterEach(() => {
     vi.restoreAllMocks()
-    // @ts-expect-error resetting test-only global
     delete (globalThis as { ClipboardItem?: unknown }).ClipboardItem
   })
 
@@ -146,10 +145,12 @@ describe('copyStyledTable', () => {
       configurable: true,
     })
     class FakeClipboardItem {
-      constructor(public items: Record<string, Blob>) {}
+      items: Record<string, Blob>
+      constructor(items: Record<string, Blob>) {
+        this.items = items
+      }
     }
-    // @ts-expect-error test-only global stub
-    globalThis.ClipboardItem = FakeClipboardItem
+    globalThis.ClipboardItem = FakeClipboardItem as unknown as typeof ClipboardItem
 
     const ok = await copyStyledTable(sample)
     expect(ok).toBe(true)
@@ -198,7 +199,7 @@ describe('downloadStyledHtml', () => {
     const origCreateElement = document.createElement.bind(document)
     vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {
       const el = origCreateElement(tag)
-      if (tag === 'a') el.click = clickSpy
+      if (tag === 'a') el.click = () => { (clickSpy as unknown as () => void)() }
       return el
     })
   })

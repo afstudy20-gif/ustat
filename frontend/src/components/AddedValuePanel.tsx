@@ -180,8 +180,8 @@ export default function AddedValuePanel() {
             <div>
               <div className="text-xs font-semibold text-gray-600 mb-1">Discrimination</div>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <Tile label="AUC base" value={result.discrimination.auc_base?.toFixed(3)} />
-                <Tile label="AUC full" value={result.discrimination.auc_full?.toFixed(3)} tone="text-emerald-600" />
+                <Tile label="AUC base" value={result.discrimination.auc_base?.toFixed(3) ?? "—"} />
+                <Tile label="AUC full" value={result.discrimination.auc_full?.toFixed(3) ?? "—"} tone="text-emerald-600" />
                 <Tile label="ΔAUC (DeLong)"
                   value={(result.discrimination.delta_auc >= 0 ? "+" : "") + result.discrimination.delta_auc?.toFixed(3)}
                   sub={<><i>p</i> = {fmtP(result.discrimination.delong_p)}</>}

@@ -111,7 +111,7 @@ export function CoefTable({
                   <td className="pr-2"><span className={adjP < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(adjP)}</span></td>
                   <td className={`font-mono font-semibold pr-2 ${adjP < 0.05 ? "text-indigo-600" : ""}`}>{c.irr?.toFixed(3)}</td>
                   <td className="font-mono text-xs text-gray-400 pr-2">
-                    {c.irr_ci_low != null ? `${c.irr_ci_low.toFixed(3)}–${c.irr_ci_high.toFixed(3)}` : "–"}
+                    {c.irr_ci_low != null && c.irr_ci_high != null ? `${c.irr_ci_low.toFixed(3)}–${c.irr_ci_high.toFixed(3)}` : "–"}
                   </td>
                   <td className="pr-2">{renderViz(c)}</td>
                   <td className="pr-2">{renderSig(c)}</td>
@@ -161,7 +161,7 @@ export function CoefTable({
                   <td className="pr-2"><span className={adjP < 0.05 ? "badge-sig" : "badge-ns"}>{fmtP(adjP)}</span></td>
                   <td className={`font-mono font-semibold pr-2 ${adjP < 0.05 ? "text-indigo-600" : ""}`}>{c.odds_ratio?.toFixed(3)}</td>
                   <td className="font-mono text-xs text-gray-400 pr-2">
-                    {c.or_ci_low != null ? `${c.or_ci_low.toFixed(3)}–${c.or_ci_high.toFixed(3)}` : "–"}
+                    {c.or_ci_low != null && c.or_ci_high != null ? `${c.or_ci_low.toFixed(3)}–${c.or_ci_high.toFixed(3)}` : "–"}
                   </td>
                   <td className="pr-2">{renderViz(c)}</td>
                   <td className="pr-2">{renderSig(c)}</td>
@@ -203,8 +203,8 @@ export function CoefTable({
             const beta = getBeta(c) ?? 0;
             const adjP = adjustP(c.p, beta, nullHyp);
             const ci   = hrMode
-              ? (c.hr_ci_low != null ? `${c.hr_ci_low.toFixed(3)}–${c.hr_ci_high.toFixed(3)}` : "–")
-              : (c.ci_low != null    ? `${c.ci_low.toFixed(3)}–${c.ci_high.toFixed(3)}`        : "–");
+              ? (c.hr_ci_low != null && c.hr_ci_high != null ? `${c.hr_ci_low.toFixed(3)}–${c.hr_ci_high.toFixed(3)}` : "–")
+              : (c.ci_low != null    && c.ci_high != null    ? `${c.ci_low.toFixed(3)}–${c.ci_high.toFixed(3)}`        : "–");
             return (
               <tr key={c.variable} className={rowCls(i, adjP)} onClick={() => onSelect?.(i)}>
                 <td className="font-mono text-xs text-gray-900 pr-2">{c.variable}</td>

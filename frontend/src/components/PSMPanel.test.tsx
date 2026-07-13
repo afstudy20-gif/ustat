@@ -38,7 +38,7 @@ const PSM_RESULT = {
 async function selectCovariates(user: ReturnType<typeof userEvent.setup>) {
   // "AGE"/"LDL" checkboxes also appear in the "Exact match strata" list, so scope to
   // the Covariates (Confounders) panel specifically.
-  const covariatesPanel = screen.getByText('Covariates (Confounders)').closest('div.panel')!
+  const covariatesPanel = screen.getByText('Covariates (Confounders)').closest('div.panel') as HTMLElement
   await user.click(within(covariatesPanel).getByRole('checkbox', { name: 'AGE' }))
   await user.click(within(covariatesPanel).getByRole('checkbox', { name: 'LDL' }))
 }

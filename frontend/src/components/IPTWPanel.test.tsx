@@ -95,7 +95,7 @@ describe('IPTWPanel', () => {
 
     // Select a covariate then deselect it via the covariates panel's "None" button
     // (there is another unrelated "None" button in weight-truncation options, so scope the query).
-    const covariatesPanel = screen.getByText('Covariates (Confounders)').closest('div.panel')!
+    const covariatesPanel = screen.getByText('Covariates (Confounders)').closest('div.panel') as HTMLElement
     await user.click(within(covariatesPanel).getByRole('button', { name: 'None' }))
     expect(screen.getByRole('button', { name: /run iptw/i })).toBeDisabled()
   })

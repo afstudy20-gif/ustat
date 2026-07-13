@@ -128,10 +128,10 @@ function ResultCard({ result }: { result: RMResult }) {
       </div>
 
       {/* Effect Sizes */}
-      {result.effect_sizes?.length > 0 && (
+      {(result.effect_sizes?.length ?? 0) > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Effect Sizes</p>
-          {result.effect_sizes.map((es: EffectSize, i: number) => (
+          {(result.effect_sizes ?? []).map((es: EffectSize, i: number) => (
             <div key={i} className="flex items-center gap-3 bg-indigo-50 rounded-lg px-3 py-1.5 text-xs">
               <span className="font-semibold text-indigo-800">{es.name?.replace(/_/g, " ")}</span>
               <span className="font-mono text-indigo-700">{es.value?.toFixed(3)}</span>
@@ -151,10 +151,10 @@ function ResultCard({ result }: { result: RMResult }) {
       )}
 
       {/* Assumptions */}
-      {result.assumptions?.length > 0 && (
+      {(result.assumptions?.length ?? 0) > 0 && (
         <div className="space-y-1">
           <p className="text-xs font-semibold text-gray-600">Assumption Checks</p>
-          {result.assumptions.map((a: AssumptionCheck, i: number) => (
+          {(result.assumptions ?? []).map((a: AssumptionCheck, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1 rounded-lg ${a.met ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-800"}`}>
               <span>{a.met ? "\u2713" : "\u26A0"}</span>
               <span className="font-medium">{a.name}</span>
@@ -165,7 +165,7 @@ function ResultCard({ result }: { result: RMResult }) {
       )}
 
       {/* Warnings */}
-      {result.warnings?.length > 0 && result.warnings.map((w: string, i: number) => (
+      {(result.warnings?.length ?? 0) > 0 && (result.warnings ?? []).map((w: string, i: number) => (
         <div key={i} className="text-xs px-3 py-1 rounded-lg bg-amber-50 text-amber-800">\u26A0 {w}</div>
       ))}
 
@@ -177,7 +177,7 @@ function ResultCard({ result }: { result: RMResult }) {
       )}
 
       {/* Multi-effect table (mixed ANOVA) */}
-      {result.effects?.length > 0 && (
+      {(result.effects?.length ?? 0) > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-600 mb-1">ANOVA Effects</p>
           <div className="overflow-auto rounded border border-gray-200">
@@ -191,7 +191,7 @@ function ResultCard({ result }: { result: RMResult }) {
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
               <tbody>
-                {result.effects.map((e: AnovaEffect, i: number) => (
+                {(result.effects ?? []).map((e: AnovaEffect, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${e.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1 font-medium">{e.term}</td>
                     <td className="px-2 py-1 text-right font-mono">{e.F?.toFixed(3)}</td>
@@ -208,7 +208,7 @@ function ResultCard({ result }: { result: RMResult }) {
       )}
 
       {/* Post-hoc */}
-      {result.posthoc?.length > 0 && (
+      {(result.posthoc?.length ?? 0) > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-600 mb-1">Post-hoc: {result.posthoc_method ?? "Pairwise"}</p>
           <div className="overflow-auto rounded border border-gray-200">
@@ -220,7 +220,7 @@ function ResultCard({ result }: { result: RMResult }) {
                 <th className="px-2 py-1 text-center">Sig</th>
               </tr></thead>
               <tbody>
-                {result.posthoc.map((ph: PostHocRow, i: number) => (
+                {(result.posthoc ?? []).map((ph: PostHocRow, i: number) => (
                   <tr key={i} className={`border-t border-gray-100 ${ph.significant ? "" : "text-gray-400"}`}>
                     <td className="px-2 py-1">{ph.group1} vs {ph.group2}</td>
                     <td className="px-2 py-1 text-right font-mono">{ph.statistic?.toFixed(3)}</td>
@@ -276,7 +276,7 @@ function RepeatedMeasuresPanelBody({ session }: { session: Session }) {
     setLoading(true); setError(null); setResult(null);
     const sid = session.session_id;
     try {
-      let res: { data?: RMResult };
+      let res: { data?: RMResult } | null = null;
       if (test === "paired_ttest") res = await runPairedTTest({ session_id: sid, col1, col2 });
       else if (test === "wilcoxon_sr") res = await runWilcoxonSR({ session_id: sid, col1, col2 });
       else if (test === "friedman") res = await runFriedman({ session_id: sid, columns: friedmanCols });

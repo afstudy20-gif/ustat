@@ -653,7 +653,7 @@ function IPTWPanelBody({ session }: { session: Session }) {
                     {result.stabilize ? " (stabilised)" : ""}
                     {" · "}<i>n</i> = {result.n_total} ({result.n_treated} treated, {result.n_control} control)
                     {result.n_trimmed_common_support > 0 && <> · {result.n_trimmed_common_support} trimmed (common support)</>}
-                    {result.weight_truncation?.n_trimmed > 0 && <> · {result.weight_truncation.n_trimmed} weights truncated</>}
+                    {(result.weight_truncation?.n_trimmed ?? 0) > 0 && <> · {result.weight_truncation?.n_trimmed} weights truncated</>}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-1">
                     Score = {result.score_method} · ESS treated = {result.weight_summary?.ess_treated} · ESS control = {result.weight_summary?.ess_control} · max w = {result.weight_summary?.max}

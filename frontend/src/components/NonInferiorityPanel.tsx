@@ -228,7 +228,7 @@ export default function NonInferiorityPanel() {
                   ["Margin", result.margin],
                   ["Bound tested", result.bound],
                   ["1-sided α", result.alpha_one_sided],
-                  [<><i>p</i> (NI)</>, result.p_noninferiority < 0.001 ? "<0.001" : result.p_noninferiority],
+                  [<><i>p</i> (NI)</>, result.p_noninferiority == null ? "—" : result.p_noninferiority < 0.001 ? "<0.001" : result.p_noninferiority],
                 ] as [ReactNode, ReactNode][]).map(([k, v], i) => (
                   <div key={i} className="bg-gray-50 border border-gray-200 rounded p-2 text-center">
                     <p className="text-[9px] text-gray-400">{k}</p>
@@ -239,7 +239,7 @@ export default function NonInferiorityPanel() {
               {(result.n_test != null) && (
                 <p className="text-[11px] text-gray-500">
                   {result.outcome_type === "binary"
-                    ? `Test: ${result.events_test}/${result.n_test} (${(result.p_test * 100).toFixed(1)}%) · Ref: ${result.events_ref}/${result.n_ref} (${(result.p_ref * 100).toFixed(1)}%)`
+                    ? `Test: ${result.events_test}/${result.n_test} (${result.p_test == null ? "—" : (result.p_test * 100).toFixed(1)}%) · Ref: ${result.events_ref}/${result.n_ref} (${result.p_ref == null ? "—" : (result.p_ref * 100).toFixed(1)}%)`
                     : <>Test: mean {result.mean_test} (<i>n</i>={result.n_test}) · Ref: mean {result.mean_ref} (<i>n</i>={result.n_ref})</>}
                 </p>
               )}

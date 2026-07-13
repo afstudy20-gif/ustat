@@ -27,13 +27,15 @@ export function usePersistedPanelState<T>(
   // initialiser avoids subscribing the component to panelCache mutations,
   // which would defeat the "set once, mirror out" contract and risk loops.
   const [value, setValue] = useState<T>(() => {
-    const cached = useStore.getState().panelCache[panelId];
+    const rawCached = useStore.getState().panelCache[panelId];
+    const cached = rawCached && typeof rawCached === "object" ? rawCached as Record<string, unknown> : undefined;
     return cached && key in cached ? (cached[key] as T) : initialValue;
   });
 
   // Mirror to panelCache whenever the value changes (idempotent when equal).
   useEffect(() => {
-    const cur = useStore.getState().panelCache[panelId] ?? {};
+    const rawCur = useStore.getState().panelCache[panelId];
+    const cur = rawCur && typeof rawCur === "object" ? rawCur as Record<string, unknown> : {};
     if (cur[key] !== value) {
       useStore.getState().setPanelCache(panelId, { ...cur, [key]: value });
     }

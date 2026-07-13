@@ -83,7 +83,7 @@ export default function PlotExporter({
     // Reuse the gd's own Plotly instance — same fix as downloadImage.
     let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
     if (!Plotly?.toImage) {
-      const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
+      const mod = (await import("plotly.js/dist/plotly")) as unknown as PlotlyToImage & { default?: PlotlyToImage };
       Plotly = mod?.toImage ? mod : mod?.default;
     }
     if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");
@@ -147,7 +147,7 @@ export default function PlotExporter({
         // rendered the chart and bypasses the ESM tree-shake bug entirely.
         let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
         if (!Plotly?.toImage) {
-          const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
+          const mod = (await import("plotly.js/dist/plotly")) as unknown as PlotlyToImage & { default?: PlotlyToImage };
           Plotly = mod?.toImage ? mod : mod?.default;
         }
         if (!Plotly?.toImage) {

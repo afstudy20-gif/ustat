@@ -130,11 +130,8 @@ describe('exportDataset', () => {
 describe('downloadSessionJson', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    // @ts-expect-error jsdom stub
     URL.createObjectURL = vi.fn(() => 'blob:mock-url')
-    // @ts-expect-error jsdom stub
     URL.revokeObjectURL = vi.fn()
-    // @ts-expect-error jsdom stub
     window.alert = vi.fn()
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
   })

@@ -45,7 +45,7 @@ function resolveGraphDiv(plotRef: PlotRef): HTMLElement | undefined {
 async function resolvePlotly(el: HTMLElement): Promise<PlotlyToImage> {
   let Plotly: PlotlyToImage | undefined = (el as { _Plotly?: PlotlyToImage })._Plotly;
   if (!Plotly?.toImage) {
-    const mod = (await import("plotly.js/dist/plotly")) as PlotlyToImage & { default?: PlotlyToImage };
+    const mod = (await import("plotly.js/dist/plotly")) as unknown as PlotlyToImage & { default?: PlotlyToImage };
     Plotly = mod?.toImage ? mod : mod?.default;
   }
   if (!Plotly?.toImage) throw new Error("plotly.js toImage not available");

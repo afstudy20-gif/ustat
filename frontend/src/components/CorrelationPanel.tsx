@@ -701,7 +701,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
                 const v = data.matrix[c1][c2];
                 const p = data.p_matrix?.[c1]?.[c2];
                 if (v == null) return "";
-                return `${v.toFixed(2)}${starsFor(p)}`;
+                return `${v.toFixed(2)}${starsFor(p ?? null)}`;
               })
             ),
             texttemplate: "%{text}",
@@ -724,7 +724,7 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
         </div>
       </div>
     ) : (
-      <div className="panel h-[480px] flex flex-col gap-2 relative" ref={corrSplomRef}>
+      <div className="panel h-[480px] flex flex-col gap-2 relative">
         <PlotExporter plotRef={corrSplomRef} title="Scatter_Matrix" />
         <div className="flex items-center justify-between flex-shrink-0">
           <span className="text-xs font-semibold text-gray-500">
@@ -765,8 +765,8 @@ function MatrixTab({ sessionId, columns }: { sessionId: string; columns: string[
               margin: { t: 20, r: 20, b: 20, l: 20 },
               dragmode: "select" as const,
             }}
-            onInitialized={(_: object, gd: HTMLElement) => { corrSplomRef.current = gd; }}
-            onUpdate={(_: object, gd: HTMLElement)      => { corrSplomRef.current = gd; }}
+            onInitialized={(_: object, gd: HTMLElement) => { corrSplomRef.current = gd as unknown as PlotCaptureHandle; }}
+            onUpdate={(_: object, gd: HTMLElement)      => { corrSplomRef.current = gd as unknown as PlotCaptureHandle; }}
             style={{ width: "100%", flex: 1 }}
             useResizeHandler
             config={{ responsive: true, displayModeBar: false }}

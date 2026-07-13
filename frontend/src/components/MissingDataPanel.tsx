@@ -660,7 +660,7 @@ export default function MissingDataPanel() {
                   <div className="flex items-center justify-between gap-3 mb-1.5">
                     <p className="text-xs font-semibold text-indigo-800">Methods</p>
                     <button
-                      onClick={() => navigator.clipboard.writeText(micePreviewResult.methods_text)}
+                      onClick={() => navigator.clipboard.writeText(micePreviewResult.methods_text ?? "")}
                       className="text-[10px] px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-white transition-colors"
                     >
                       Copy
@@ -669,7 +669,7 @@ export default function MissingDataPanel() {
                   <p className="text-xs text-indigo-800 leading-relaxed">{micePreviewResult.methods_text}</p>
                 </div>
               )}
-              {micePreviewResult?.export_rows?.length > 1 && (
+              {micePreviewResult?.export_rows && micePreviewResult.export_rows.length > 1 && (
                 <>
                   <div className="overflow-auto rounded-lg border border-gray-200">
                     <table className="text-xs w-full">
@@ -679,10 +679,16 @@ export default function MissingDataPanel() {
                       ))}</tbody>
                     </table>
                   </div>
-                  <ResultExporter title="MICE_imputation_preview" headers={micePreviewResult.export_rows[0]} rows={micePreviewResult.export_rows.slice(1)} />
+                  <ResultExporter
+                    title="MICE_imputation_preview"
+                    headers={micePreviewResult.export_rows[0].map(String)}
+                    rows={micePreviewResult.export_rows.slice(1).map((row) => row.map((v) =>
+                      v == null || typeof v === "string" || typeof v === "number" ? v : String(v)
+                    ))}
+                  />
                 </>
               )}
-              {micePreviewResult?.preview_rows?.length > 0 && (
+              {micePreviewResult?.preview_rows && micePreviewResult.preview_rows.length > 0 && (
                 <div className="space-y-3">
                   <p className="text-xs font-semibold text-gray-700">Previewed imputed values</p>
                   <div className="overflow-auto rounded-lg border border-gray-200 max-h-64">
@@ -920,7 +926,7 @@ export default function MissingDataPanel() {
               {externalResult?.warnings?.map((w) => (
                 <div key={w} className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-[11px] text-amber-700">{w}</div>
               ))}
-              {externalResult?.preview_rows?.length > 0 && (
+              {externalResult?.preview_rows && externalResult.preview_rows.length > 0 && (
                 <div className="space-y-3">
                   <div className="overflow-auto rounded-lg border border-gray-200">
                     <table className="text-xs w-full">

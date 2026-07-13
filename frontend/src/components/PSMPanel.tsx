@@ -1036,7 +1036,7 @@ function PSMPanelBody({ session }: { session: Session }) {
                         </thead>
                         <tbody>
                           {result.rosenbaum.curve?.map((r) => (
-                            <tr key={r.gamma} className={r.p_upper > result.rosenbaum.alpha ? "bg-amber-50" : ""}>
+                            <tr key={r.gamma} className={r.p_upper > (result.rosenbaum?.alpha ?? 0.05) ? "bg-amber-50" : ""}>
                               <td className="px-2 py-0.5 font-mono">{r.gamma.toFixed(2)}</td>
                               <td className="px-2 py-0.5 text-right font-mono">{r.p_upper.toFixed(4)}</td>
                             </tr>

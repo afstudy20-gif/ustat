@@ -172,7 +172,7 @@ export default function PowerPanel() {
 
   const cachedPower = useStore((s) => s.panelCache.power);
   const setCachePower = useStore((s) => s.setPanelCache);
-  const [result,  _setResultPower]  = useState<PowerResult | null>(cachedPower?.result ?? null);
+  const [result,  _setResultPower]  = useState<PowerResult | null>(((cachedPower as { result?: PowerResult | null } | undefined)?.result) ?? null);
   const setResult = (r: PowerResult | null) => { _setResultPower(r); setCachePower("power", { result: r }); };
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);

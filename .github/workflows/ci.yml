@@ -64,6 +64,6 @@ jobs:
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
       - name: Typecheck
-        run: npx tsc -b || echo "Typecheck errors logged but ignoring"
+        run: npx tsc -b
       - name: Build
         run: npm run build

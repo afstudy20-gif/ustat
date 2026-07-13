@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useRef, useMemo, type ReactNode, type RefObject } from "react";
+import type { Data, Annotations } from "plotly.js";
 import Plot from "../PlotComponent";
 import { useStore, analysisCols, isCategoricalKind, type Session } from "../store";
 import { usePersistedPanelState } from "../hooks/usePersistedPanelState";
@@ -121,7 +122,7 @@ interface FineGrayCoefficient {
   p?: number | null;
 }
 
-interface FineGrayResult {
+interface FineGrayResult extends ResultBlockData {
   plot?: ApiPlot;
   regression_result?: {
     model?: string;
@@ -137,7 +138,7 @@ interface FineGrayResult {
 
 interface RmstGroupStat { n?: number; rmst?: number | string; ci_low?: number | string; ci_high?: number | string }
 interface RmstContrast { group_a: string; group_b: string; delta_rmst?: number | string; p?: number | null }
-interface RmstResult {
+interface RmstResult extends ResultBlockData {
   plot?: ApiPlot;
   rmst_by_group?: Record<string, RmstGroupStat>;
   rmst_mi_note?: string;
@@ -151,7 +152,7 @@ interface LwyyCoefficient {
   rr_high?: number;
   p?: number | null;
 }
-interface LwyyResult {
+interface LwyyResult extends ResultBlockData {
   plot?: ApiPlot;
   model?: string;
   n_subjects?: number;
@@ -160,7 +161,7 @@ interface LwyyResult {
   coefficients?: LwyyCoefficient[];
 }
 
-interface EValueResult {
+interface EValueResult extends ResultBlockData {
   evalue_point?: number | string;
   evalue_ci?: number | string;
   interpretation?: string;
@@ -175,7 +176,7 @@ interface LandmarkCoxRow {
   fmi?: number | string | null;
   error?: string;
 }
-interface LandmarkResult {
+interface LandmarkResult extends ResultBlockData {
   plot?: ApiPlot;
   cox_mi_note?: string;
   cox_results?: LandmarkCoxRow[];
@@ -194,6 +195,7 @@ interface CoxHorizonsResult {
   forest_rows?: ForestRow[];
   covariates?: string[];
   predictor?: string;
+  interpretation?: string;
 }
 
 interface CoxUniMultiResult { rows: UMRow[]; n: number; n_events: number }
@@ -247,7 +249,7 @@ function CoxUniMultiForest({
 }: {
   result: { rows: UMRow[]; n: number; n_events: number };
   columns: { name: string; value_labels?: Record<string, string> }[];
-  plotRef: PlotRef;
+  plotRef: RefObject<HTMLDivElement | null>;
   refs: Record<string, string>;
   loading: boolean;
   onChangeRef: (predictor: string, level: string) => void;
@@ -454,7 +456,7 @@ function CoxUniMultiForest({
           style={{ width: "100%", height: "100%" }}
           useResizeHandler
         />
-        <PlotExporter plotRef={plotRef} title="Figure_unadjusted_vs_adjusted_HR" />
+        <PlotExporter plotRef={plotRef as unknown as PlotRef} title="Figure_unadjusted_vs_adjusted_HR" />
       </div>
     </div>
   );
@@ -675,15 +677,21 @@ function buildKmNarrative(
   if (pw && pw.length) {
     const useAdj = pw.some((c) => c.p_adj != null);
     const val = (c: PairwiseComparison) => (useAdj ? c.p_adj : c.p);
-    const sig = pw.filter((c) => val(c) != null && val(c)! < 0.05);
-    const ns = pw.filter((c) => val(c) != null && val(c)! >= 0.05);
+    const sig = pw.filter((c) => {
+      const p = val(c);
+      return p != null && p < 0.05;
+    });
+    const ns = pw.filter((c) => {
+      const p = val(c);
+      return p != null && p >= 0.05;
+    });
     const fmtPair = (c: PairwiseComparison) => `${lab(c.group_a)} vs ${lab(c.group_b)}, ${fmtPubP(val(c))}`;
     const bits: string[] = [];
     if (sig.length) bits.push(`significant differences were found for ${sig.map(fmtPair).join("; ")}`);
     if (ns.length) bits.push(`no significant difference between ${ns.map(fmtPair).join("; ")}`);
     if (bits.length) {
       parts.push(
-        `Pairwise comparisons (${km.pairwise.correction && km.pairwise.correction !== "none" ? km.pairwise.correction + "-adjusted" : "unadjusted"}) showed ${bits.join(", whereas ")}.`,
+        `Pairwise comparisons (${km.pairwise?.correction && km.pairwise.correction !== "none" ? km.pairwise.correction + "-adjusted" : "unadjusted"}) showed ${bits.join(", whereas ")}.`,
       );
     }
   }
@@ -719,6 +727,8 @@ interface ResultBlockData {
 
 function ResultBlock({ result }: { result: ResultBlockData | null | undefined }) {
   if (!result) return null;
+  const assumptions = result.assumptions ?? [];
+  const exportRows = result.export_rows ?? [];
   return (
     <div className="space-y-3 mt-3">
       {/* Result text */}
@@ -729,9 +739,9 @@ function ResultBlock({ result }: { result: ResultBlockData | null | undefined })
       )}
 
       {/* Assumptions */}
-      {result.assumptions?.length > 0 && (
+      {assumptions.length > 0 && (
         <div className="space-y-1">
-          {result.assumptions.map((a, i: number) => (
+          {assumptions.map((a, i: number) => (
             <div key={i} className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${a.met ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
               <span>{a.met ? "✓" : "⚠"}</span>
               <span className="font-medium">{a.name}</span>
@@ -742,18 +752,18 @@ function ResultBlock({ result }: { result: ResultBlockData | null | undefined })
       )}
 
       {/* Export rows as table */}
-      {result.export_rows?.length > 1 && (
+      {exportRows.length > 1 && (
         <div className="overflow-auto rounded-lg border border-gray-200">
           <table className="text-xs w-full">
             <thead>
               <tr className="bg-gray-50">
-                {result.export_rows[0].map((h: string, i: number) => (
+                {exportRows[0].map((h, i: number) => (
                   <th key={i} className="px-3 py-1.5 text-left text-gray-500 font-medium border-r border-gray-100 last:border-r-0">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {result.export_rows.slice(1).map((row, ri: number) => (
+              {exportRows.slice(1).map((row, ri: number) => (
                 <tr key={ri} className="border-t border-gray-100">
                   {row.map((v, ci: number) => (
                     <td key={ci} className="px-3 py-1 text-gray-700 border-r border-gray-100 last:border-r-0">{v ?? "—"}</td>
@@ -774,8 +784,8 @@ function ResultBlock({ result }: { result: ResultBlockData | null | undefined })
       )}
 
       {/* Exporter */}
-      {result.export_rows?.length > 1 && (
-        <ResultExporter title={result.test ?? "result"} headers={result.export_rows[0]} rows={result.export_rows.slice(1)} />
+      {exportRows.length > 1 && (
+        <ResultExporter title={result.test ?? "result"} headers={exportRows[0].map((h) => h == null ? "" : String(h))} rows={exportRows.slice(1)} />
       )}
     </div>
   );
@@ -930,7 +940,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   const [coxUMResult, setCoxUMResult] = useState<CoxUniMultiResult | null>(null);
   const [coxUMLoading, setCoxUMLoading] = useState(false);
   const [coxUMRefs, setCoxUMRefs] = useState<Record<string, string>>({});  // per-predictor reference level
-  const coxUMRef = useRef<PlotCaptureHandle | null>(null);
+  const coxUMRef = useRef<HTMLDivElement | null>(null);
 
   const runCoxUMForest = async (refs: Record<string, string>) => {
     setCoxUMLoading(true);
@@ -1172,6 +1182,9 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
   useEffect(() => { setLmResult(null); setLmError(null); }, [lmDuration, lmEvent, lmTime, lmGroup, lmPreds]);
   useEffect(() => { setKmResult(null); setKmError(null); }, [kmDuration, kmEvent, kmGroup, kmStratify]);
   useEffect(() => { setCoxResult(null); setCoxError(null); }, [coxDuration, coxEvent, coxPreds, coxInteractions]);
+
+  const coxUMReady = (coxUMResult?.rows?.length ?? 0) > 0 ? coxUMResult : null;
+  const chForestRows = chResult?.forest_rows ?? [];
 
   return (
     <div className="flex gap-4 max-w-[1400px] mx-auto">
@@ -2041,7 +2054,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                         }];
                       })
                     : []),
-                ]}
+                ] as unknown as Data[]}
                 layout={{
                   ...baseLayout,
                   // Title is rendered as HTML above the plot (UI only) so it
@@ -2137,11 +2150,11 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
 
               {/* Log-rank test embedded as a cohesive footer inside the same block */}
               {kmResult.logrank && (
-                <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
+                <div className={`px-3 py-1.5 text-[11px] border-t font-medium flex items-center justify-between ${kmResult.logrank.p != null && kmResult.logrank.p < 0.05 ? "bg-indigo-50 border-indigo-100 text-indigo-700" : "bg-gray-50 border-gray-100 text-gray-500"}`}>
                   <span>Log-rank test (overall)</span>
                   <span>
                     <i>p</i> = {fmtP(kmResult.logrank.p)}
-                    {kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
+                    {kmResult.logrank.p != null && kmResult.logrank.p < 0.05 ? " (Significant difference)" : " (No difference)"}
                   </span>
                 </div>
               )}
@@ -2204,11 +2217,11 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
               )}
 
               {/* Pairwise log-rank comparisons */}
-              {kmResult.pairwise?.comparisons?.length > 0 && (
+              {(kmResult.pairwise?.comparisons?.length ?? 0) > 0 && (
                 <div className="border-t border-gray-100">
                   <div className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wide bg-gray-50 flex items-center justify-between">
                     <span>Pairwise log-rank</span>
-                    {kmResult.pairwise.correction && kmResult.pairwise.correction !== "none" && (
+                    {kmResult.pairwise?.correction && kmResult.pairwise.correction !== "none" && (
                       <span className="normal-case font-normal text-gray-400">{kmResult.pairwise.correction} adjusted</span>
                     )}
                   </div>
@@ -2217,13 +2230,13 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                       <tr className="text-[10px] text-gray-400">
                         <th className="px-3 py-1 text-left font-medium">Comparison</th>
                         <th className="px-3 py-1 text-right font-medium">p (raw)</th>
-                        {kmResult.pairwise.comparisons.some((c) => c.p_adj != null) && (
+                        {(kmResult.pairwise?.comparisons ?? []).some((c) => c.p_adj != null) && (
                           <th className="px-3 py-1 text-right font-medium"><i>p</i> (adj)</th>
                         )}
                       </tr>
                     </thead>
                     <tbody>
-                      {kmResult.pairwise.comparisons.map((c, i) => {
+                      {(kmResult.pairwise?.comparisons ?? []).map((c, i) => {
                         const pShow = (p: number | null | undefined) => fmtP(p);
                         const pVal = c.p_adj ?? c.p;
                         const sig = pVal != null && pVal < 0.05;
@@ -2417,7 +2430,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                           xaxis: { ...(baseLayout.xaxis as Record<string, unknown>), title: { text: kmCustomDurationTitle || kmDuration } },
                           yaxis: { ...(baseLayout.yaxis as Record<string, unknown>), range: [0, 1.05], tickformat: ".0%", title: { text: "Survival" } },
                           legend: { font: { size: 9 }, orientation: "h", y: -0.22 },
-                          annotations: pAnnot,
+                          annotations: pAnnot as Partial<Annotations>[],
                         }}
                         style={{ width: "100%", height: miniH }}
                         config={{ responsive: true, displaylogo: false, modeBarButtonsToRemove: ["select2d", "lasso2d"] }}
@@ -2607,9 +2620,9 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
           {coxError && <p className="text-xs text-red-500">{coxError}</p>}
         </div>
 
-        {coxUMResult?.rows?.length > 0 && (
+        {coxUMReady && (
           <CoxUniMultiForest
-            result={coxUMResult}
+            result={coxUMReady}
             /* full column list — used only to resolve value_labels for the saved result */
             columns={columns /* display only */}
             plotRef={coxUMRef}
@@ -2721,7 +2734,7 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
                     <td className="px-3 py-1 text-gray-500">{r.n ?? "—"}</td>
                     <td className="px-3 py-1 font-semibold text-gray-800">{r.hr != null ? r.hr.toFixed(3) : "—"}</td>
                     <td className="px-3 py-1 text-gray-500">
-                      {r.hr_ci_low != null ? `${r.hr_ci_low.toFixed(3)} – ${r.hr_ci_high.toFixed(3)}` : "—"}
+                      {r.hr_ci_low != null && r.hr_ci_high != null ? `${r.hr_ci_low.toFixed(3)} – ${r.hr_ci_high.toFixed(3)}` : "—"}
                     </td>
                     <td className={`px-3 py-1 font-semibold ${r.p !== null && r.p < 0.05 ? "text-indigo-700" : "text-gray-500"}`}>
                       {r.p !== null ? fmtP(r.p) : "error"}
@@ -2872,13 +2885,13 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
               }
             }}
           />
-          {chResult?.forest_rows?.length > 0 && (
+          {chResult && chForestRows.length > 0 && (
             <button
               onClick={() => {
                 const cov = (chResult.covariates ?? []) as string[];
                 // Keep p + event counts in the figure — richer than the
                 // bare reference look. Right header reflects that content.
-                setForestHandoff(chResult.forest_rows, {
+                setForestHandoff(chForestRows, {
                   customTitle: "",
                   customSubtitle: cov.length ? `Adjusted for ${cov.join(" + ")}` : "(unadjusted; red = 95% CI excludes 1)",
                   xLabel: `${cov.length ? "Adjusted" : "Unadjusted"} hazard ratio for ${chResult.predictor} (95% CI), log scale`,
@@ -2938,6 +2951,3 @@ function SurvivalAdvancedPanelBody({ session }: { session: Session }) {
     </div>
   );
 }
-
-
-

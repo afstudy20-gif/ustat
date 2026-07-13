@@ -1100,13 +1100,13 @@ function JournalFormatSection({ result }: { result: T1Result }) {
 
           {/* Journal-formatted HTML preview */}
           <div className="border border-gray-200 rounded-xl overflow-hidden bg-white p-4">
-            <div dangerouslySetInnerHTML={{ __html: journalData.html }} />
+            <div dangerouslySetInnerHTML={{ __html: journalData.html ?? "" }} />
           </div>
 
           {/* Footnotes */}
-          {journalData.footnotes?.length > 0 && (
+          {(journalData.footnotes?.length ?? 0) > 0 && (
             <div className="text-[10px] text-gray-400 italic space-y-0.5 px-1">
-              {journalData.footnotes.map((fn: string, i: number) => (
+              {(journalData.footnotes ?? []).map((fn: string, i: number) => (
                 <p key={i}>{fn}</p>
               ))}
             </div>

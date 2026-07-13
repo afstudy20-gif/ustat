@@ -262,8 +262,8 @@ export function ForestPlot({ result, modelType, outcome }: {
     const rows       = result.table ?? [];
     const n          = rows.length;
     const yIdx       = Object.fromEntries(rows.map((r, i) => [r.variable, i]));
-    const uniValid   = rows.filter((r) => r.uni_or   != null && r.uni_or   > 0);
-    const multiValid = rows.filter((r) => r.multi_or != null && r.multi_or > 0);
+    const uniValid   = rows.filter((r): r is ORRow & { uni_or: number } => r.uni_or != null && r.uni_or > 0);
+    const multiValid = rows.filter((r): r is ORRow & { multi_or: number } => r.multi_or != null && r.multi_or > 0);
     const plotH      = Math.max(320, n * 58 + 120);
     const splitLayout = opts.layout === "split";
 
@@ -348,13 +348,13 @@ export function ForestPlot({ result, modelType, outcome }: {
       y: uniValid.map((r) => splitLayout ? yIdx[r.variable] : yIdx[r.variable] + 0.18),
       error_x: {
         type: "data", symmetric: false,
-        array:      uniValid.map((r) => r.uni_ci_high - r.uni_or),
-        arrayminus: uniValid.map((r) => r.uni_or - r.uni_ci_low),
+        array:      uniValid.map((r) => (r.uni_ci_high ?? r.uni_or) - r.uni_or),
+        arrayminus: uniValid.map((r) => r.uni_or - (r.uni_ci_low ?? r.uni_or)),
         color: opts.colorBy === "series" ? "#6366f1" : "#9ca3af",
         thickness: 2, width: 7,
       },
       marker: {
-        size: uniValid.map((r) => precisionSize(r.uni_or, r.uni_ci_low, r.uni_ci_high)),
+        size: uniValid.map((r) => precisionSize(r.uni_or, r.uni_ci_low ?? 0, r.uni_ci_high ?? 0)),
         symbol: uniMarker,
         color: uniValid.map((r) => uniColor(r)),
         line: { color: "#d1d5db", width: 1 },
@@ -371,13 +371,13 @@ export function ForestPlot({ result, modelType, outcome }: {
       y: multiValid.map((r) => splitLayout ? yIdx[r.variable] : yIdx[r.variable] - 0.18),
       error_x: {
         type: "data", symmetric: false,
-        array:      multiValid.map((r) => r.multi_ci_high - r.multi_or),
-        arrayminus: multiValid.map((r) => r.multi_or - r.multi_ci_low),
+        array:      multiValid.map((r) => (r.multi_ci_high ?? r.multi_or) - r.multi_or),
+        arrayminus: multiValid.map((r) => r.multi_or - (r.multi_ci_low ?? r.multi_or)),
         color: opts.colorBy === "series" ? "#10b981" : "#9ca3af",
         thickness: 2, width: 7,
       },
       marker: {
-        size: multiValid.map((r) => precisionSize(r.multi_or, r.multi_ci_low, r.multi_ci_high)),
+        size: multiValid.map((r) => precisionSize(r.multi_or, r.multi_ci_low ?? 0, r.multi_ci_high ?? 0)),
         symbol: multiMarker,
         color: multiValid.map((r) => multiColor(r)),
         line: { color: "#d1d5db", width: 1 },
@@ -420,7 +420,7 @@ export function ForestPlot({ result, modelType, outcome }: {
     const bottomPad = opts.showLegend ? 130 : 80;
 
     return (
-      <div className="relative" ref={forestRef}>
+      <div className="relative" ref={(el) => { forestRef.current = el as unknown as PlotCaptureHandle | null; }}>
       {Toolbar}
       <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
       <Plot
@@ -489,6 +489,7 @@ export function ForestPlot({ result, modelType, outcome }: {
   const ciHigh    = coefs.map((c: Coefficient) => isCox ? c.hr_ci_high : c.or_ci_high);
   const pVals     = coefs.map((c: Coefficient) => c.p);
   const labels    = coefs.map((c: Coefficient) => c.variable);
+  const estimatesForPlot = estimates.map((e) => e ?? null);
   const COLOR     = isCox ? "#10b981" : "#6366f1";
   const COLOR_SIG = isCox ? "#34d399" : "#818cf8";
   const plotH     = Math.max(260, n * 46 + 120);
@@ -537,23 +538,23 @@ export function ForestPlot({ result, modelType, outcome }: {
     : `Odds Ratio (95% CI), log scale${outcome ? ` — Outcome: ${outcome}` : ""}`);
 
   return (
-    <div className="relative" ref={forestRef}>
+    <div className="relative" ref={(el) => { forestRef.current = el as unknown as PlotCaptureHandle | null; }}>
     {Toolbar}
     <PlotExporter plotRef={forestRef} title={`Forest_${metric}_${outcome ?? "model"}`} />
     <Plot
       data={[{
         type: "scatter", mode: "markers",
-        x: estimates,
+        x: estimatesForPlot,
         y: coefs.map((_: Coefficient, i: number) => i),
         error_x: {
           type: "data", symmetric: false,
-          array:      estimates.map((e: number, i: number) => (ciHigh[i] ?? e) - e),
-          arrayminus: estimates.map((e: number, i: number) => e - (ciLow[i]  ?? e)),
+          array:      estimates.map((e, i: number) => e == null ? 0 : (ciHigh[i] ?? e) - e),
+          arrayminus: estimates.map((e, i: number) => e == null ? 0 : e - (ciLow[i]  ?? e)),
           color: opts.colorBy === "series" ? COLOR : "#9ca3af",
           thickness: 2.5, width: 9,
         },
         marker: {
-          size: estimates.map((_: number, i: number) => precisionSize(estimates[i], ciLow[i], ciHigh[i])),
+          size: estimates.map((_, i: number) => precisionSize(estimates[i] ?? 0, ciLow[i] ?? 0, ciHigh[i] ?? 0)),
           symbol: opts.markerStyle,
           color: coefs.map((_: Coefficient, i: number) => rowColor(i)),
           line: { color: "#d1d5db", width: 1 },
@@ -611,4 +612,3 @@ export function ForestPlot({ result, modelType, outcome }: {
     </div>
   );
 }
-

@@ -144,8 +144,8 @@ const aucColor = (auc: number) =>
   auc >= 0.9 ? "text-green-600" : auc >= 0.8 ? "text-blue-600" : auc >= 0.7 ? "text-amber-600" : "text-red-500";
 const aucLabel = (auc: number) =>
   auc >= 0.9 ? "Excellent" : auc >= 0.8 ? "Good" : auc >= 0.7 ? "Fair" : "Poor";
-const fmtPct = (v: number) => `${(v * 100).toFixed(1)}%`;
-const fmtAUC = (auc: number, lo?: number, hi?: number) =>
+const fmtPct = (v?: number | null) => v == null ? "—" : `${(v * 100).toFixed(1)}%`;
+const fmtAUC = (auc: number, lo?: number | null, hi?: number | null) =>
   lo != null && hi != null
     ? `AUC ${auc.toFixed(2)} (95% CI ${lo.toFixed(2)}–${hi.toFixed(2)})`
     : `AUC ${auc.toFixed(2)}`;
@@ -550,9 +550,9 @@ function ROCPanelBody({ session }: { session: Session }) {
     const rows: (string | number | null)[][] = [
       ["Score column", scoreCol],
       ["Outcome column", outcomeCol],
-      ["n", result.n],
-      ["Positives (1)", result.n_positive],
-      ["Negatives (0)", result.n_negative],
+      ["n", result.n ?? "—"],
+      ["Positives (1)", result.n_positive ?? "—"],
+      ["Negatives (0)", result.n_negative ?? "—"],
       ["AUC", result.auc],
       ["AUC interpretation", aucLabel(result.auc)],
       ["AUC SE (DeLong)", result.auc_se ?? "—"],
@@ -578,7 +578,7 @@ function ROCPanelBody({ session }: { session: Session }) {
     ];
     if (result.manual) {
       rows.push(["", ""], ["Manual cutoff", ""],
-        ["Cutoff", result.manual.cutoff],
+        ["Cutoff", result.manual.cutoff ?? null],
         ["Sensitivity", fmtPct(result.manual.sensitivity)],
         ["Specificity", fmtPct(result.manual.specificity)],
         ["PPV", fmtPct(result.manual.ppv)],
@@ -1114,15 +1114,15 @@ function ROCPanelBody({ session }: { session: Session }) {
           {mode === "single" && result && (() => {
             // Pick the cutoff point to highlight: optimal (Youden J) unless the
             // user clicked "Manual" with a cutoff in scope.
-            const cutoffPoint = result.manual
+            const cutoffPoint = result.manual?.specificity != null && result.manual.sensitivity != null
               ? { x: 1 - result.manual.specificity, y: result.manual.sensitivity,
                   cutoff: Number(result.manual.cutoff), se: result.manual.sensitivity,
                   sp: result.manual.specificity, label: "Manual cutoff", color: "#f59e0b" }
-              : result.optimal
+              : result.optimal?.specificity != null && result.optimal.sensitivity != null
                 ? { x: 1 - result.optimal.specificity, y: result.optimal.sensitivity,
                     cutoff: Number(result.optimal.cutoff), se: result.optimal.sensitivity,
                     sp: result.optimal.specificity, label: "Optimal cutoff", color: "#ef4444" }
-                : result.sensitivity != null
+                : result.sensitivity != null && result.specificity != null
                   ? { x: 1 - result.specificity, y: result.sensitivity,
                       cutoff: Number(result.optimal_cutoff), se: result.sensitivity,
                       sp: result.specificity, label: "Optimal cutoff", color: "#ef4444" }
@@ -1396,7 +1396,7 @@ function ROCPanelBody({ session }: { session: Session }) {
                 <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mt-2">
                   <div className="flex items-center justify-between mb-1">
                     <span className="text-[10px] font-semibold text-gray-400 uppercase">Results Paragraph</span>
-                    <button onClick={() => navigator.clipboard.writeText(result.result_text)} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
+                    <button onClick={() => navigator.clipboard.writeText(result.result_text ?? "")} className="text-[10px] px-2 py-0.5 rounded border border-gray-300 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors">Copy</button>
                   </div>
                   <p className="text-sm text-gray-700 leading-relaxed">{result.result_text}</p>
                 </div>
@@ -1496,7 +1496,7 @@ function ROCPanelBody({ session }: { session: Session }) {
               DeLong: {multiDelongErr}
             </div>
           )}
-          {multiDelong && multiDelong.pairs?.length > 0 && (
+          {multiDelong?.pairs && multiDelong.pairs.length > 0 && (
             <div className="panel space-y-1.5">
               <div className="flex items-center justify-between">
                 <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">

@@ -475,15 +475,15 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
             </div>
 
             {/* Custom Legend Labels */}
-            {colorCol && plotData?.traces && showLegend && (
+            {colorCol && Array.isArray(plotData?.traces) && showLegend && (
               <div className="space-y-2 pt-2 border-t border-gray-100">
                 <span className="text-xs font-semibold text-gray-700 block">Custom Legend Labels</span>
                 <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
-                  {(plotData.traces as Array<{ name: unknown }>).map((t) => {
+                  {plotData.traces.map((t: { name: unknown }) => {
                     const rawVal = String(t.name);
                     const colorColMeta = session.columns.find((c) => c.name === colorCol);
                     const colorLabels = colorColMeta?.value_labels ?? {};
-                    const defaultLabel = colorLabels[rawVal] ?? rawVal;
+                    const defaultLabel = String(colorLabels[rawVal] ?? rawVal);
                     return (
                       <div key={rawVal} className="flex items-center gap-2">
                         <span className="text-[10px] text-gray-500 min-w-16 truncate" title={rawVal}>{rawVal}:</span>
@@ -706,12 +706,13 @@ function SubgroupBarPanelBody({ session }: { session: Session }) {
             </div>
             <div className="flex-1 min-h-0">
               <Plot
-                ref={chartRef}
                 data={traces as unknown as Data[]}
                 layout={fullLayout as unknown as Partial<Layout>}
                 style={{ width: "100%", height: "100%" }}
                 useResizeHandler
                 config={{ responsive: true, displayModeBar: true, displaylogo: false }}
+                onInitialized={(_: object, gd: HTMLElement) => { chartRef.current = gd as unknown as PlotCaptureHandle; }}
+                onUpdate={(_: object, gd: HTMLElement) => { chartRef.current = gd as unknown as PlotCaptureHandle; }}
               />
             </div>
             {/* Red vertical resize line on the right — drag left to shrink the chart */}

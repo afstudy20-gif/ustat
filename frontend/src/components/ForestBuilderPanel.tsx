@@ -4,7 +4,7 @@ import PlotExporter from "./PlotExporter";
 import ThreeCol from "./ThreeCol";
 import { useStore, isNumericKind } from "../store";
 import { fmtPubP } from "../lib/format";
-import type { PlotData } from "../lib/plotTypes";
+import type { PlotCaptureHandle, PlotData } from "../lib/plotTypes";
 import type { Data, Layout } from "plotly.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -99,6 +99,7 @@ export default function ForestBuilderPanel() {
   const [rows, setRows] = useState<ForestRowInput[]>([emptyRow()]);
   const [layout, setLayout] = useState<ForestLayout>(DEFAULT_LAYOUT);
   const plotRef = useRef<HTMLDivElement | null>(null);
+  const plotCaptureRef = useRef<PlotCaptureHandle | null>(null);
   // Resizable plot box: the user can drag the bottom-right corner. A
   // ResizeObserver writes the dragged height back into layout.height (so it
   // persists across re-renders) and nudges Plotly to re-fit its width.
@@ -860,7 +861,7 @@ export default function ForestBuilderPanel() {
         <div className="panel relative space-y-2 bg-white border border-gray-200 shadow-sm rounded-2xl p-4">
           {/* PlotExporter floats top-right (absolute); keep it a direct child
               of the relative panel so it anchors correctly. */}
-          <PlotExporter plotRef={plotRef} title={`Forest_custom`} />
+          <PlotExporter plotRef={plotCaptureRef} title={`Forest_custom`} />
           <div className="flex items-center justify-between pr-16">
             <h3 className="text-sm font-semibold text-gray-700">Forest plot</h3>
           </div>
@@ -978,6 +979,8 @@ export default function ForestBuilderPanel() {
               style={{ width: "100%", height: "100%" }}
               useResizeHandler
               config={{ responsive: true, displaylogo: false }}
+              onInitialized={(_: object, gd: HTMLElement) => { plotCaptureRef.current = gd as unknown as PlotCaptureHandle; }}
+              onUpdate={(_: object, gd: HTMLElement) => { plotCaptureRef.current = gd as unknown as PlotCaptureHandle; }}
             />
           </div>
           </div>
@@ -1059,4 +1062,3 @@ export default function ForestBuilderPanel() {
     />
   );
 }
-

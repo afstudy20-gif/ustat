@@ -224,7 +224,8 @@ function RReplicationHub() {
       script += `# ── Step ${idx + 1}: ${step.action.replace(/_/g, " ").toUpperCase()} ──\n`;
       
       if (step.action === "data_cleaning") {
-        const { mode, columns, outlier_method, outlier_threshold, find_value, replace_value } = step.params;
+        const { mode, outlier_method, outlier_threshold, find_value, replace_value } = step.params;
+        const columns = Array.isArray(step.params.columns) ? step.params.columns.filter((c): c is string => typeof c === "string") : [];
         const colsStr = columns.map((c: string) => `"${c}"`).join(", ");
         if (mode === "missing") {
           script += `data <- data[complete.cases(data[, c(${colsStr})]), ]\n\n`;
@@ -251,7 +252,8 @@ function RReplicationHub() {
           script += `\n`;
         }
       } else if (step.action === "factor_pca") {
-        const { variables, extraction, rotation, n_factors } = step.params;
+        const { extraction, rotation, n_factors } = step.params;
+        const variables = Array.isArray(step.params.variables) ? step.params.variables.filter((c): c is string => typeof c === "string") : [];
         const colsStr = variables.map((c: string) => `"${c}"`).join(", ");
         const rRot = rotation === "none" ? "none" : rotation;
         if (extraction === "pca") {
@@ -262,6 +264,7 @@ function RReplicationHub() {
         script += `print(fit$loadings, cutoff = 0.3)\n\n`;
       } else if (step.action === "bayesian_stats") {
         const { analysis_type, outcome, predictor, predictors, mu } = step.params;
+        const predictorList = Array.isArray(predictors) ? predictors.filter((c): c is string => typeof c === "string") : [];
         if (analysis_type === "ttest_one") {
           script += `ttestBF(data$"${outcome}", mu = ${mu})\n\n`;
         } else if (analysis_type === "ttest_paired") {
@@ -271,7 +274,7 @@ function RReplicationHub() {
         } else if (analysis_type === "correlation") {
           script += `correlationBF(data$"${outcome}", data$"${predictor}")\n\n`;
         } else if (analysis_type === "regression") {
-          script += `regressionBF(formula = ${outcome} ~ ${predictors.join(" + ")}, data = data)\n\n`;
+          script += `regressionBF(formula = ${outcome} ~ ${predictorList.join(" + ")}, data = data)\n\n`;
         }
       }
     });

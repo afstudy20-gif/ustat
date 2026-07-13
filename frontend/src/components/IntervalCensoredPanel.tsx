@@ -173,8 +173,10 @@ export default function IntervalCensoredPanel({ session }: { session: Session })
               </h4>
               <ResultExporter title="Interval-censored survival" plotRef={plotRef} />
             </div>
-            <Plot ref={plotRef} data={traces as unknown as Data[]} layout={layout as unknown as Partial<Layout>}
+            <Plot data={traces as unknown as Data[]} layout={layout as unknown as Partial<Layout>}
               config={{ responsive: true, displaylogo: false, displayModeBar: false }}
+              onInitialized={(_: object, gd: HTMLElement) => { plotRef.current = gd as unknown as PlotCaptureHandle; }}
+              onUpdate={(_: object, gd: HTMLElement) => { plotRef.current = gd as unknown as PlotCaptureHandle; }}
               style={{ width: "100%", height: "420px" }} useResizeHandler />
           </div>
 

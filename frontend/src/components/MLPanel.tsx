@@ -292,9 +292,9 @@ export default function MLPanel() {
                       showlegend: false,
                       annotations: [{
                         x: 0.98, y: 0.04, xref: "paper" as const, yref: "paper" as const,
-                        text: result.auc_ci_low != null
+                        text: result.auc != null && result.auc_ci_low != null && result.auc_ci_high != null
                           ? `AUC = ${result.auc.toFixed(2)} (95% CI ${result.auc_ci_low.toFixed(2)}–${result.auc_ci_high.toFixed(2)})`
-                          : `AUC = ${result.auc.toFixed(2)}`,
+                          : `AUC = ${result.auc?.toFixed(2) ?? "—"}`,
                         showarrow: false, font: { color: "#374151", size: 13 },
                         bgcolor: "rgba(249,250,251,0.92)", bordercolor: "#9ca3af", borderwidth: 1, borderpad: 6,
                         xanchor: "right" as const, yanchor: "bottom" as const,
@@ -457,7 +457,7 @@ export default function MLPanel() {
               </div>
 
               {/* Calibration (classification) */}
-              {isClass && result.calibration?.length > 0 && (
+              {isClass && (result.calibration?.length ?? 0) > 0 && (
                 <div className="panel space-y-1">
                   <h4 className="text-sm font-semibold text-gray-700 flex items-center gap-1">
                     Calibration
@@ -468,7 +468,7 @@ export default function MLPanel() {
                       <tr><th className="text-left px-1 py-0.5">Pred</th><th className="text-left px-1 py-0.5">Obs</th><th className="text-right px-1 py-0.5"><i>n</i></th></tr>
                     </thead>
                     <tbody>
-                      {result.calibration.map((c, i: number) => (
+                      {(result.calibration ?? []).map((c, i: number) => (
                         <tr key={i} className="border-t border-gray-100">
                           <td className="px-1 py-0.5 font-mono">{c.pred.toFixed(3)}</td>
                           <td className="px-1 py-0.5 font-mono">{c.obs.toFixed(3)}</td>
