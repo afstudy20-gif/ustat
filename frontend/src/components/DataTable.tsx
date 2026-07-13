@@ -1465,9 +1465,18 @@ function DataTableBody({ session }: { session: Session }) {
                           <span className="text-amber-400 italic text-[10px] font-medium">null</span>
                         ) : (
                           <span className={col.kind === "numeric" ? "text-gray-700" : "text-gray-600"}>
-                            {col.name in columnDecimals && typeof cellVal === "number"
-                              ? cellVal.toFixed(columnDecimals[col.name])
-                              : String(cellVal)}
+                            {(() => {
+                              // Always derive display from the raw stored value + the
+                              // CURRENT decimals setting — never trust a stale display
+                              // string. A hand-typed value can be stored as a string
+                              // (e.g. right after edit, before the next full reload),
+                              // so coerce with Number() rather than gating on typeof.
+                              if (col.name in columnDecimals) {
+                                const n = typeof cellVal === "number" ? cellVal : Number(cellVal);
+                                if (Number.isFinite(n)) return n.toFixed(columnDecimals[col.name]);
+                              }
+                              return String(cellVal);
+                            })()}
                           </span>
                         )}
                       </td>

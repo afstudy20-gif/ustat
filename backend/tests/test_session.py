@@ -78,6 +78,26 @@ def test_update_cell_missing_session(client):
     assert r.status_code == 404, r.text
 
 
+def test_update_cell_blank_numeric_column_coerces_by_kind(client, df):
+    # A numeric column that's still all-blank stays "object" dtype until
+    # something is written to it — coercion must key off the declared kind
+    # override, not the current (stale) dtype, or a typed decimal value would
+    # be stored as a bare string and never respect the column's decimals setting.
+    from services import store
+
+    sid = _new_session(df, "cell_blank_numeric")
+    empty_df = store.get(sid).copy()
+    empty_df["NEWNUM"] = np.nan
+    store.save(sid, empty_df)
+    store.save_kind_overrides(sid, {"NEWNUM": "numeric"})
+
+    r = client.patch(f"/api/sessions/{sid}/cell", json={"row_index": 0, "column": "NEWNUM", "value": "1.5"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert isinstance(body["value"], float)
+    assert abs(body["value"] - 1.5) < 1e-9
+
+
 def test_clear_cells(client, df):
     sid = _new_session(df, "clear")
     r = client.post(

@@ -162,13 +162,23 @@ async def update_cell(session_id: str, body: CellUpdate):
     col_dtype = df[body.column].dtype
     val = body.value
 
-    # Coerce to column dtype
+    # Coerce to numeric using the column's DECLARED kind, not just its current
+    # pandas dtype — a numeric column that's still empty (all-NaN) has dtype
+    # "object"/"float64" depending on history, so dtype alone missed typed
+    # values on blank numeric columns and left them as bare strings forever
+    # (they'd never respect the column's decimals display setting).
+    from routers.upload import _detect_kind
+
+    kind_override = store.get_kind_overrides(session_id).get(body.column)
+    kind = kind_override or _detect_kind(df[body.column])
+    is_numeric_kind = col_dtype.kind in ("i", "u", "f") or kind == "numeric"
+
     if val is not None and val != "":
         try:
             if col_dtype.kind in ("i", "u"):
                 val = int(float(str(val)))
-            elif col_dtype.kind == "f":
-                val = float(str(val))
+            elif col_dtype.kind == "f" or is_numeric_kind:
+                val = float(str(val).replace(",", "."))
         except (ValueError, TypeError):
             pass  # keep as string
     else:
