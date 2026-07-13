@@ -409,11 +409,7 @@ BibTeX:
 
 ## License & attribution
 
-© 2026 Dr. Yusuf Hoşoğlu. All rights reserved.
-
-The source is published for transparency and community review. A formal
-open-source license is on the roadmap — until one is added, no
-redistribution rights are granted by default.
+MIT License — © 2026 Dr. Yusuf Hoşoğlu. See [LICENSE](LICENSE).
 
 Statistical computation builds on `scipy`, `statsmodels`, `lifelines`,
 `scikit-learn`, `pandas`, `numpy`, `patsy`, `pyreadstat` (each under its own

@@ -36,7 +36,7 @@ keywords:
   - python
   - fastapi
   - react
-license: "Other (Proprietary — see LICENSE)"
+license: "MIT"
 version: "1.9.27"
 date-released: "2026-05-16"
 preferred-citation:
