@@ -427,6 +427,35 @@ def test_delete_column_not_found(client, synth):
     assert r.status_code == 404, r.text
 
 
+def test_delete_columns_bulk(client, synth):
+    sid = _fresh(synth, "delcols")
+    r = client.post(f"{BASE}/{sid}/delete_columns", json={"columns": ["LDL", "AGE", "WEIGHT"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["deleted"] == ["LDL", "AGE", "WEIGHT"]
+    for col in ("LDL", "AGE", "WEIGHT"):
+        assert col not in body["remaining_columns"]
+
+
+def test_delete_columns_dedupes(client, synth):
+    sid = _fresh(synth, "delcols_dupe")
+    r = client.post(f"{BASE}/{sid}/delete_columns", json={"columns": ["LDL", "LDL"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] == ["LDL"]
+
+
+def test_delete_columns_not_found(client, synth):
+    sid = _fresh(synth, "delcols_miss")
+    r = client.post(f"{BASE}/{sid}/delete_columns", json={"columns": ["LDL", "NOPE"]})
+    assert r.status_code == 404, r.text
+
+
+def test_delete_columns_empty(client, synth):
+    sid = _fresh(synth, "delcols_empty")
+    r = client.post(f"{BASE}/{sid}/delete_columns", json={"columns": []})
+    assert r.status_code == 422, r.text
+
+
 def test_fill_blanks_mean(client, synth):
     sid = _fresh(synth, "fill_mean")
     r = client.post(f"{BASE}/{sid}/fill_blanks",

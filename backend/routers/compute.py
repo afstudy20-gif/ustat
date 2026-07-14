@@ -1003,6 +1003,29 @@ def delete_column(session_id: str, col_name: str):
     return {"deleted": col_name}
 
 
+class DeleteColumnsRequest(BaseModel):
+    columns: List[str]  # column names to drop
+
+
+@router.post("/{session_id}/delete_columns")
+def delete_columns(session_id: str, req: DeleteColumnsRequest):
+    """Drop several columns in one atomic mutation (bulk tick-and-delete)."""
+    df = _get_df(session_id)
+    if not req.columns:
+        raise HTTPException(status_code=422, detail="No columns provided")
+    # De-duplicate while preserving order so a repeated name doesn't error.
+    unique_cols = list(dict.fromkeys(req.columns))
+    missing = [c for c in unique_cols if c not in df.columns]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Columns not found: {missing}")
+    if len(unique_cols) >= len(df.columns):
+        raise HTTPException(status_code=422, detail="Cannot delete every column")
+    df = df.drop(columns=unique_cols)
+    store.save(session_id, df)
+    store.log_action(session_id, "delete_columns", {"n_deleted": len(unique_cols)})
+    return {"deleted": unique_cols, "remaining_columns": list(df.columns)}
+
+
 # ── 6. Fill blanks ──────────────────────────────────────────────────────────
 
 class FillBlanksRequest(BaseModel):

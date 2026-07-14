@@ -219,6 +219,12 @@ function DataTableBody({ session }: { session: Session }) {
   // Paste notification
   const [pasteMsg, setPasteMsg] = useState<string | null>(null);
 
+  // Bulk tick-and-delete: checkboxes in the row gutter and column headers.
+  // checkedRows holds ORIGINAL (backend-positional) row indices; checkedCols
+  // holds column names. Kept separate from the cell-selection Set above.
+  const [checkedRows, setCheckedRows] = useState<Set<number>>(new Set());
+  const [checkedCols, setCheckedCols] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (editCell) setTimeout(() => inputRef.current?.focus(), 0);
   }, [editCell]);
@@ -293,6 +299,19 @@ function DataTableBody({ session }: { session: Session }) {
   useEffect(() => {
     if (renameCol) setTimeout(() => renameRef.current?.focus(), 0);
   }, [renameCol]);
+
+  // Keep the bulk-delete selections from going stale. Row indices are
+  // positional, so any change to the row COUNT (add/delete/undo) invalidates
+  // them — drop the row ticks. Column ticks survive as long as the column
+  // still exists, so prune to current columns rather than clearing outright.
+  useEffect(() => { setCheckedRows(new Set()); }, [session?.session_id, preview.length]);
+  useEffect(() => {
+    setCheckedCols((prev) => {
+      const valid = new Set(columns.map((c) => c.name));
+      const next = new Set([...prev].filter((name) => valid.has(name)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [session?.session_id, columns]);
 
   // Close context menus on outside click
   useEffect(() => {
@@ -381,6 +400,56 @@ function DataTableBody({ session }: { session: Session }) {
       const res = await api.get(`/api/stats/${session.session_id}/refresh`);
       useStore.getState().setSession({ ...session, ...res.data }); bumpUndo();
     } catch { /* ignore */ }
+  };
+
+  // ── Bulk tick-and-delete (row gutter + column header checkboxes) ────────────
+  const toggleCheckedRow = (idx: number) => setCheckedRows((prev) => {
+    const next = new Set(prev);
+    if (next.has(idx)) next.delete(idx); else next.add(idx);
+    return next;
+  });
+  const toggleCheckedCol = (name: string) => setCheckedCols((prev) => {
+    const next = new Set(prev);
+    if (next.has(name)) next.delete(name); else next.add(name);
+    return next;
+  });
+  const allRowsChecked = displayRows.length > 0 && displayRows.every((r) => checkedRows.has(r._idx as number));
+  const toggleAllRows = () => setCheckedRows(() =>
+    allRowsChecked ? new Set() : new Set(displayRows.map((r) => r._idx as number)));
+  const allColsChecked = columns.length > 0 && columns.every((c) => checkedCols.has(c.name));
+  const toggleAllCols = () => setCheckedCols(() =>
+    allColsChecked ? new Set() : new Set(columns.map((c) => c.name)));
+  const clearChecks = () => { setCheckedRows(new Set()); setCheckedCols(new Set()); };
+
+  const deleteChecked = async () => {
+    if (!session) return;
+    const rows = [...checkedRows];
+    const cols = [...checkedCols];
+    if (rows.length === 0 && cols.length === 0) return;
+    if (cols.length >= columns.length) {
+      alert("You can't delete every column.");
+      return;
+    }
+    const parts: string[] = [];
+    if (rows.length) parts.push(`${rows.length} row${rows.length > 1 ? "s" : ""}`);
+    if (cols.length) parts.push(`${cols.length} column${cols.length > 1 ? "s" : ""}`);
+    if (!window.confirm(`Delete ${parts.join(" and ")}? You can undo this with Ctrl/Cmd+Z.`)) return;
+    try {
+      // Rows first: delete_rows drops by position and resets the index; column
+      // deletion is unaffected by that, so the order is safe.
+      if (rows.length) {
+        await api.post(`/api/compute/${session.session_id}/delete_rows`, { row_indices: rows });
+      }
+      if (cols.length) {
+        await api.post(`/api/compute/${session.session_id}/delete_columns`, { columns: cols });
+      }
+      const res = await api.get(`/api/stats/${session.session_id}/refresh`);
+      useStore.getState().setSession({ ...session, ...res.data });
+      bumpUndo();
+      clearChecks();
+    } catch (e: unknown) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Bulk delete failed");
+    }
   };
 
   // ── Cell selection helpers ──────────────────────────────────────────────────
@@ -964,7 +1033,7 @@ function DataTableBody({ session }: { session: Session }) {
       tabIndex={0}
       onKeyDown={handleGridKeyDown}
       onMouseUp={() => { dragSelectingRef.current = false; }}
-      className="flex flex-col gap-2 h-full focus:outline-none"
+      className="relative flex flex-col gap-2 h-full focus:outline-none"
       style={{ minHeight: 0 }}
     >
       {showSelectCases && session && (
@@ -1151,21 +1220,41 @@ function DataTableBody({ session }: { session: Session }) {
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10">
 
-            {/* Column-number row (1, 2, 3 … above each column) */}
+            {/* Column-number row (1, 2, 3 … above each column) — also carries the
+                per-column bulk-select checkboxes + the "select all columns" master. */}
             <tr className="bg-gray-50 border-b border-gray-100">
               <th
-                className="py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
+                className="py-0.5 text-center border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
                 style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
-              />
+              >
+                <input
+                  type="checkbox"
+                  className="h-3 w-3 align-middle accent-indigo-500 cursor-pointer"
+                  checked={allColsChecked}
+                  ref={(el) => { if (el) el.indeterminate = checkedCols.size > 0 && !allColsChecked; }}
+                  onChange={toggleAllCols}
+                  title="Select / clear all columns"
+                />
+              </th>
               {columns.map((col, colIdx) => {
                 const frozen = isFrozenCol(colIdx);
+                const isChecked = checkedCols.has(col.name);
                 return (
                   <th
                     key={col.name}
-                    className={`py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none ${frozen ? "sticky bg-gray-50 z-20" : ""}`}
+                    className={`py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none ${isChecked ? "bg-indigo-50" : ""} ${frozen ? "sticky z-20" : ""} ${frozen && !isChecked ? "bg-gray-50" : ""}`}
                     style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                   >
-                    {colIdx + 1}
+                    <span className="inline-flex items-center justify-center gap-1">
+                      <input
+                        type="checkbox"
+                        className="h-3 w-3 accent-indigo-500 cursor-pointer"
+                        checked={isChecked}
+                        onChange={() => toggleCheckedCol(col.name)}
+                        title={`Select column "${col.name}" for bulk delete`}
+                      />
+                      <span>{colIdx + 1}</span>
+                    </span>
                   </th>
                 );
               })}
@@ -1176,8 +1265,15 @@ function DataTableBody({ session }: { session: Session }) {
               <th
                 className="px-1 py-2 text-center text-gray-400 text-xs font-normal border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
                 style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
+                title="Select / clear all visible rows"
               >
-                #
+                <input
+                  type="checkbox"
+                  className="h-3 w-3 align-middle accent-indigo-500 cursor-pointer"
+                  checked={allRowsChecked}
+                  ref={(el) => { if (el) el.indeterminate = checkedRows.size > 0 && !allRowsChecked; }}
+                  onChange={toggleAllRows}
+                />
               </th>
               {columns.map((col, colIdx) => {
                 const isSorted = sortCol === col.name;
@@ -1349,13 +1445,14 @@ function DataTableBody({ session }: { session: Session }) {
           <tbody>
             {displayRows.map((row, visualIdx) => {
               const origIdx = row._idx as number;
+              const rowChecked = checkedRows.has(origIdx);
               return (
                 <tr
                   key={origIdx}
                   className="group border-t border-gray-100 hover:bg-gray-50 transition-colors"
                 >
                   <td
-                    className="px-1 py-1.5 text-gray-300 text-[11px] border-r border-gray-200 select-none text-center cursor-context-menu sticky left-0 bg-white group-hover:bg-gray-50 z-10"
+                    className={`px-1 py-1.5 text-gray-300 text-[11px] border-r border-gray-200 select-none text-center cursor-context-menu sticky left-0 z-10 ${rowChecked ? "bg-indigo-50" : "bg-white group-hover:bg-gray-50"}`}
                     style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
                     onMouseDown={(e) => {
                       if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
@@ -1366,7 +1463,16 @@ function DataTableBody({ session }: { session: Session }) {
                     onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
                     title={`Original row #${origIdx + 1} in the dataset · Ctrl/Cmd+Shift+click selects the row`}
                   >
-                    {visualIdx + 1}
+                    {/* Checkbox reveals on row hover or when checked; otherwise the
+                        row number shows. Keeps the 30px gutter uncluttered. */}
+                    <input
+                      type="checkbox"
+                      className={`h-3 w-3 accent-indigo-500 cursor-pointer ${rowChecked ? "inline-block" : "hidden group-hover:inline-block"}`}
+                      checked={rowChecked}
+                      onChange={() => toggleCheckedRow(origIdx)}
+                      title="Select this row for bulk delete"
+                    />
+                    <span className={rowChecked ? "hidden" : "group-hover:hidden"}>{visualIdx + 1}</span>
                   </td>
 
                   {columns.map((col, colIdx) => {
@@ -1889,6 +1995,30 @@ function DataTableBody({ session }: { session: Session }) {
               <DataDictionaryPanel />
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Bulk-delete action bar — appears when any rows/columns are ticked. */}
+      {(checkedRows.size > 0 || checkedCols.size > 0) && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-full bg-gray-900 text-white px-4 py-2 shadow-xl text-sm">
+          <span className="font-medium">
+            {[
+              checkedRows.size > 0 ? `${checkedRows.size} row${checkedRows.size > 1 ? "s" : ""}` : null,
+              checkedCols.size > 0 ? `${checkedCols.size} column${checkedCols.size > 1 ? "s" : ""}` : null,
+            ].filter(Boolean).join(" · ")} selected
+          </span>
+          <button
+            onClick={deleteChecked}
+            className="rounded-full bg-red-500 hover:bg-red-600 px-3 py-1 font-medium transition-colors"
+          >
+            🗑 Delete
+          </button>
+          <button
+            onClick={clearChecks}
+            className="text-gray-300 hover:text-white transition-colors"
+          >
+            Clear
+          </button>
         </div>
       )}
     </div>
