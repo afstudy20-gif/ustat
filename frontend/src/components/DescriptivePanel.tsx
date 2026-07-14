@@ -987,14 +987,21 @@ export default function DescriptivePanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.session_id]);
 
+  // Guards a fast column switch: only the response matching the MOST RECENT
+  // request is allowed to update state, so a slow stale request can't
+  // overwrite the summary for whatever column is selected now.
+  const summaryRequestIdRef = useRef(0);
+
   const loadSummary = useCallback((colName: string, kindOverride?: string) => {
     if (!session) return;
     const kind = kindOverride ?? session.columns.find((c) => c.name === colName)?.kind ?? undefined;
+    const requestId = ++summaryRequestIdRef.current;
     setSelected(colName);
     setSummary(null);
     setSummaryLoading(true);
     api.get(`/api/stats/${session.session_id}/column_summary`, { params: { column: colName, kind } })
       .then((r) => {
+        if (summaryRequestIdRef.current !== requestId) return; // superseded by a newer request
         const rawSummary = r.data as ColumnSummary;
         if (rawSummary && rawSummary.type === "categorical" && rawSummary.categories) {
           const colMeta = session.columns.find((c) => c.name === colName);
@@ -1011,7 +1018,14 @@ export default function DescriptivePanel() {
         }
         setSummary(rawSummary);
       })
-      .finally(() => setSummaryLoading(false));
+      .catch(() => {
+        // Falls back to the existing "Select a column" empty state below —
+        // no crash, no stale data, just nothing rendered for this column.
+        if (summaryRequestIdRef.current === requestId) setSummary(null);
+      })
+      .finally(() => {
+        if (summaryRequestIdRef.current === requestId) setSummaryLoading(false);
+      });
     // Same reasoning as the metadata effect above — depend on the stable
     // session_id, not the constantly-reidentified session object.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { http, HttpResponse } from 'msw'
+import { http, HttpResponse, delay } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 import { server } from '../test/server'
 import { clearSession, installSession } from '../test/testUtils'
@@ -180,5 +180,39 @@ describe('DescriptivePanel', () => {
     await waitFor(() =>
       expect(screen.getByText('Select a column to view distribution')).toBeInTheDocument(),
     )
+  })
+
+  it('a slow stale request cannot overwrite a faster newer selection (race guard)', async () => {
+    installSession()
+    mockCommonEndpoints()
+    server.use(
+      http.get('/api/stats/test-session/column_summary', async ({ request }) => {
+        const url = new URL(request.url)
+        const column = url.searchParams.get('column')
+        if (column === 'AGE') {
+          // AGE was clicked FIRST but resolves LAST.
+          await delay(50)
+          return HttpResponse.json(numericSummary)
+        }
+        // GROUP was clicked SECOND but resolves FIRST.
+        return HttpResponse.json(categoricalSummary)
+      }),
+    )
+
+    const user = userEvent.setup()
+    render(<DescriptivePanel />)
+
+    // AGE auto-loads on mount (slow), then immediately switch to GROUP (fast).
+    await waitFor(() => expect(screen.getByText('AGE')).toBeInTheDocument())
+    await user.click(screen.getByText('GROUP'))
+
+    // GROUP's fast response should render...
+    await waitFor(() =>
+      expect(screen.getByText((_, el) => el?.textContent === 'Categorical · n=3')).toBeInTheDocument(),
+    )
+    // ...and AGE's slow response, arriving afterward, must NOT clobber it.
+    await new Promise((r) => setTimeout(r, 80))
+    expect(screen.getByText((_, el) => el?.textContent === 'Categorical · n=3')).toBeInTheDocument()
+    expect(screen.queryByText((_, el) => el?.textContent === 'Continuous · n=3')).not.toBeInTheDocument()
   })
 })
