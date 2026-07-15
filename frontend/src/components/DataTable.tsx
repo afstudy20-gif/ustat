@@ -353,12 +353,74 @@ function DataTableBody({ session }: { session: Session }) {
     navigator.clipboard.writeText(tsv).catch(() => {});
   };
 
-  const copyColumn = (colName: string) => {
+  const copyColumn = async (colName: string) => {
     if (!session) return;
     setCtxMenu(null);
-    const vals = preview.map((row) => String(row[colName] ?? ""));
-    const tsv = colName + "\n" + vals.join("\n");
-    navigator.clipboard.writeText(tsv).catch(() => {});
+    try {
+      // Pull the WHOLE column from the backend: `preview` is capped at 2000
+      // rows, so copying from it silently truncated bigger datasets.
+      const res = await api.get(
+        `/api/compute/${session.session_id}/column_values/${encodeURIComponent(colName)}`
+      );
+      const values = (res.data.values as unknown[]).map((v) => (v === null || v === undefined ? "" : String(v)));
+      await navigator.clipboard.writeText(colName + "\n" + values.join("\n"));
+      setPasteMsg(`Column "${colName}" copied (${values.length} values)`);
+      setTimeout(() => setPasteMsg(null), 2500);
+    } catch {
+      // Previously this failed silently, so a denied clipboard looked like a
+      // broken menu item.
+      setPasteMsg("Copy failed — clipboard access was denied");
+      setTimeout(() => setPasteMsg(null), 3500);
+    }
+  };
+
+  /** Paste the clipboard as a NEW column (the paste side of "Copy column").
+   *  Works across windows/sessions since the clipboard is the only channel. */
+  const pasteColumn = async (afterCol?: string) => {
+    if (!session) return;
+    setCtxMenu(null);
+    try {
+      const text = await navigator.clipboard.readText();
+      const body = text.replace(/\r\n?/g, "\n").replace(/\n+$/, "");
+      if (!body.trim()) {
+        setPasteMsg("Clipboard is empty");
+        setTimeout(() => setPasteMsg(null), 3000);
+        return;
+      }
+      const lines = body.split("\n");
+      if (lines.some((l) => l.includes("\t"))) {
+        setPasteMsg("Clipboard holds multiple columns — select a cell and press Ctrl/Cmd+V instead");
+        setTimeout(() => setPasteMsg(null), 4000);
+        return;
+      }
+      if (lines.length < 2) {
+        setPasteMsg("Clipboard needs a header line plus values to paste as a column");
+        setTimeout(() => setPasteMsg(null), 4000);
+        return;
+      }
+      // "Copy column" always writes the name on the first line.
+      const [rawName, ...values] = lines;
+      let name = rawName.trim() || "PASTED";
+      const existing = new Set(columns.map((c) => c.name));
+      if (existing.has(name)) {
+        let i = 2;
+        while (existing.has(`${name}_${i}`)) i++;
+        name = `${name}_${i}`;
+      }
+      const position = afterCol ? columns.findIndex((c) => c.name === afterCol) + 1 : -1;
+      const res = await api.post(`/api/compute/${session.session_id}/paste_column`, { name, values, position });
+      const refresh = await api.get(`/api/stats/${session.session_id}/refresh`);
+      useStore.getState().setSession({ ...session, ...refresh.data }); bumpUndo();
+      const { n_truncated: truncated, n_padded: padded } = res.data;
+      const note = truncated ? ` · ${truncated} extra value${truncated > 1 ? "s" : ""} dropped`
+                 : padded    ? ` · ${padded} row${padded > 1 ? "s" : ""} left blank`
+                 : "";
+      setPasteMsg(`Column "${name}" pasted${note}`);
+      setTimeout(() => setPasteMsg(null), 4000);
+    } catch (err: unknown) {
+      setPasteMsg((err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ?? "Paste column failed");
+      setTimeout(() => setPasteMsg(null), 3500);
+    }
   };
 
   const addRow = async (position: number) => {
@@ -1644,9 +1706,14 @@ function DataTableBody({ session }: { session: Session }) {
             {columns.find((c) => c.name === ctxMenu.col)?.analysis_excluded
               ? "✅ Include in analysis" : "🚫 Exclude from analysis"}
           </button>
-          <button onClick={() => copyColumn(ctxMenu.col)}
+          <button onClick={() => { void copyColumn(ctxMenu.col); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             📋 Copy column
+          </button>
+          <button onClick={() => { void pasteColumn(ctxMenu.col); }}
+            title="Paste a copied column from the clipboard as a new column after this one — works across windows"
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            📥 Paste column
           </button>
           <button onClick={() => { cycleKind(ctxMenu.col); setCtxMenu(null); }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">

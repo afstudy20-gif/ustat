@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services import store
-from services.dirty_value_guard import flag_sentinels, mask_sentinels, plausibility_max_for_column, sentinel_values
+from services.dirty_value_guard import coerce_numeric, flag_sentinels, mask_sentinels, plausibility_max_for_column, sentinel_values
 
 router = APIRouter()
 
@@ -1001,6 +1001,82 @@ def delete_column(session_id: str, col_name: str):
     df = df.drop(columns=[col_name])
     store.save(session_id, df)
     return {"deleted": col_name}
+
+
+@router.get("/{session_id}/column_values/{col_name:path}")
+def column_values(session_id: str, col_name: str):
+    """Every value in a column, in row order.
+
+    "Copy column" needs the WHOLE column: the frontend's `preview` is capped at
+    2000 rows, so copying from it silently truncated larger datasets.
+    """
+    df = _get_df(session_id)
+    if col_name not in df.columns:
+        raise HTTPException(status_code=404, detail=f"Column '{col_name}' not found")
+    return {
+        "name": col_name,
+        "values": [_jsonable_value(v) for v in df[col_name].tolist()],
+        "rows": len(df),
+    }
+
+
+class PasteColumnRequest(BaseModel):
+    name: str
+    values: List[Optional[str]]  # raw strings in row order; "" / None → missing
+    position: int = -1  # -1 = append at end, otherwise insert at this index
+
+
+@router.post("/{session_id}/paste_column")
+def paste_column(session_id: str, req: PasteColumnRequest):
+    """Insert a whole column (name + per-row values) — the paste side of
+    "Copy column", including pasting across sessions/windows via the clipboard.
+
+    Values are matched to rows by position. A longer payload is truncated and a
+    shorter one is padded with blanks; both counts are reported so the UI can
+    tell the user what happened instead of silently mangling the data.
+    """
+    df = _get_df(session_id)
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Column name cannot be empty")
+    if name in df.columns:
+        raise HTTPException(status_code=422, detail=f"Column '{name}' already exists")
+
+    n_rows = len(df)
+    supplied = len(req.values)
+    trimmed = [None if (v is None or str(v).strip() == "") else str(v).strip() for v in req.values[:n_rows]]
+    padded = trimmed + [None] * (n_rows - len(trimmed))
+    series = pd.Series(padded, index=df.index, dtype="object")
+
+    # Cast to numeric only when every observed value parses, so a text column
+    # pasted onto a numeric-looking dataset isn't silently coerced to NaN.
+    observed = series.notna()
+    if observed.any():
+        numeric = coerce_numeric(series)
+        if bool(numeric[observed].notna().all()):
+            # coerce_numeric hands back pandas' NULLABLE dtypes (Int64/Float64),
+            # but the rest of the app — _detect_kind included — only recognises
+            # numpy dtypes, so an Int64 column would be mislabelled "text".
+            # Downcast to numpy: float64 when blanks need NaN, else the natural
+            # integer/float dtype.
+            if bool(numeric.isna().any()):
+                series = pd.Series(numeric.to_numpy(dtype="float64", na_value=np.nan), index=df.index)
+            else:
+                series = pd.Series(numeric.to_numpy(), index=df.index)
+
+    df = df.copy()
+    if 0 <= req.position < len(df.columns):
+        df.insert(req.position, name, series)
+    else:
+        df[name] = series
+    store.save(session_id, df)
+    store.log_action(session_id, "paste_column", {"name": name, "n_values": int(observed.sum())})
+
+    result = _build_result(df, name)
+    result["n_supplied"] = supplied
+    result["n_truncated"] = max(0, supplied - n_rows)
+    result["n_padded"] = max(0, n_rows - supplied)
+    return result
 
 
 class DeleteColumnsRequest(BaseModel):

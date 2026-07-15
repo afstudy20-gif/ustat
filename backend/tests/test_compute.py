@@ -427,6 +427,93 @@ def test_delete_column_not_found(client, synth):
     assert r.status_code == 404, r.text
 
 
+def test_column_values_returns_every_row(client, synth):
+    """Copy-column must see the whole column, not just the 2000-row preview."""
+    sid = _fresh(synth, "colvals")
+    r = client.get(f"{BASE}/{sid}/column_values/LDL")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "LDL"
+    assert body["rows"] == 200
+    assert len(body["values"]) == 200
+
+
+def test_column_values_not_found(client, synth):
+    sid = _fresh(synth, "colvals_miss")
+    r = client.get(f"{BASE}/{sid}/column_values/NOPE")
+    assert r.status_code == 404, r.text
+
+
+def test_paste_column_numeric(client, synth):
+    sid = _fresh(synth, "pastecol")
+    vals = [str(i) for i in range(200)]
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "PASTED", "values": vals})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "PASTED"
+    assert body["kind"] == "numeric"
+    assert body["n_computed"] == 200
+    assert body["n_truncated"] == 0 and body["n_padded"] == 0
+    assert body["preview_values"][:3] == [0, 1, 2]
+
+
+def test_paste_column_pads_and_truncates(client, synth):
+    sid = _fresh(synth, "pastecol_short")
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "SHORT", "values": ["1", "2", "3"]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_padded"] == 197
+    assert body["n_computed"] == 3
+
+    sid2 = _fresh(synth, "pastecol_long")
+    r2 = client.post(f"{BASE}/{sid2}/paste_column",
+                     json={"name": "LONG", "values": [str(i) for i in range(250)]})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["n_truncated"] == 50
+
+
+def test_paste_column_text_stays_text(client, synth):
+    """A text payload must not be coerced to all-NaN numeric."""
+    sid = _fresh(synth, "pastecol_txt")
+    vals = ["alpha", "beta"] * 100
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "TXT", "values": vals})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_computed"] == 200
+    assert body["preview_values"][0] == "alpha"
+
+
+def test_paste_column_blanks_become_missing(client, synth):
+    sid = _fresh(synth, "pastecol_blank")
+    vals = ["5", "", "  ", "7"] + [""] * 196
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "SPARSE", "values": vals})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["n_computed"] == 2
+    assert body["preview_values"][1] is None
+
+
+def test_paste_column_position_inserts(client, synth):
+    sid = _fresh(synth, "pastecol_pos")
+    r = client.post(f"{BASE}/{sid}/paste_column",
+                    json={"name": "FIRST", "values": ["1"] * 200, "position": 0})
+    assert r.status_code == 200, r.text
+    cols = client.get(f"/api/stats/{sid}/refresh").json()["columns"]
+    assert cols[0]["name"] == "FIRST"
+
+
+def test_paste_column_duplicate_name(client, synth):
+    sid = _fresh(synth, "pastecol_dupe")
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "LDL", "values": ["1"]})
+    assert r.status_code == 422, r.text
+
+
+def test_paste_column_empty_name(client, synth):
+    sid = _fresh(synth, "pastecol_noname")
+    r = client.post(f"{BASE}/{sid}/paste_column", json={"name": "  ", "values": ["1"]})
+    assert r.status_code == 422, r.text
+
+
 def test_delete_columns_bulk(client, synth):
     sid = _fresh(synth, "delcols")
     r = client.post(f"{BASE}/{sid}/delete_columns", json={"columns": ["LDL", "AGE", "WEIGHT"]})
