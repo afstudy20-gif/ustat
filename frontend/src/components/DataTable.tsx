@@ -1895,7 +1895,7 @@ function DataTableBody({ session }: { session: Session }) {
             </button>
             <button onClick={() => { setMoveCol(ctxMenu.col); setCtxMenu(null); }}
               className={MENU_ITEM_CLS}>
-              📍 Move to position…
+              📍 Send to position…
             </button>
             <button
               onClick={() => {
@@ -2091,13 +2091,13 @@ function DataTableBody({ session }: { session: Session }) {
         />
       )}
 
-      {/* ── Move column to position ── */}
+      {/* ── Send column to position ── */}
       {moveCol && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
           onMouseDown={(e) => { if (e.target === e.currentTarget) setMoveCol(null); }}>
           <div className="bg-white rounded-xl shadow-2xl w-72" onMouseDown={(e) => e.stopPropagation()}>
             <div className="px-4 py-3 border-b border-gray-200">
-              <h3 className="text-sm font-semibold text-gray-800">Move column</h3>
+              <h3 className="text-sm font-semibold text-gray-800">Send column to position</h3>
               <p className="text-[11px] text-gray-400 mt-0.5 truncate">{moveCol}</p>
             </div>
             <div className="px-4 py-3 space-y-2">
@@ -2112,7 +2112,7 @@ function DataTableBody({ session }: { session: Session }) {
             <div className="px-4 py-3 border-t border-gray-200 flex justify-end gap-2">
               <button onClick={() => setMoveCol(null)} className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">Cancel</button>
               <button onClick={() => { const el = document.getElementById("move-pos-input") as HTMLInputElement | null; moveToPosition(moveCol, el ? parseInt(el.value, 10) : 1); }}
-                className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Move</button>
+                className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">Send</button>
             </div>
           </div>
         </div>
