@@ -92,10 +92,13 @@ export default defineConfig({
     nodePolyfills(),
     emitVersionJson(),
     VitePWA({
-      registerType: 'autoUpdate',
-      // 'prompt' would surface needRefresh always; 'autoUpdate' silently
-      // installs in the background and exposes needRefresh too, so the
-      // UpdatePrompt component can show a toast on top of it.
+      // MUST stay 'prompt'. With 'autoUpdate' the service worker activates and
+      // reloads the tab on its own as soon as a deploy lands — and since the
+      // session lives in memory, that reload silently dumped users back to the
+      // landing page mid-analysis (every deploy, within the 60 s update poll).
+      // 'prompt' parks the new worker until the user accepts via UpdatePrompt's
+      // "Reload to update" toast, which is exactly what that component is for.
+      registerType: 'prompt',
       includeAssets: ['logo.png', 'pwa-192.png', 'pwa-512.png'],
       manifest: {
         name: 'uSTAT - Statistical Analysis',
@@ -121,9 +124,10 @@ export default defineConfig({
         globIgnores: ['**/version.json'],
         // Don't claim navigation requests for /api/* (FastAPI backend).
         navigateFallbackDenylist: [/^\/api\//],
-        // Activate the new SW as soon as it finishes installing — without
-        // this, users would need TWO reloads to pick up a deploy.
-        skipWaiting: true,
+        // No skipWaiting: it activates the new worker the moment it installs,
+        // which forces the reload 'prompt' is meant to defer. The waiting
+        // worker is told to skip only when the user clicks "Reload to update"
+        // (updateServiceWorker(true) in UpdatePrompt).
         clientsClaim: true,
         runtimeCaching: [
           {
