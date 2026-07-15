@@ -1132,6 +1132,17 @@ function DataTableBody({ session }: { session: Session }) {
           await pasteCellsAt(destination.row, destination.col, text);
           return;
         }
+        // A single-column clipboard (no tabs) with no cell selected is almost
+        // always a "Copy column" payload. Appending it as ROWS — which is what
+        // this used to fall through to — tacked a pile of blank rows onto the
+        // bottom of the dataset. Treat it as a column paste instead; only a
+        // genuine multi-column grid still appends rows.
+        const singleColumn = !text.includes("\t")
+          && text.replace(/\r\n?/g, "\n").replace(/\n+$/, "").split("\n").length > 1;
+        if (singleColumn) {
+          await pasteColumn();
+          return;
+        }
         const res = await api.post(`/api/compute/${session.session_id}/paste`, {
           tsv: text, has_header: true, mode: "append",
         });
