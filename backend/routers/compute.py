@@ -100,6 +100,73 @@ class FormulaRequest(BaseModel):
     new_col: str
 
 
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _resolve_awkward_column_names(
+    df: pd.DataFrame, formula: str, names: dict
+) -> tuple:
+    """Let formulas reference columns whose names aren't Python identifiers.
+
+    Two ways in, both mapped onto generated placeholders the parser accepts:
+      1. Backticks — ```p wave mv_2` / 2`` (explicit, always wins).
+      2. The bare name — ``p wave mv_2 / 2``. Matched longest-first so that a
+         dataset with both "p wave" and "p wave mv_2" resolves the longer one.
+    Returns the rewritten formula plus the extended name map.
+    """
+    names = dict(names)
+    counter = 0
+
+    def _placeholder(col: str) -> str:
+        nonlocal counter
+        key = f"_col_{counter}_"
+        counter += 1
+        names[key] = df[col]
+        return key
+
+    # 1. Backtick-quoted names.
+    def _sub_quoted(match: "re.Match") -> str:
+        col = match.group(1)
+        if col not in df.columns:
+            raise ValueError(f"Column '{col}' not found")
+        return _placeholder(col)
+
+    formula = re.sub(r"`([^`]+)`", _sub_quoted, formula)
+
+    # 2. Bare names that can't be parsed as identifiers. Longest first so a
+    #    shorter column name can't shadow a longer one that contains it.
+    awkward = sorted(
+        (c for c in df.columns if not _IDENTIFIER_RE.match(str(c))),
+        key=lambda c: len(str(c)),
+        reverse=True,
+    )
+    for col in awkward:
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9_])" + re.escape(str(col)) + r"(?![A-Za-z0-9_])"
+        )
+        if pattern.search(formula):
+            formula = pattern.sub(lambda _m, c=col: _placeholder(c), formula)
+
+    return formula, names
+
+
+def _syntax_error_help(df: pd.DataFrame, formula: str, exc: SyntaxError) -> str:
+    """Turn "invalid syntax (<unknown>, line 1)" into something actionable."""
+    awkward = [str(c) for c in df.columns if not _IDENTIFIER_RE.match(str(c))]
+    hint = ""
+    if awkward:
+        sample = ", ".join(f"`{c}`" for c in awkward[:3])
+        hint = (
+            " If you meant a column whose name has spaces or symbols, wrap it in "
+            f"backticks — e.g. {sample}."
+        )
+    offset = getattr(exc, "offset", None)
+    where = ""
+    if isinstance(offset, int) and 0 < offset <= len(formula) + 1:
+        where = f" near position {offset}: \"{formula[max(0, offset - 12):offset + 12]}\""
+    return f"Could not parse the formula{where}.{hint}"
+
+
 def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Series:
     """Evaluate a column-arithmetic formula safely.
 
@@ -150,9 +217,19 @@ def _eval_formula_with_custom_functions(df: pd.DataFrame, formula: str) -> pd.Se
     }
     names = {col: df[col] for col in df.columns}
 
+    # simpleeval parses with Python's ast, so a column whose name isn't a valid
+    # identifier ("p wave mv_2", "BMI (kg/m2)") can never be referenced directly
+    # — it just dies with "invalid syntax" and no hint about which part failed.
+    # Swap such names out for safe placeholders first, both when the user quotes
+    # them in backticks (pandas-style, always unambiguous) and when they simply
+    # type the real name.
+    formula, names = _resolve_awkward_column_names(df, formula, names)
+
     evaluator = SimpleEval(operators=operators, functions=functions, names=names)
     try:
         result = evaluator.eval(formula)
+    except SyntaxError as exc:
+        raise ValueError(_syntax_error_help(df, formula, exc))
     except InvalidExpression as exc:
         # NameNotDefined / FunctionNotDefined / FeatureNotAvailable / numeric
         # guards all subclass InvalidExpression.

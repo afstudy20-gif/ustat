@@ -84,6 +84,57 @@ def test_formula_custom_if_function(client, synth):
     assert body["n_computed"] == 200
 
 
+def test_formula_column_name_with_spaces(client, synth):
+    """A column whose name isn't a Python identifier is still referencable —
+    bare and backticked — instead of dying with 'invalid syntax'."""
+    df = synth.copy()
+    df["p wave mv_2"] = 2.0
+    sid = make_session(df, "tcomp_formula_spaces")
+
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "LDL / p wave mv_2", "new_col": "R_BARE"})
+    assert r.status_code == 200, r.text
+    assert r.json()["n_computed"] == 200
+
+    r2 = client.post(f"{BASE}/{sid}/formula",
+                     json={"formula": "LDL / `p wave mv_2`", "new_col": "R_TICK"})
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["n_computed"] == 200
+
+
+def test_formula_prefers_longest_column_name(client, synth):
+    """'p wave' must not shadow 'p wave mv_2'."""
+    df = synth.copy()
+    df["p wave"] = 10.0
+    df["p wave mv_2"] = 2.0
+    sid = make_session(df, "tcomp_formula_longest")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "p wave mv_2 + p wave", "new_col": "SUMP"})
+    assert r.status_code == 200, r.text
+    assert r.json()["preview_values"][0] == 12.0
+
+
+def test_formula_syntax_error_is_actionable(client, synth):
+    """The old message was 'invalid syntax (<unknown>, line 1)' — useless."""
+    df = synth.copy()
+    df["p wave mv_2"] = 2.0
+    sid = make_session(df, "tcomp_formula_syntax")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "LDL / / 2", "new_col": "BAD"})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "invalid syntax" not in detail
+    assert "backticks" in detail
+
+
+def test_formula_backtick_unknown_column(client, synth):
+    sid = _fresh(synth, "formula_tick_miss")
+    r = client.post(f"{BASE}/{sid}/formula",
+                    json={"formula": "`NOSUCH` + 1", "new_col": "BAD2"})
+    assert r.status_code == 422, r.text
+    assert "NOSUCH" in r.json()["detail"]
+
+
 @pytest.mark.parametrize("evil", [
     "().__class__.__bases__[0].__subclasses__()",  # dunder traversal
     "AGE.__class__",                                 # attribute access
