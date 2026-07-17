@@ -599,6 +599,73 @@ function DataTableBody({ session }: { session: Session }) {
     allColsChecked ? new Set() : new Set(columns.map((c) => c.name)));
   const clearChecks = () => { setCheckedRows(new Set()); setCheckedCols(new Set()); };
 
+  // Shift+click extends the tick from the last-clicked row/column (Excel-style
+  // range selection). Anchors live in refs — they never need a re-render.
+  const lastRowTickRef = useRef<number | null>(null);
+  const lastColTickRef = useRef<string | null>(null);
+
+  const tickRow = (origIdx: number, shiftKey: boolean) => {
+    const anchor = lastRowTickRef.current;
+    if (shiftKey && anchor !== null && anchor !== origIdx) {
+      const ids = displayRows.map((r) => r._idx as number);
+      const a = ids.indexOf(anchor);
+      const b = ids.indexOf(origIdx);
+      if (a >= 0 && b >= 0) {
+        // The whole range takes the anchor's state, so shift-extending after an
+        // untick clears the range rather than re-ticking it.
+        const on = checkedRows.has(anchor);
+        setCheckedRows((prev) => {
+          const next = new Set(prev);
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+            if (on) next.add(ids[i]); else next.delete(ids[i]);
+          }
+          return next;
+        });
+        lastRowTickRef.current = origIdx;
+        return;
+      }
+    }
+    toggleCheckedRow(origIdx);
+    lastRowTickRef.current = origIdx;
+  };
+
+  const tickCol = (name: string, shiftKey: boolean) => {
+    const anchor = lastColTickRef.current;
+    if (shiftKey && anchor !== null && anchor !== name) {
+      const names = columns.map((c) => c.name);
+      const a = names.indexOf(anchor);
+      const b = names.indexOf(name);
+      if (a >= 0 && b >= 0) {
+        const on = checkedCols.has(anchor);
+        setCheckedCols((prev) => {
+          const next = new Set(prev);
+          for (let i = Math.min(a, b); i <= Math.max(a, b); i++) {
+            if (on) next.add(names[i]); else next.delete(names[i]);
+          }
+          return next;
+        });
+        lastColTickRef.current = name;
+        return;
+      }
+    }
+    toggleCheckedCol(name);
+    lastColTickRef.current = name;
+  };
+
+  // Escape clears the tick selection (unless the user is typing in a field —
+  // the cell editor's own Escape must win).
+  useEffect(() => {
+    if (checkedRows.size === 0 && checkedCols.size === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      clearChecks();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [checkedRows.size, checkedCols.size]);
+
   const deleteChecked = async () => {
     if (!session) return;
     const rows = [...checkedRows];
@@ -1413,17 +1480,19 @@ function DataTableBody({ session }: { session: Session }) {
                 per-column bulk-select checkboxes + the "select all columns" master. */}
             <tr className="bg-gray-50 border-b border-gray-100">
               <th
-                className="py-0.5 text-center border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
+                className="py-0 text-center border-r border-gray-200 select-none sticky left-0 bg-gray-50 z-20"
                 style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
               >
-                <input
-                  type="checkbox"
-                  className="h-3 w-3 align-middle accent-indigo-500 cursor-pointer"
-                  checked={allColsChecked}
-                  ref={(el) => { if (el) el.indeterminate = checkedCols.size > 0 && !allColsChecked; }}
-                  onChange={toggleAllCols}
-                  title="Select / clear all columns"
-                />
+                <span className="inline-flex h-4 items-center justify-center">
+                  <input
+                    type="checkbox"
+                    className={`h-3 w-3 accent-indigo-500 cursor-pointer transition-opacity ${checkedCols.size > 0 ? "opacity-100" : "opacity-30 hover:opacity-100"}`}
+                    checked={allColsChecked}
+                    ref={(el) => { if (el) el.indeterminate = checkedCols.size > 0 && !allColsChecked; }}
+                    onChange={toggleAllCols}
+                    title="Select / clear all columns"
+                  />
+                </span>
               </th>
               {columns.map((col, colIdx) => {
                 const frozen = isFrozenCol(colIdx);
@@ -1431,18 +1500,23 @@ function DataTableBody({ session }: { session: Session }) {
                 return (
                   <th
                     key={col.name}
-                    className={`py-0.5 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none ${isChecked ? "bg-indigo-50" : ""} ${frozen ? "sticky z-20" : ""} ${frozen && !isChecked ? "bg-gray-50" : ""}`}
+                    className={`group py-0 text-center text-gray-300 text-[9px] font-normal border-r border-gray-200 select-none cursor-pointer ${isChecked ? "bg-indigo-100/80" : ""} ${frozen ? "sticky z-20" : ""} ${frozen && !isChecked ? "bg-gray-50" : ""}`}
                     style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
+                    onClick={(e) => tickCol(col.name, e.shiftKey)}
+                    onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
+                    title={`Click to select column "${col.name}" · Shift+click extends the range`}
                   >
-                    <span className="inline-flex items-center justify-center gap-1">
+                    {/* Fixed-height swap: the number shows at rest, the checkbox on
+                        hover or when ticked — the row never changes height. */}
+                    <span className="inline-flex h-4 items-center justify-center">
                       <input
                         type="checkbox"
-                        className="h-3 w-3 accent-indigo-500 cursor-pointer"
+                        tabIndex={-1}
+                        className={`h-3 w-3 accent-indigo-500 cursor-pointer pointer-events-none ${isChecked ? "inline-block" : "hidden group-hover:inline-block"}`}
                         checked={isChecked}
-                        onChange={() => toggleCheckedCol(col.name)}
-                        title={`Select column "${col.name}" for bulk delete`}
+                        readOnly
                       />
-                      <span>{colIdx + 1}</span>
+                      <span className={isChecked ? "hidden" : "group-hover:hidden"}>{colIdx + 1}</span>
                     </span>
                   </th>
                 );
@@ -1458,7 +1532,7 @@ function DataTableBody({ session }: { session: Session }) {
               >
                 <input
                   type="checkbox"
-                  className="h-3 w-3 align-middle accent-indigo-500 cursor-pointer"
+                  className={`h-3 w-3 align-middle accent-indigo-500 cursor-pointer transition-opacity ${checkedRows.size > 0 ? "opacity-100" : "opacity-30 hover:opacity-100"}`}
                   checked={allRowsChecked}
                   ref={(el) => { if (el) el.indeterminate = checkedRows.size > 0 && !allRowsChecked; }}
                   onChange={toggleAllRows}
@@ -1519,6 +1593,7 @@ function DataTableBody({ session }: { session: Session }) {
                     onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
                     className={`px-2 py-2 border-r border-gray-200
                       ${frozen ? "sticky bg-gray-50 z-20" : "min-w-[130px] max-w-[200px]"}
+                      ${!frozen && checkedCols.has(col.name) ? "bg-indigo-100/60" : ""}
                       ${renameCol === col.name || frozen ? "" : "cursor-grab active:cursor-grabbing select-none"}
                       ${dragIdx === colIdx ? "opacity-40" : ""}
                       ${isDragOver ? "border-l-2 border-l-indigo-500" : ""}`}
@@ -1641,25 +1716,34 @@ function DataTableBody({ session }: { session: Session }) {
                   className="group border-t border-gray-100 hover:bg-gray-50 transition-colors"
                 >
                   <td
-                    className={`px-1 py-1.5 text-gray-300 text-[11px] border-r border-gray-200 select-none text-center cursor-context-menu sticky left-0 z-10 ${rowChecked ? "bg-indigo-50" : "bg-white group-hover:bg-gray-50"}`}
+                    className={`px-1 py-1.5 text-gray-300 text-[11px] border-r border-gray-200 select-none text-center cursor-pointer sticky left-0 z-10 ${rowChecked ? "bg-indigo-100/80" : "bg-white group-hover:bg-gray-50"}`}
                     style={{ width: HASH_COL_W, minWidth: HASH_COL_W, maxWidth: HASH_COL_W }}
                     onMouseDown={(e) => {
                       if ((e.ctrlKey || e.metaKey) && e.shiftKey) {
                         e.preventDefault();
                         selectVisibleRow(origIdx, true);
+                        return;
                       }
+                      // Prevent shift+click text selection before the range-tick
+                      if (e.shiftKey) e.preventDefault();
+                    }}
+                    onClick={(e) => {
+                      if ((e.ctrlKey || e.metaKey) && e.shiftKey) return;
+                      tickRow(origIdx, e.shiftKey);
                     }}
                     onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
-                    title={`Original row #${origIdx + 1} in the dataset · Ctrl/Cmd+Shift+click selects the row`}
+                    title={`Original row #${origIdx + 1} · Click to select the row · Shift+click extends the range`}
                   >
                     {/* Checkbox reveals on row hover or when checked; otherwise the
-                        row number shows. Keeps the 30px gutter uncluttered. */}
+                        row number shows. Keeps the 30px gutter uncluttered. The
+                        whole gutter cell is the click target — the checkbox itself
+                        is display-only. */}
                     <input
                       type="checkbox"
-                      className={`h-3 w-3 accent-indigo-500 cursor-pointer ${rowChecked ? "inline-block" : "hidden group-hover:inline-block"}`}
+                      tabIndex={-1}
+                      className={`h-3 w-3 accent-indigo-500 cursor-pointer pointer-events-none ${rowChecked ? "inline-block" : "hidden group-hover:inline-block"}`}
                       checked={rowChecked}
-                      onChange={() => toggleCheckedRow(origIdx)}
-                      title="Select this row for bulk delete"
+                      readOnly
                     />
                     <span className={rowChecked ? "hidden" : "group-hover:hidden"}>{visualIdx + 1}</span>
                   </td>
@@ -1670,6 +1754,10 @@ function DataTableBody({ session }: { session: Session }) {
                     const isNull    = cellVal === null || cellVal === undefined;
                     const isSel     = selectedCells.has(cellKey(origIdx, col.name));
                     const frozen    = isFrozenCol(colIdx);
+                    // Whole-line tint when the row or the column is ticked for
+                    // bulk delete — the selection must be visible along its full
+                    // length, not only at the gutter checkbox.
+                    const ticked    = rowChecked || checkedCols.has(col.name);
 
                     return (
                       <td
@@ -1703,8 +1791,8 @@ function DataTableBody({ session }: { session: Session }) {
                             : isSel
                               ? "px-3 py-1.5 cursor-pointer bg-blue-100 outline outline-1 outline-blue-400"
                               : isNull
-                                ? "px-3 py-1.5 cursor-pointer bg-amber-50/60 hover:bg-amber-100/60"
-                                : `px-3 py-1.5 cursor-pointer hover:bg-indigo-50/50 ${frozen ? "bg-white" : ""}`}`}
+                                ? `px-3 py-1.5 cursor-pointer ${ticked ? "bg-indigo-50" : "bg-amber-50/60 hover:bg-amber-100/60"}`
+                                : `px-3 py-1.5 cursor-pointer hover:bg-indigo-50/50 ${ticked ? "bg-indigo-50" : frozen ? "bg-white" : ""}`}`}
                         style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                       >
                         {isEditing ? (
@@ -2208,24 +2296,25 @@ function DataTableBody({ session }: { session: Session }) {
 
       {/* Bulk-delete action bar — appears when any rows/columns are ticked. */}
       {(checkedRows.size > 0 || checkedCols.size > 0) && (
-        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 rounded-full bg-gray-900 text-white px-4 py-2 shadow-xl text-sm">
-          <span className="font-medium">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 rounded-full bg-gray-900/95 backdrop-blur text-white pl-4 pr-1.5 py-1.5 shadow-xl text-xs">
+          <span className="font-medium whitespace-nowrap">
             {[
               checkedRows.size > 0 ? `${checkedRows.size} row${checkedRows.size > 1 ? "s" : ""}` : null,
               checkedCols.size > 0 ? `${checkedCols.size} column${checkedCols.size > 1 ? "s" : ""}` : null,
-            ].filter(Boolean).join(" · ")} selected
+            ].filter(Boolean).join(" · ")}
           </span>
           <button
             onClick={deleteChecked}
             className="rounded-full bg-red-500 hover:bg-red-600 px-3 py-1 font-medium transition-colors"
           >
-            🗑 Delete
+            Delete
           </button>
           <button
             onClick={clearChecks}
-            className="text-gray-300 hover:text-white transition-colors"
+            title="Clear selection (Esc)"
+            className="w-6 h-6 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
           >
-            Clear
+            ✕
           </button>
         </div>
       )}
