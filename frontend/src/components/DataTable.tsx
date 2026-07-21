@@ -313,6 +313,8 @@ function DataTableBody({ session }: { session: Session }) {
   // Right-click context menu (rows)
   const [rowCtx, setRowCtx] = useState<{ x: number; y: number; idx: number } | null>(null);
   const rowCtxRef = useRef<HTMLDivElement>(null);
+  // Range spec typed into the row context menu ("100-500, 750")
+  const [rowRangeInput, setRowRangeInput] = useState("");
   const columnMenuStyle = useViewportContextMenuStyle(ctxMenu, ctxRef, 192);
   // Flyouts open rightwards by default; near the right edge there isn't room
   // for menu (192) + submenu (192), so flip them to the left instead.
@@ -651,6 +653,47 @@ function DataTableBody({ session }: { session: Session }) {
     toggleCheckedCol(name);
     lastColTickRef.current = name;
   };
+
+  // Range spec from the row context menu: "100-500, 750, 900-950". Numbers are
+  // the DISPLAYED gutter numbers (1-based), so an active filter/sort is
+  // respected. Returns how many rows the spec matched (0 = nothing valid).
+  const applyRowRangeSpec = (spec: string): number => {
+    const n = displayRows.length;
+    const picked: number[] = [];
+    for (const raw of spec.split(/[,;]+/)) {
+      const tok = raw.trim();
+      if (!tok) continue;
+      const m = /^(\d+)(?:\s*[-–:]\s*(\d+))?$/.exec(tok);
+      if (!m) continue;
+      let a = parseInt(m[1], 10);
+      let b = m[2] ? parseInt(m[2], 10) : a;
+      if (a > b) [a, b] = [b, a];
+      for (let i = Math.max(1, a); i <= Math.min(n, b); i++) {
+        picked.push(displayRows[i - 1]._idx as number);
+      }
+    }
+    if (picked.length === 0) return 0;
+    setCheckedRows((prev) => new Set([...prev, ...picked]));
+    return picked.length;
+  };
+
+  // Tick every displayed row from the given display position downwards.
+  const tickRowsFromHere = (fromVisualIdx: number) => {
+    if (fromVisualIdx < 0) return;
+    setCheckedRows((prev) => {
+      const next = new Set(prev);
+      for (let i = fromVisualIdx; i < displayRows.length; i++) {
+        next.add(displayRows[i]._idx as number);
+      }
+      return next;
+    });
+  };
+
+  // Invert the tick over the displayed rows (hidden rows drop out).
+  const invertCheckedRows = () =>
+    setCheckedRows((prev) => new Set(
+      displayRows.map((r) => r._idx as number).filter((i) => !prev.has(i)),
+    ));
 
   // Escape clears the tick selection (unless the user is typing in a field —
   // the cell editor's own Escape must win).
@@ -1731,7 +1774,7 @@ function DataTableBody({ session }: { session: Session }) {
                       if ((e.ctrlKey || e.metaKey) && e.shiftKey) return;
                       tickRow(origIdx, e.shiftKey);
                     }}
-                    onContextMenu={(e) => { e.preventDefault(); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
+                    onContextMenu={(e) => { e.preventDefault(); setRowRangeInput(""); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
                     title={`Original row #${origIdx + 1} · Click to select the row · Shift+click extends the range`}
                   >
                     {/* Checkbox reveals on row hover or when checked; otherwise the
@@ -2146,6 +2189,47 @@ function DataTableBody({ session }: { session: Session }) {
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
             ⬇️ Insert row below
           </button>
+          <div className="border-t border-gray-100 mt-0.5" />
+          {/* Bulk tick helpers — range spec uses the displayed gutter numbers */}
+          <div className="px-3 py-1.5">
+            <input
+              type="text"
+              value={rowRangeInput}
+              onChange={(e) => setRowRangeInput(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter" && applyRowRangeSpec(rowRangeInput) > 0) setRowCtx(null);
+                if (e.key === "Escape") setRowCtx(null);
+              }}
+              placeholder="Select e.g. 100-500, 750"
+              className="w-full border border-gray-200 rounded px-1.5 py-1 text-[11px]
+                placeholder-gray-300 focus:outline-none focus:border-indigo-400"
+              autoFocus
+            />
+          </div>
+          <button onClick={() => {
+            if (applyRowRangeSpec(rowRangeInput) > 0) setRowCtx(null);
+          }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ✅ Select range
+          </button>
+          <button onClick={() => {
+            tickRowsFromHere(displayRows.findIndex((r) => (r._idx as number) === rowCtx.idx));
+            setRowCtx(null);
+          }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            ⤵️ Select here → end
+          </button>
+          <button onClick={() => { invertCheckedRows(); setRowCtx(null); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+            🔁 Invert selection
+          </button>
+          {checkedRows.size > 0 && (
+            <button onClick={() => { clearChecks(); setRowCtx(null); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+              ✖️ Clear selection
+            </button>
+          )}
           <div className="border-t border-gray-100 mt-0.5" />
           <button onClick={() => deleteRow(rowCtx.idx)}
             className="w-full text-left px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 flex items-center gap-2">
