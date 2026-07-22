@@ -315,6 +315,8 @@ function DataTableBody({ session }: { session: Session }) {
   const rowCtxRef = useRef<HTMLDivElement>(null);
   // Range spec typed into the row context menu ("100-500, 750")
   const [rowRangeInput, setRowRangeInput] = useState("");
+  // Range spec typed into the column context menu ("3-10, 15")
+  const [colRangeInput, setColRangeInput] = useState("");
   const columnMenuStyle = useViewportContextMenuStyle(ctxMenu, ctxRef, 192);
   // Flyouts open rightwards by default; near the right edge there isn't room
   // for menu (192) + submenu (192), so flip them to the left instead.
@@ -693,6 +695,42 @@ function DataTableBody({ session }: { session: Session }) {
   const invertCheckedRows = () =>
     setCheckedRows((prev) => new Set(
       displayRows.map((r) => r._idx as number).filter((i) => !prev.has(i)),
+    ));
+
+  // Column counterparts — numbers are the 1-based column numbers shown in the
+  // column-number row.
+  const applyColRangeSpec = (spec: string): number => {
+    const n = columns.length;
+    const picked: string[] = [];
+    for (const raw of spec.split(/[,;]+/)) {
+      const tok = raw.trim();
+      if (!tok) continue;
+      const m = /^(\d+)(?:\s*[-–:]\s*(\d+))?$/.exec(tok);
+      if (!m) continue;
+      let a = parseInt(m[1], 10);
+      let b = m[2] ? parseInt(m[2], 10) : a;
+      if (a > b) [a, b] = [b, a];
+      for (let i = Math.max(1, a); i <= Math.min(n, b); i++) {
+        picked.push(columns[i - 1].name);
+      }
+    }
+    if (picked.length === 0) return 0;
+    setCheckedCols((prev) => new Set([...prev, ...picked]));
+    return picked.length;
+  };
+
+  const tickColsFromHere = (fromIdx: number) => {
+    if (fromIdx < 0) return;
+    setCheckedCols((prev) => {
+      const next = new Set(prev);
+      for (let i = fromIdx; i < columns.length; i++) next.add(columns[i].name);
+      return next;
+    });
+  };
+
+  const invertCheckedCols = () =>
+    setCheckedCols((prev) => new Set(
+      columns.map((c) => c.name).filter((name) => !prev.has(name)),
     ));
 
   // Escape clears the tick selection (unless the user is typing in a field —
@@ -1633,7 +1671,7 @@ function DataTableBody({ session }: { session: Session }) {
                       setDropIdx(null);
                     }}
                     onDragEnd={() => { setDragIdx(null); setDropIdx(null); }}
-                    onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
+                    onContextMenu={(e) => { e.preventDefault(); setColRangeInput(""); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
                     className={`px-2 py-2 border-r border-gray-200
                       ${frozen ? "sticky bg-gray-50 z-20" : "min-w-[130px] max-w-[200px]"}
                       ${!frozen && checkedCols.has(col.name) ? "bg-indigo-100/60" : ""}
@@ -1965,62 +2003,51 @@ function DataTableBody({ session }: { session: Session }) {
 
           <div className="border-t border-gray-100 mt-0.5" />
 
-          <ColMenuGroup label="🏷️ Type & format" groupKey="type" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
-            <button onClick={() => { cycleKind(ctxMenu.col); setCtxMenu(null); }}
-              className={MENU_ITEM_CLS}>
-              🏷️ Change type
-            </button>
-            <button onClick={() => {
-              const col = columns.find((c) => c.name === ctxMenu.col);
-              setValueLabelDraft(col?.value_labels ? { ...col.value_labels } : {});
-              setValueLabelCol(ctxMenu.col);
-              setCtxMenu(null);
-            }}
-              className={MENU_ITEM_CLS}>
-              🔤 Value Labels
-            </button>
-            <button onClick={() => { setFindReplaceCol(ctxMenu.col); setCtxMenu(null); }}
-              title="Convert value: swap codes (e.g. 1 ↔ 2) or recode missing → 0"
-              className={MENU_ITEM_CLS}>
-              🔁 Convert value…
-            </button>
-            <button onClick={() => { setParseDateCol(ctxMenu.col); setCtxMenu(null); }}
-              className={MENU_ITEM_CLS}>
-              📅 Parse as date…
-            </button>
-            {/* Decimal places selector */}
-            {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
-              <div className="px-3 py-1 border-t border-gray-100 mt-0.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-gray-500">🔢 Decimals:</span>
-                  {[0, 1, 2, 3, 4, "auto"].map((d) => (
-                    <button key={String(d)}
-                      onClick={() => {
-                        if (d === "auto") {
-                          clearColumnDecimals(ctxMenu.col);
-                        } else {
-                          setColumnDecimals(ctxMenu.col, d as number);
-                        }
-                        setCtxMenu(null);
-                      }}
-                      className={`text-[10px] w-6 h-5 rounded flex items-center justify-center transition-colors ${
-                        (d === "auto" && !(ctxMenu.col in columnDecimals)) || columnDecimals[ctxMenu.col] === d
-                          ? "bg-indigo-600 text-white"
-                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                      }`}>
-                      {d === "auto" ? "A" : d}
-                    </button>
-                  ))}
-                </div>
-                {/* Hint — surfaces that the decimals control now affects more
-                    than just this data table. */}
-                <p className="text-[9px] text-gray-400 mt-1 leading-snug">
-                  Summary, Histogram &amp; Tablo 1 metriklerine de uygulanır. "A" =
-                  otomatik (integer kolonlar 0, diğerleri 2 ondalık).
-                </p>
+          {/* Everyday formatting lives at the top level; Change type and Parse
+              as date moved into the More group. */}
+          <button onClick={() => {
+            const col = columns.find((c) => c.name === ctxMenu.col);
+            setValueLabelDraft(col?.value_labels ? { ...col.value_labels } : {});
+            setValueLabelCol(ctxMenu.col);
+            setCtxMenu(null);
+          }}
+            className={MENU_ITEM_CLS}>
+            🔤 Value Labels
+          </button>
+          <button onClick={() => { setFindReplaceCol(ctxMenu.col); setCtxMenu(null); }}
+            title="Convert value: swap codes (e.g. 1 ↔ 2) or recode missing → 0"
+            className={MENU_ITEM_CLS}>
+            🔁 Convert value…
+          </button>
+          {/* Decimal places selector — explanation lives in the tooltip */}
+          {columns.find((c) => c.name === ctxMenu.col)?.kind === "numeric" && (
+            <div className="px-3 py-1"
+              title={'Summary, Histogram & Tablo 1 metriklerine de uygulanır. "A" = otomatik (integer kolonlar 0, diğerleri 2 ondalık).'}>
+              <span className="text-xs text-gray-500">🔢 Decimals</span>
+              <div className="flex items-center gap-1 mt-1">
+                {[0, 1, 2, 3, 4, "auto"].map((d) => (
+                  <button key={String(d)}
+                    onClick={() => {
+                      if (d === "auto") {
+                        clearColumnDecimals(ctxMenu.col);
+                      } else {
+                        setColumnDecimals(ctxMenu.col, d as number);
+                      }
+                      setCtxMenu(null);
+                    }}
+                    className={`text-[10px] w-6 h-5 rounded flex items-center justify-center transition-colors ${
+                      (d === "auto" && !(ctxMenu.col in columnDecimals)) || columnDecimals[ctxMenu.col] === d
+                        ? "bg-indigo-600 text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}>
+                    {d === "auto" ? "A" : d}
+                  </button>
+                ))}
               </div>
-            )}
-          </ColMenuGroup>
+            </div>
+          )}
+
+          <div className="border-t border-gray-100 mt-0.5" />
 
           <ColMenuGroup label="↔️ Position" groupKey="position" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
             <button onClick={() => { const idx = columns.findIndex((c) => c.name === ctxMenu.col); setCtxMenu(null); addColumn(idx); }}
@@ -2057,7 +2084,57 @@ function DataTableBody({ session }: { session: Session }) {
             )}
           </ColMenuGroup>
 
+          <ColMenuGroup label="☑️ Select" groupKey="select" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
+            {/* Range spec uses the 1-based numbers of the column-number row */}
+            <div className="px-3 py-1.5">
+              <input
+                type="text"
+                value={colRangeInput}
+                onChange={(e) => setColRangeInput(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter" && applyColRangeSpec(colRangeInput) > 0) setCtxMenu(null);
+                  if (e.key === "Escape") setCtxMenu(null);
+                }}
+                placeholder="Select e.g. 3-10, 15"
+                className="w-full border border-gray-200 rounded px-1.5 py-1 text-[11px]
+                  placeholder-gray-300 focus:outline-none focus:border-indigo-400"
+              />
+            </div>
+            <button onClick={() => {
+              if (applyColRangeSpec(colRangeInput) > 0) setCtxMenu(null);
+            }}
+              className={MENU_ITEM_CLS}>
+              ✅ Select range
+            </button>
+            <button onClick={() => {
+              tickColsFromHere(columns.findIndex((c) => c.name === ctxMenu.col));
+              setCtxMenu(null);
+            }}
+              className={MENU_ITEM_CLS}>
+              ⤵️ Select here → end
+            </button>
+            <button onClick={() => { invertCheckedCols(); setCtxMenu(null); }}
+              className={MENU_ITEM_CLS}>
+              🔁 Invert selection
+            </button>
+            {(checkedCols.size > 0 || checkedRows.size > 0) && (
+              <button onClick={() => { clearChecks(); setCtxMenu(null); }}
+                className={MENU_ITEM_CLS}>
+                ✖️ Clear selection
+              </button>
+            )}
+          </ColMenuGroup>
+
           <ColMenuGroup label="⋯ More" groupKey="more" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
+            <button onClick={() => { cycleKind(ctxMenu.col); setCtxMenu(null); }}
+              className={MENU_ITEM_CLS}>
+              🏷️ Change type
+            </button>
+            <button onClick={() => { setParseDateCol(ctxMenu.col); setCtxMenu(null); }}
+              className={MENU_ITEM_CLS}>
+              📅 Parse as date…
+            </button>
             <button onClick={() => duplicateColumn(ctxMenu.col)}
               className={MENU_ITEM_CLS}>
               📑 Duplicate column

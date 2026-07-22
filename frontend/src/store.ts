@@ -287,11 +287,12 @@ export const useStore = create<AppState>((set) => ({
   addSessionColumn: (col, previewValues) =>
     set((state) => {
       if (!state.session) return state;
-      // Replace existing column with same name, or append
-      const columns = [
-        ...state.session.columns.filter((c) => c.name !== col.name),
-        col,
-      ];
+      // Replace existing column IN PLACE (e.g. Convert value must not move the
+      // column to the end), or append when it's genuinely new.
+      const existingIdx = state.session.columns.findIndex((c) => c.name === col.name);
+      const columns = existingIdx >= 0
+        ? state.session.columns.map((c, i) => (i === existingIdx ? col : c))
+        : [...state.session.columns, col];
       const preview = state.session.preview.map((row, i) => ({
         ...row,
         [col.name]: previewValues[i] ?? null,
