@@ -1585,7 +1585,8 @@ function DataTableBody({ session }: { session: Session }) {
                     style={frozen ? { left: frozenLeft(colIdx), width: FROZEN_COL_W, minWidth: FROZEN_COL_W, maxWidth: FROZEN_COL_W } : undefined}
                     onClick={(e) => tickCol(col.name, e.shiftKey)}
                     onMouseDown={(e) => { if (e.shiftKey) e.preventDefault(); }}
-                    title={`Click to select column "${col.name}" · Shift+click extends the range`}
+                    onContextMenu={(e) => { e.preventDefault(); setColRangeInput(""); setCtxMenu({ x: e.clientX, y: e.clientY, col: col.name }); }}
+                    title={`Click to select column "${col.name}" · Shift+click extends the range · Right-click for range select`}
                   >
                     {/* Fixed-height swap: the number shows at rest, the checkbox on
                         hover or when ticked — the row never changes height. */}
@@ -1813,7 +1814,7 @@ function DataTableBody({ session }: { session: Session }) {
                       tickRow(origIdx, e.shiftKey);
                     }}
                     onContextMenu={(e) => { e.preventDefault(); setRowRangeInput(""); setRowCtx({ x: e.clientX, y: e.clientY, idx: origIdx }); }}
-                    title={`Original row #${origIdx + 1} · Click to select the row · Shift+click extends the range`}
+                    title={`Original row #${origIdx + 1} · Click to select the row · Shift+click extends the range · Right-click for range select`}
                   >
                     {/* Checkbox reveals on row hover or when checked; otherwise the
                         row number shows. Keeps the 30px gutter uncluttered. The
@@ -2084,7 +2085,7 @@ function DataTableBody({ session }: { session: Session }) {
             )}
           </ColMenuGroup>
 
-          <ColMenuGroup label="☑️ Select" groupKey="select" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
+          <ColMenuGroup label="☑️ Select columns" groupKey="select" activeKey={openSub} setActiveKey={setOpenSub} flip={subFlip}>
             {/* Range spec uses the 1-based numbers of the column-number row */}
             <div className="px-3 py-1.5">
               <input
@@ -2105,7 +2106,7 @@ function DataTableBody({ session }: { session: Session }) {
               if (applyColRangeSpec(colRangeInput) > 0) setCtxMenu(null);
             }}
               className={MENU_ITEM_CLS}>
-              ✅ Select range
+              ✅ Select column range
             </button>
             <button onClick={() => {
               tickColsFromHere(columns.findIndex((c) => c.name === ctxMenu.col));
@@ -2268,7 +2269,10 @@ function DataTableBody({ session }: { session: Session }) {
           </button>
           <div className="border-t border-gray-100 mt-0.5" />
           {/* Bulk tick helpers — range spec uses the displayed gutter numbers */}
-          <div className="px-3 py-1.5">
+          <div className="px-3 pt-1.5 pb-0.5 text-[10px] uppercase tracking-wide text-gray-400 select-none">
+            Select rows
+          </div>
+          <div className="px-3 py-1">
             <input
               type="text"
               value={rowRangeInput}
@@ -2288,7 +2292,7 @@ function DataTableBody({ session }: { session: Session }) {
             if (applyRowRangeSpec(rowRangeInput) > 0) setRowCtx(null);
           }}
             className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-            ✅ Select range
+            ✅ Select row range
           </button>
           <button onClick={() => {
             tickRowsFromHere(displayRows.findIndex((r) => (r._idx as number) === rowCtx.idx));
